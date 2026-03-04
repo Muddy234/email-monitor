@@ -1,0 +1,7 @@
+keys/
+.env
+__pycache__/
+*.pyc
+legacy/
+tmpclaude-*
+.claude/

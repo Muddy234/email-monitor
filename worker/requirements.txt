@@ -1,0 +1,8 @@
+# Supabase client (service role, full access)
+supabase>=2.0.0
+
+# Anthropic API for Claude analysis
+anthropic>=0.40.0
+
+# Date parsing (used by pipeline modules)
+python-dateutil>=2.8.2
