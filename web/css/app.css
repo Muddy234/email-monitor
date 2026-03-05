@@ -422,13 +422,6 @@
     border-color: var(--em-blue-500);
 }
 
-.em-email-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 12px;
-}
-
 .em-email-sender {
     font-weight: 600;
     font-size: 14px;
@@ -749,7 +742,95 @@
     text-decoration: underline;
 }
 
-/* --- 19. Responsive --- */
+/* --- 19. Metric Card Links --- */
+.em-metric-link {
+    text-decoration: none;
+    color: inherit;
+    display: block;
+    transition: box-shadow var(--em-transition), border-color var(--em-transition);
+    cursor: pointer;
+}
+
+.em-metric-link:hover {
+    box-shadow: var(--em-shadow-md);
+    border-color: var(--em-blue-500);
+}
+
+/* --- 20. Email Checkbox --- */
+.em-email-checkbox-wrap {
+    flex-shrink: 0;
+    display: flex;
+    align-items: flex-start;
+    padding-top: 2px;
+}
+
+.em-email-checkbox {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+    accent-color: var(--em-emerald-600);
+}
+
+.em-email-checkbox:disabled {
+    cursor: default;
+}
+
+.em-email-header-content {
+    flex: 1;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    min-width: 0;
+}
+
+.em-email-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+.em-email-completed {
+    opacity: 0.6;
+}
+
+/* --- 21. Email Summary (Needs Response) --- */
+.em-email-summary {
+    margin-top: 10px;
+    padding: 10px 14px;
+    background: var(--em-blue-50);
+    border: 1px solid var(--em-blue-100);
+    border-radius: var(--em-radius-sm);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.em-email-summary-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--em-blue-700);
+    margin-bottom: 4px;
+}
+
+.em-email-summary-text {
+    color: var(--em-slate-700);
+    margin-bottom: 8px;
+}
+
+.em-email-response-needed {
+    color: var(--em-slate-800);
+    padding-top: 6px;
+    border-top: 1px solid var(--em-blue-100);
+}
+
+.em-response-needed-label {
+    font-weight: 600;
+    color: var(--em-blue-700);
+}
+
+/* --- 22. Responsive --- */
 @media (max-width: 768px) {
     .em-sidebar {
         display: none;

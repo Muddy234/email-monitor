@@ -97,18 +97,18 @@ async function loadMetrics() {
         }
 
         metricsGrid.innerHTML = `
-            <div class="em-metric-card">
+            <a href="/app/emails.html" class="em-metric-card em-metric-link">
                 <div class="em-metric-label">Emails Synced</div>
                 <div class="em-metric-value">${emailCount}</div>
-            </div>
-            <div class="em-metric-card">
+            </a>
+            <a href="/app/emails.html?section=needs-response" class="em-metric-card em-metric-link">
                 <div class="em-metric-label">Needs Response</div>
                 <div class="em-metric-value">${needsResponseCount}</div>
-            </div>
-            <div class="em-metric-card">
+            </a>
+            <a href="/app/emails.html?section=drafts" class="em-metric-card em-metric-link">
                 <div class="em-metric-label">Drafts Generated</div>
                 <div class="em-metric-value">${draftCount}</div>
-            </div>
+            </a>
             <div class="em-metric-card">
                 <div class="em-metric-label">Pipeline Funnel</div>
                 <div style="font-size: 13px; color: var(--em-slate-700); margin-top: 8px;">

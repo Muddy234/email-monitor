@@ -555,6 +555,62 @@ async function dispatchCommand(command) {
 // Supabase email sync
 // ---------------------------------------------------------------------------
 
+/**
+ * Detect the user's Outlook email from synced emails and update profile
+ * aliases if they're empty. Scans to_field/cc_field across emails to find
+ * addresses that appear as recipients (the user's own mailbox).
+ */
+async function detectAndUpdateAliases(userId, emails) {
+  try {
+    const profiles = await getProfile(userId);
+    const existing = (profiles?.[0]?.user_email_aliases || []).map(a => a.toLowerCase());
+
+    // Collect all recipient addresses from to_field, cc_field, and recipients array
+    const candidates = new Map(); // address → count
+    const emailRegex = /[\w.+-]+@[\w.-]+\.\w+/g;
+    for (const e of emails) {
+      const found = new Set();
+      // Parse from structured recipients
+      for (const r of (e.recipients || [])) {
+        if (r.address) found.add(r.address.toLowerCase());
+      }
+      // Parse from to_field / cc_field strings as fallback
+      for (const field of [e.to_field, e.cc_field]) {
+        if (!field) continue;
+        for (const match of field.matchAll(emailRegex)) {
+          found.add(match[0].toLowerCase());
+        }
+      }
+      // Exclude the sender — we want recipient-only addresses
+      const sender = (e.sender_email || e.sender || "").toLowerCase();
+      found.delete(sender);
+      for (const addr of found) {
+        candidates.set(addr, (candidates.get(addr) || 0) + 1);
+      }
+    }
+
+    // The user's own address is the most frequent non-sender recipient.
+    // Pick addresses appearing in at least 3 emails or 20% of the batch.
+    const threshold = Math.max(3, Math.floor(emails.length * 0.2));
+    const detected = [];
+    for (const [addr, count] of candidates) {
+      if (count >= threshold) detected.push(addr);
+    }
+
+    console.log(`Alias detection: ${emails.length} emails, ${candidates.size} unique recipients, ${detected.length} above threshold (${threshold})`);
+    if (detected.length === 0) return;
+
+    // Merge with existing aliases (no duplicates)
+    const merged = [...new Set([...existing, ...detected])];
+    if (merged.length === existing.length) return; // nothing new
+
+    await patchProfileAliases(userId, merged);
+    console.log("Updated user aliases:", merged);
+  } catch (err) {
+    console.warn("Alias detection failed (non-blocking):", err.message);
+  }
+}
+
 async function syncEmailsToSupabase() {
   if (isSyncing) return { skipped: true };
   isSyncing = true;
@@ -572,25 +628,14 @@ async function syncEmailsToSupabase() {
 
     const userId = session.user.id;
 
-    // Determine date filter: use last sync time, or fall back to MAX_CATCHUP_DAYS
-    let startDate;
-    if (lastSyncTime) {
-      startDate = lastSyncTime;
-    } else {
-      const cutoff = new Date();
-      cutoff.setDate(cutoff.getDate() - MAX_CATCHUP_DAYS);
-      startDate = cutoff.toISOString();
-    }
-
     // Set limit: small for incremental syncs, larger for catch-up
     const maxEmails = lastSyncTime ? 50 : MAX_CATCHUP_EMAILS;
 
-    // Fetch emails via OWA with date filter
+    // Fetch emails via OWA (no date filter — upsert handles duplicates)
     const result = await handleGetEmails({
       folder: "inbox",
       max_scan: maxEmails,
       flagged_only: false,
-      start_date: startDate,
     });
 
     if (!result.emails || result.emails.length === 0) {
@@ -642,6 +687,10 @@ async function syncEmailsToSupabase() {
     lastSyncTime = new Date().toISOString();
     persistSyncTime();
     console.log(`Synced ${rows.length} emails to Supabase`);
+
+    // Auto-detect user's Outlook email and update profile aliases if needed
+    await detectAndUpdateAliases(userId, enriched);
+
     return { synced: rows.length };
   } catch (err) {
     console.error("Email sync error:", err.message);

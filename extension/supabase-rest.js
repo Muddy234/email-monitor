@@ -69,6 +69,23 @@ async function getPendingDrafts(userId) {
 }
 
 /**
+ * Fetch the current user's profile (user_email_aliases, etc).
+ */
+async function getProfile(userId) {
+  return supabaseRequest(`/profiles?id=eq.${userId}&select=user_email_aliases`);
+}
+
+/**
+ * Add new aliases to user_email_aliases (merge, no duplicates).
+ */
+async function patchProfileAliases(userId, aliases) {
+  return supabaseRequest(`/profiles?id=eq.${userId}`, {
+    method: "PATCH",
+    body: { user_email_aliases: aliases },
+  });
+}
+
+/**
  * Update a draft's status and optionally set the outlook_draft_id.
  */
 async function updateDraftStatus(draftId, status, outlookDraftId) {

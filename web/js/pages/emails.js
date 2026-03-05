@@ -19,6 +19,7 @@ let allEmails = [];
 let totalCount = 0;
 let page = parseInt(getParam("page", "1"), 10);
 let searchQuery = getParam("q", "");
+let activeSection = getParam("section", ""); // from dashboard links
 
 // -------------------------------------------------------------------------
 // DOM refs
@@ -114,6 +115,14 @@ function groupEmails(emails) {
     return groups;
 }
 
+// Map section param to group name
+const SECTION_MAP = {
+    "drafts": "Drafts Ready",
+    "needs-response": "Needs Response",
+    "other": "Other",
+    "completed": "Completed",
+};
+
 function renderEmails() {
     const filtered = filterEmails();
 
@@ -127,71 +136,23 @@ function renderEmails() {
     const groups = groupEmails(filtered);
     let html = "";
 
-    for (const [groupName, emails] of Object.entries(groups)) {
-        if (emails.length === 0) continue;
+    // Determine group order — if section param, put that group first
+    const groupOrder = ["Drafts Ready", "Needs Response", "Other", "Completed"];
+    const targetGroup = SECTION_MAP[activeSection];
 
-        html += `<div class="em-group">`;
+    for (const groupName of groupOrder) {
+        const emails = groups[groupName];
+        if (!emails || emails.length === 0) continue;
+
+        const sectionId = Object.entries(SECTION_MAP).find(([, v]) => v === groupName)?.[0] || "";
+        const isTarget = groupName === targetGroup;
+
+        html += `<div class="em-group" id="section-${sectionId}">`;
         html += `<div class="em-group-title">${groupName}<span class="em-group-count">${emails.length}</span></div>`;
         html += `<div class="em-email-list">`;
 
         for (const email of emails) {
-            const cls = email.classifications?.[0];
-            const draft = email.drafts?.[0];
-            const actionSnippet = cls?.action ? cls.action.substring(0, 100) : "";
-            const priorityBadge = cls?.priority >= 3
-                ? `<span class="em-badge em-badge-red">P${cls.priority}</span>`
-                : cls?.priority >= 2
-                ? `<span class="em-badge em-badge-amber">P${cls.priority}</span>`
-                : "";
-
-            html += `
-                <div class="em-email-card" data-id="${email.id}">
-                    <div class="em-email-header">
-                        <div>
-                            <div class="em-email-sender">${escapeHtml(email.sender_name || email.sender || "Unknown")}</div>
-                            <div class="em-email-subject">${escapeHtml(email.subject || "(no subject)")}</div>
-                            ${actionSnippet ? `<div class="em-email-action">${escapeHtml(actionSnippet)}</div>` : ""}
-                        </div>
-                        <div style="text-align: right; flex-shrink: 0;">
-                            <div class="em-email-meta">${formatDate(email.received_time)} ${priorityBadge}</div>
-                            ${draft ? `<span class="em-badge em-badge-blue" style="margin-top: 4px;">Draft</span>` : ""}
-                            ${email.status === "completed" ? `<span class="em-badge em-badge-green" style="margin-top: 4px;">Done</span>` : ""}
-                        </div>
-                    </div>
-
-                    <div class="em-email-detail">
-                        <div class="em-email-section-label">Email Body</div>
-                        <div class="em-email-body">${escapeHtml(email.body || "No body available.")}</div>
-
-                        ${cls ? `
-                            <div class="em-email-section-label">Classification</div>
-                            <div style="font-size: 13px; color: var(--em-slate-700); margin-bottom: 16px;">
-                                <div><strong>Action:</strong> ${escapeHtml(cls.action || "\u2014")}</div>
-                                <div><strong>Context:</strong> ${escapeHtml(cls.context || "\u2014")}</div>
-                                <div><strong>Project:</strong> ${escapeHtml(cls.project || "\u2014")}</div>
-                                <div><strong>Needs Response:</strong> ${cls.needs_response ? "Yes" : "No"}</div>
-                            </div>
-                        ` : ""}
-
-                        ${draft ? `
-                            <div class="em-email-section-label">Draft Response</div>
-                            <div class="em-draft-editor">
-                                <textarea class="em-draft-textarea" data-draft-id="${draft.id}">${escapeHtml(draft.draft_body || "")}</textarea>
-                                <div class="em-draft-actions">
-                                    <button class="em-btn em-btn-primary em-btn-sm draft-save-btn" data-draft-id="${draft.id}">Save</button>
-                                    <span class="em-saved-msg" data-saved-for="${draft.id}">Saved</span>
-                                </div>
-                            </div>
-                        ` : ""}
-
-                        ${email.status !== "completed" ? `
-                            <div style="margin-top: 12px;">
-                                <button class="em-btn em-btn-success em-btn-sm mark-completed-btn" data-email-id="${email.id}">Mark Completed</button>
-                            </div>
-                        ` : ""}
-                    </div>
-                </div>
-            `;
+            html += renderEmailCard(email, groupName);
         }
 
         html += `</div></div>`;
@@ -199,6 +160,97 @@ function renderEmails() {
 
     container.innerHTML = html;
     bindCardEvents();
+
+    // Scroll to target section if linked from dashboard
+    if (targetGroup) {
+        const sectionId = activeSection;
+        const el = document.getElementById(`section-${sectionId}`);
+        if (el) {
+            el.scrollIntoView({ behavior: "smooth", block: "start" });
+            activeSection = ""; // only scroll once
+            setParam("section", "");
+        }
+    }
+}
+
+function renderEmailCard(email, groupName) {
+    const cls = email.classifications?.[0];
+    const draft = email.drafts?.[0];
+    const priorityBadge = cls?.priority >= 3
+        ? `<span class="em-badge em-badge-red">P${cls.priority}</span>`
+        : cls?.priority >= 2
+        ? `<span class="em-badge em-badge-amber">P${cls.priority}</span>`
+        : "";
+
+    const isCompleted = email.status === "completed";
+    const needsResponse = groupName === "Needs Response";
+
+    // Build summary for Needs Response emails
+    let summaryHtml = "";
+    if (needsResponse && cls) {
+        const context = cls.context || "";
+        const action = cls.action || "";
+        summaryHtml = `
+            <div class="em-email-summary">
+                <div class="em-email-summary-label">Summary</div>
+                <div class="em-email-summary-text">${escapeHtml(context || "No summary available.")}</div>
+                ${action ? `
+                    <div class="em-email-response-needed">
+                        <span class="em-response-needed-label">Response Needed:</span>
+                        ${escapeHtml(action)}
+                    </div>
+                ` : ""}
+            </div>
+        `;
+    }
+
+    return `
+        <div class="em-email-card${isCompleted ? " em-email-completed" : ""}" data-id="${email.id}">
+            <div class="em-email-header">
+                <div class="em-email-checkbox-wrap">
+                    <input type="checkbox" class="em-email-checkbox mark-completed-cb"
+                        data-email-id="${email.id}"
+                        ${isCompleted ? "checked disabled" : ""}
+                        title="${isCompleted ? "Completed" : "Mark as completed"}">
+                </div>
+                <div class="em-email-header-content">
+                    <div>
+                        <div class="em-email-sender">${escapeHtml(email.sender_name || email.sender || "Unknown")}</div>
+                        <div class="em-email-subject">${escapeHtml(email.subject || "(no subject)")}</div>
+                    </div>
+                    <div style="text-align: right; flex-shrink: 0;">
+                        <div class="em-email-meta">${formatDate(email.received_time)} ${priorityBadge}</div>
+                        ${draft ? `<span class="em-badge em-badge-blue" style="margin-top: 4px;">Draft</span>` : ""}
+                        ${isCompleted ? `<span class="em-badge em-badge-green" style="margin-top: 4px;">Done</span>` : ""}
+                    </div>
+                </div>
+            </div>
+
+            ${summaryHtml}
+
+            <div class="em-email-detail">
+                <div class="em-email-section-label">Email Body</div>
+                <div class="em-email-body">${escapeHtml(email.body || "No body available.")}</div>
+
+                ${draft ? `
+                    <div class="em-email-section-label">Draft Response</div>
+                    <div class="em-draft-editor">
+                        <textarea class="em-draft-textarea" data-draft-id="${draft.id}">${escapeHtml(draft.draft_body || "")}</textarea>
+                        <div class="em-draft-actions">
+                            <button class="em-btn em-btn-primary em-btn-sm draft-save-btn" data-draft-id="${draft.id}">Save</button>
+                            <span class="em-saved-msg" data-saved-for="${draft.id}">Saved</span>
+                        </div>
+                    </div>
+                ` : ""}
+
+                ${!draft && !isCompleted ? `
+                    <div style="margin-top: 12px;">
+                        <button class="em-btn em-btn-primary em-btn-sm generate-draft-btn" data-email-id="${email.id}">Generate Draft</button>
+                    </div>
+                ` : ""}
+            </div>
+        </div>
+    `;
 }
 
 // -------------------------------------------------------------------------
@@ -251,8 +303,7 @@ function bindCardEvents() {
     // Expand/collapse
     document.querySelectorAll(".em-email-card").forEach(card => {
         card.addEventListener("click", (e) => {
-            // Don't toggle if clicking buttons or textarea
-            if (e.target.closest("button") || e.target.closest("textarea")) return;
+            if (e.target.closest("button") || e.target.closest("textarea") || e.target.closest("input")) return;
             card.classList.toggle("expanded");
         });
     });
@@ -294,12 +345,12 @@ function bindCardEvents() {
         });
     });
 
-    // Mark completed
-    document.querySelectorAll(".mark-completed-btn").forEach(btn => {
-        btn.addEventListener("click", async () => {
-            const emailId = btn.dataset.emailId;
-            btn.disabled = true;
-            btn.textContent = "Updating...";
+    // Mark completed via checkbox
+    document.querySelectorAll(".mark-completed-cb").forEach(cb => {
+        cb.addEventListener("change", async (e) => {
+            if (!cb.checked) return; // only handle checking, not unchecking
+            const emailId = cb.dataset.emailId;
+            cb.disabled = true;
 
             try {
                 const { error } = await supabase
@@ -309,12 +360,44 @@ function bindCardEvents() {
 
                 if (error) throw error;
 
-                // Update local state and re-render
                 const email = allEmails.find(e => e.id === emailId);
                 if (email) email.status = "completed";
                 renderEmails();
             } catch (err) {
+                cb.checked = false;
+                cb.disabled = false;
                 showError(`Failed to mark completed: ${err.message}`);
+            }
+        });
+    });
+
+    // Generate draft
+    document.querySelectorAll(".generate-draft-btn").forEach(btn => {
+        btn.addEventListener("click", async () => {
+            const emailId = btn.dataset.emailId;
+            btn.disabled = true;
+            btn.textContent = "Generating...";
+
+            try {
+                // Mark email as unprocessed so the worker picks it up for draft generation
+                const { error } = await supabase
+                    .from("emails")
+                    .update({ status: "unprocessed" })
+                    .eq("id", emailId);
+
+                if (error) throw error;
+
+                btn.textContent = "Queued";
+                btn.classList.remove("em-btn-primary");
+                btn.classList.add("em-btn-secondary");
+
+                // Update local state
+                const email = allEmails.find(e => e.id === emailId);
+                if (email) email.status = "unprocessed";
+            } catch (err) {
+                btn.disabled = false;
+                btn.textContent = "Generate Draft";
+                showError(`Failed to queue draft: ${err.message}`);
             }
         });
     });
