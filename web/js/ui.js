@@ -159,6 +159,15 @@ export function relativeTime(dateStr) {
  * @param {string} message
  * @param {"success"|"error"} type
  */
+/**
+ * Escape a string for safe insertion into innerHTML.
+ */
+export function escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str;
+    return div.innerHTML;
+}
+
 export function showToast(message, type = "success") {
     let container = document.querySelector(".em-toast-container");
     if (!container) {

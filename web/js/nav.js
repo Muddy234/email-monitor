@@ -3,6 +3,7 @@
  * Call renderNav() on each app page to inject the sidebar.
  */
 import { signOut, getUserEmail } from "./auth.js";
+import { escapeHtml } from "./ui.js";
 
 const NAV_ITEMS = [
     {
@@ -48,7 +49,7 @@ export async function renderNav() {
         <div class="em-sidebar-footer">
             <div class="em-sidebar-avatar">${initial}</div>
             <div class="em-sidebar-user-info">
-                <div class="em-sidebar-email">${email || "\u2014"}</div>
+                <div class="em-sidebar-email">${escapeHtml(email || "\u2014")}</div>
                 <button class="em-sidebar-logout" id="em-logout-btn">Log out</button>
             </div>
         </div>
