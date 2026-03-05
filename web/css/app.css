@@ -257,7 +257,24 @@
     padding: 24px;
     box-shadow: var(--em-shadow-sm);
     transition: box-shadow var(--em-transition), transform var(--em-transition);
+    position: relative;
+    overflow: hidden;
 }
+
+.em-metric-card::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: var(--em-slate-300);
+    transition: background var(--em-transition);
+}
+
+.em-metric-card:nth-child(1)::before { background: var(--em-blue-600); }
+.em-metric-card:nth-child(2)::before { background: var(--em-amber-600); }
+.em-metric-card:nth-child(3)::before { background: var(--em-emerald-600); }
 
 .em-metric-card:hover {
     box-shadow: var(--em-shadow-md);
@@ -933,28 +950,36 @@
     align-items: stretch;
     gap: 0;
     margin-bottom: 24px;
+    background: var(--em-white);
+    border: 1px solid var(--em-slate-200);
+    border-radius: var(--em-radius-lg);
+    overflow: hidden;
+    box-shadow: var(--em-shadow-sm);
 }
 
 .em-pipeline-stage {
     flex: 1;
     text-align: center;
-    padding: 24px 16px;
-    background: var(--em-white);
-    border: 1px solid var(--em-slate-200);
+    padding: 28px 16px;
     position: relative;
-    transition: box-shadow var(--em-transition);
-}
-
-.em-pipeline-stage:first-child {
-    border-radius: var(--em-radius-lg) 0 0 var(--em-radius-lg);
-}
-
-.em-pipeline-stage:last-child {
-    border-radius: 0 var(--em-radius-lg) var(--em-radius-lg) 0;
 }
 
 .em-pipeline-stage + .em-pipeline-stage {
-    border-left: none;
+    border-left: 1px solid var(--em-slate-200);
+}
+
+.em-pipeline-stage + .em-pipeline-stage::before {
+    content: '';
+    position: absolute;
+    left: -9px;
+    top: 50%;
+    transform: translateY(-50%) rotate(45deg);
+    width: 16px;
+    height: 16px;
+    background: var(--em-white);
+    border-right: 1px solid var(--em-slate-200);
+    border-top: 1px solid var(--em-slate-200);
+    z-index: 1;
 }
 
 .em-pipeline-stage-value {
@@ -965,17 +990,11 @@
 }
 
 .em-pipeline-stage-label {
-    font-size: 13px;
+    font-size: 12px;
+    font-weight: 500;
     color: var(--em-slate-500);
-    margin-top: 6px;
-}
-
-.em-pipeline-arrow {
-    display: flex;
-    align-items: center;
-    color: var(--em-slate-300);
-    font-size: 18px;
-    padding: 0 2px;
+    margin-top: 8px;
+    letter-spacing: 0.02em;
 }
 
 /* --- 24. CTA Cards --- */
@@ -987,26 +1006,27 @@
 
 .em-cta-card {
     flex: 1;
-    background: var(--em-white);
-    border: 1px solid var(--em-slate-200);
-    border-radius: var(--em-radius-lg);
-    padding: 20px 24px;
+    background: var(--em-blue-50);
+    border: 1px solid var(--em-blue-100);
+    border-left: 3px solid var(--em-blue-600);
+    border-radius: var(--em-radius);
+    padding: 18px 24px;
     text-decoration: none;
     color: inherit;
-    transition: box-shadow var(--em-transition), border-color var(--em-transition), transform var(--em-transition);
+    transition: box-shadow var(--em-transition), background var(--em-transition), transform var(--em-transition);
     cursor: pointer;
 }
 
 .em-cta-card:hover {
     box-shadow: var(--em-shadow-md);
-    border-color: var(--em-blue-500);
+    background: var(--em-blue-100);
     transform: translateY(-1px);
 }
 
 .em-cta-title {
     font-weight: 600;
     font-size: 14px;
-    color: var(--em-slate-900);
+    color: var(--em-blue-700);
     margin-bottom: 4px;
 }
 
@@ -1017,11 +1037,9 @@
 
 /* --- 25. Latest Run Card --- */
 .em-latest-run-header {
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--em-slate-500);
+    color: var(--em-slate-700);
     margin-bottom: 12px;
 }
 
@@ -1034,17 +1052,21 @@
 }
 
 .em-latest-run-time {
-    color: var(--em-slate-700);
+    color: var(--em-slate-500);
 }
 
 .em-latest-run-stats {
     color: var(--em-slate-400);
+    font-size: 12px;
 }
 
 .em-latest-run-error {
     margin-top: 8px;
     font-size: 12px;
     color: var(--em-red-600);
+    padding: 8px 12px;
+    background: var(--em-red-50);
+    border-radius: var(--em-radius-sm);
 }
 
 /* --- 26. Fade-in Animations --- */
@@ -1130,17 +1152,13 @@
         flex-direction: column;
     }
 
-    .em-pipeline-stage:first-child {
-        border-radius: var(--em-radius-lg) var(--em-radius-lg) 0 0;
-    }
-
-    .em-pipeline-stage:last-child {
-        border-radius: 0 0 var(--em-radius-lg) var(--em-radius-lg);
-    }
-
     .em-pipeline-stage + .em-pipeline-stage {
-        border-left: 1px solid var(--em-slate-200);
-        border-top: none;
+        border-left: none;
+        border-top: 1px solid var(--em-slate-200);
+    }
+
+    .em-pipeline-stage + .em-pipeline-stage::before {
+        display: none;
     }
 
     .em-cta-row {

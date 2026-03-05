@@ -178,12 +178,10 @@ function renderPipeline(scanned, processed, generated) {
                 <div class="em-pipeline-stage-value">${scanned}</div>
                 <div class="em-pipeline-stage-label">Scanned</div>
             </div>
-            <div class="em-pipeline-arrow">\u2192</div>
             <div class="em-pipeline-stage">
                 <div class="em-pipeline-stage-value">${processed}</div>
                 <div class="em-pipeline-stage-label">Classified</div>
             </div>
-            <div class="em-pipeline-arrow">\u2192</div>
             <div class="em-pipeline-stage">
                 <div class="em-pipeline-stage-value">${generated}</div>
                 <div class="em-pipeline-stage-label">Drafts Created</div>
