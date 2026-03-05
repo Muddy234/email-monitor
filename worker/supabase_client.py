@@ -152,37 +152,37 @@ class SupabaseWorkerClient:
         Returns:
             dict: The inserted/updated draft row, or empty dict if skipped.
         """
-        # Check for existing user-edited draft
-        existing = (
+        # Check for existing draft
+        existing_result = (
             self.client.table("drafts")
             .select("id, user_edited")
             .eq("email_id", email_id)
             .eq("user_id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        if existing.data and existing.data.get("user_edited"):
+        existing = existing_result.data[0] if existing_result.data else None
+
+        if existing and existing.get("user_edited"):
             logger.info(f"Skipping draft for email {email_id}: user has edited it")
             return {}
 
-        row = {
-            "email_id": email_id,
-            "user_id": user_id,
-            "draft_body": draft_body,
-            "status": "pending",
-            "user_edited": False,
-        }
-
-        if existing.data:
+        if existing:
             # Update existing draft (worker re-run)
             result = (
                 self.client.table("drafts")
                 .update({"draft_body": draft_body, "status": "pending", "user_edited": False})
-                .eq("id", existing.data["id"])
+                .eq("id", existing["id"])
                 .execute()
             )
         else:
-            result = self.client.table("drafts").insert(row).execute()
+            result = self.client.table("drafts").insert({
+                "email_id": email_id,
+                "user_id": user_id,
+                "draft_body": draft_body,
+                "status": "pending",
+                "user_edited": False,
+            }).execute()
 
         return result.data[0] if result.data else {}
 
@@ -202,11 +202,12 @@ class SupabaseWorkerClient:
             .select("messages")
             .eq("user_id", user_id)
             .eq("conversation_id", conversation_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        if result.data and result.data.get("messages"):
-            return result.data["messages"]
+        row = result.data[0] if result.data else None
+        if row and row.get("messages"):
+            return row["messages"]
         return []
 
     # ------------------------------------------------------------------
