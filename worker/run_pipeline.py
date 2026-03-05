@@ -7,7 +7,9 @@ Ports the core logic from pipeline/runner.py, adapted for Supabase I/O:
 """
 
 import logging
+import os
 import re
+from datetime import datetime, timezone, timedelta
 
 from pipeline.filter import EmailFilter
 from pipeline.analyzer import ClaudeAnalyzer
@@ -154,8 +156,12 @@ def process_email_batch(db_client, emails, user_id, config):
             "priority": _parse_priority(item.get("priority", "")),
         })
 
-        # Generate draft if needed
-        if needs_response and config.get("enable_draft_generation", True):
+        # Generate draft only for recent emails (older ones are for behavioral context)
+        draft_max_age_hours = int(os.environ.get("DRAFT_MAX_AGE_HOURS", "24"))
+        email_age_ok = _is_recent(email_data.get("received_time"), draft_max_age_hours)
+        if not email_age_ok and needs_response:
+            logger.info(f"  Skipping draft (too old): {email_data.get('subject', '?')[:60]}")
+        if needs_response and email_age_ok and config.get("enable_draft_generation", True):
             action_context = {
                 "action": item.get("action", ""),
                 "context": item.get("context", ""),
@@ -382,3 +388,17 @@ def _parse_priority(priority_val):
     if priority_val == "x":
         return 1
     return 0
+
+
+def _is_recent(received_time, max_age_hours):
+    """Check if an email is recent enough for draft generation."""
+    if not received_time:
+        return False
+    try:
+        received = datetime.fromisoformat(str(received_time).replace("Z", "+00:00"))
+        if received.tzinfo is None:
+            received = received.replace(tzinfo=timezone.utc)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
+        return received > cutoff
+    except (ValueError, TypeError):
+        return False
