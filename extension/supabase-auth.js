@@ -102,7 +102,7 @@ async function getValidAccessToken() {
     const refreshed = await supabaseRefreshToken(session.refresh_token);
     return refreshed.access_token;
   } catch (err) {
-    console.warn("Supabase token refresh failed:", err.message);
+    if (DEBUG) console.warn("Supabase token refresh failed:", err.message);
     return null;
   }
 }

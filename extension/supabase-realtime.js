@@ -60,7 +60,7 @@ async function handleNewDraft(record) {
     const emails = await supabaseRequest(`/emails?id=eq.${emailId}&select=email_ref,sender_email,sender_name,subject`);
     const parentEmail = emails?.[0];
     if (!parentEmail) {
-      console.warn("Realtime: parent email not found for draft", draftId);
+      if (DEBUG) console.warn("Realtime: parent email not found for draft", draftId);
       return;
     }
 
@@ -85,12 +85,12 @@ async function handleNewDraft(record) {
     if (result.success) {
       // Update draft status in Supabase
       await updateDraftStatus(draftId, "written", result.draft_ref);
-      console.log("Realtime: draft written to Outlook:", subject);
+      if (DEBUG) console.log("Realtime: draft written to Outlook:", subject);
     } else {
-      console.error("Realtime: failed to save draft to Outlook");
+      if (DEBUG) console.error("Realtime: failed to save draft to Outlook");
     }
   } catch (err) {
-    console.error("Realtime: error handling draft:", err.message);
+    if (DEBUG) console.error("Realtime: error handling draft:", err.message);
   }
 }
 
@@ -113,7 +113,7 @@ function connectRealtime(userId, accessToken) {
   }
 
   realtimeWs.onopen = () => {
-    console.log("Realtime: connected");
+    if (DEBUG) console.log("Realtime: connected");
     startHeartbeat();
 
     // Join the drafts channel filtered to this user
@@ -138,7 +138,7 @@ function connectRealtime(userId, accessToken) {
   };
 
   realtimeWs.onclose = () => {
-    console.log("Realtime: disconnected");
+    if (DEBUG) console.log("Realtime: disconnected");
     stopHeartbeat();
     realtimeWs = null;
   };

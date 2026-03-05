@@ -265,6 +265,17 @@ h3 { font-size: 1.125rem; font-weight: 600; }
     gap: 16px;
 }
 
+.lp-navbar__login {
+    font-size: 0.9375rem;
+    font-weight: 500;
+    color: var(--lp-slate-700);
+    transition: color 200ms ease;
+}
+
+.lp-navbar__login:hover {
+    color: var(--lp-blue-700);
+}
+
 .lp-navbar__cta {
     display: none;
 }

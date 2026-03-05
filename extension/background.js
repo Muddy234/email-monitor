@@ -597,7 +597,7 @@ async function detectAndUpdateAliases(userId, emails) {
       if (count >= threshold) detected.push(addr);
     }
 
-    console.log(`Alias detection: ${emails.length} emails, ${candidates.size} unique recipients, ${detected.length} above threshold (${threshold})`);
+    if (DEBUG) console.log(`Alias detection: ${emails.length} emails, ${candidates.size} unique recipients, ${detected.length} above threshold (${threshold})`);
     if (detected.length === 0) return;
 
     // Merge with existing aliases (no duplicates)
@@ -605,9 +605,9 @@ async function detectAndUpdateAliases(userId, emails) {
     if (merged.length === existing.length) return; // nothing new
 
     await patchProfileAliases(userId, merged);
-    console.log("Updated user aliases:", merged);
+    if (DEBUG) console.log("Updated user aliases:", merged);
   } catch (err) {
-    console.warn("Alias detection failed (non-blocking):", err.message);
+    if (DEBUG) console.warn("Alias detection failed (non-blocking):", err.message);
   }
 }
 
@@ -686,14 +686,14 @@ async function syncEmailsToSupabase() {
     await pushEmails(rows);
     lastSyncTime = new Date().toISOString();
     persistSyncTime();
-    console.log(`Synced ${rows.length} emails to Supabase`);
+    if (DEBUG) console.log(`Synced ${rows.length} emails to Supabase`);
 
     // Auto-detect user's Outlook email and update profile aliases if needed
     await detectAndUpdateAliases(userId, enriched);
 
     return { synced: rows.length };
   } catch (err) {
-    console.error("Email sync error:", err.message);
+    if (DEBUG) console.error("Email sync error:", err.message);
     return { error: err.message };
   } finally {
     isSyncing = false;

@@ -64,9 +64,9 @@ async function setWorkerActive(accessToken, userId, active) {
       },
       body: JSON.stringify({ worker_active: active }),
     });
-    if (!resp.ok) console.warn("Failed to set worker_active:", resp.status);
+    if (!resp.ok && DEBUG) console.warn("Failed to set worker_active:", resp.status);
   } catch (e) {
-    console.warn("Failed to set worker_active:", e);
+    if (DEBUG) console.warn("Failed to set worker_active:", e);
   }
 }
 
@@ -129,13 +129,13 @@ function refreshStatus() {
     const originEl = document.getElementById("tokenOrigin");
 
     if (!status.has_token) {
-      tokenEl.innerHTML = `${dot("red")}Missing`;
+      setStatusDot(tokenEl, "red", "Missing");
       expiresEl.textContent = "—";
     } else if (status.token_expired) {
-      tokenEl.innerHTML = `${dot("yellow")}Expired`;
+      setStatusDot(tokenEl, "yellow", "Expired");
       expiresEl.textContent = status.token_expires || "—";
     } else {
-      tokenEl.innerHTML = `${dot("green")}Valid`;
+      setStatusDot(tokenEl, "green", "Valid");
       if (status.token_expires) {
         const exp = new Date(status.token_expires);
         const hours = Math.max(0, Math.round((exp - Date.now()) / 3_600_000));

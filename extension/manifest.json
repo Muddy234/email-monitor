@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Email Monitor — Outlook Bridge",
   "version": "1.0.0",
-  "description": "Bridges Outlook Online with the Email Monitor pipeline via WebSocket.",
+  "description": "Syncs your Outlook emails for AI-powered analysis and draft generation.",
 
   "permissions": [
     "alarms",

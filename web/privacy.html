@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy Policy — Email Monitor</title>
+    <link rel="icon" type="image/svg+xml" href="assets/favicon/favicon.svg">
+    <link rel="preload" href="assets/fonts/InterVariable.woff2" as="font" type="font/woff2" crossorigin>
+    <style>
+        @font-face {
+            font-family: 'Inter';
+            src: url('assets/fonts/InterVariable.woff2') format('woff2');
+            font-weight: 100 900;
+            font-display: swap;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            color: #1a1a1a;
+            background: #fff;
+            line-height: 1.7;
+            padding: 48px 24px;
+            max-width: 720px;
+            margin: 0 auto;
+        }
+        h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; }
+        .updated { font-size: 14px; color: #666; margin-bottom: 32px; }
+        h2 { font-size: 18px; font-weight: 600; margin: 28px 0 12px; }
+        p, li { font-size: 15px; color: #333; margin-bottom: 12px; }
+        ul { padding-left: 24px; }
+        li { margin-bottom: 6px; }
+        a { color: #3b82f6; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .back { display: inline-block; margin-bottom: 24px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <a class="back" href="/">&larr; Back to Email Monitor</a>
+
+    <h1>Privacy Policy</h1>
+    <p class="updated">Last updated: March 5, 2026</p>
+
+    <p>Email Monitor ("we", "our", "the extension") is operated by Arete Collective, L.P. This policy explains what data the Email Monitor Chrome extension and web dashboard collect, how that data is used, and your rights regarding it.</p>
+
+    <h2>1. What Data We Collect</h2>
+    <ul>
+        <li><strong>Email metadata and content:</strong> Subject lines, sender/recipient addresses, email body text, timestamps, flag status, and attachment names from your Outlook inbox. This data is synced from Outlook to our backend for analysis.</li>
+        <li><strong>Outlook session token:</strong> The extension reads your existing Outlook Web session token from your browser to access your mailbox on your behalf. This token is stored locally in your browser's extension storage and is never sent to any third party.</li>
+        <li><strong>Account information:</strong> Your email address and a password you create when signing up for the Email Monitor service.</li>
+        <li><strong>Usage data:</strong> Sync timestamps, processing status, and error logs to maintain service reliability.</li>
+    </ul>
+
+    <h2>2. How We Use Your Data</h2>
+    <ul>
+        <li><strong>Email analysis:</strong> Synced emails are processed by AI (Anthropic Claude) to generate prioritization insights and draft replies.</li>
+        <li><strong>Draft generation:</strong> AI-generated draft replies are written back to your Outlook Drafts folder for your review before sending.</li>
+        <li><strong>Service operation:</strong> Account data is used for authentication and to associate your emails with your account.</li>
+    </ul>
+
+    <h2>3. How We Store Your Data</h2>
+    <ul>
+        <li>Email data and account information are stored in a Supabase (PostgreSQL) database with row-level security. Each user can only access their own data.</li>
+        <li>Your Outlook session token is stored only in your browser's local extension storage. It is never transmitted to our servers.</li>
+        <li>All data transmission uses HTTPS/WSS encryption.</li>
+    </ul>
+
+    <h2>4. Third-Party Services</h2>
+    <ul>
+        <li><strong>Supabase:</strong> Database hosting and user authentication. <a href="https://supabase.com/privacy">Supabase Privacy Policy</a></li>
+        <li><strong>Anthropic (Claude):</strong> AI processing of email content for analysis and draft generation. <a href="https://www.anthropic.com/privacy">Anthropic Privacy Policy</a></li>
+        <li><strong>Vercel:</strong> Web dashboard hosting. <a href="https://vercel.com/legal/privacy-policy">Vercel Privacy Policy</a></li>
+    </ul>
+    <p>We do not sell, rent, or share your personal data with any other third parties.</p>
+
+    <h2>5. Permissions Explained</h2>
+    <ul>
+        <li><strong>Host access to Outlook domains:</strong> Required to read your Outlook session token and sync emails via the Outlook Web API.</li>
+        <li><strong>Host access to Supabase:</strong> Required to store and retrieve your synced email data and account information.</li>
+        <li><strong>Alarms:</strong> Used to schedule periodic email sync (every 5 minutes).</li>
+        <li><strong>Storage:</strong> Used to persist your authentication session and sync state locally.</li>
+    </ul>
+
+    <h2>6. Data Retention</h2>
+    <p>Your email data is retained in our database while your account is active. You may request deletion of your account and all associated data at any time by contacting us.</p>
+
+    <h2>7. Your Rights</h2>
+    <ul>
+        <li>You can stop syncing at any time by logging out of the extension or uninstalling it.</li>
+        <li>You can request a copy of your data or request its deletion by contacting us.</li>
+        <li>Uninstalling the extension removes all locally stored data (tokens, session, sync state).</li>
+    </ul>
+
+    <h2>8. Security</h2>
+    <p>We use industry-standard security measures including HTTPS encryption, row-level database security, and scoped API keys. Your Outlook token never leaves your browser.</p>
+
+    <h2>9. Changes to This Policy</h2>
+    <p>We may update this privacy policy from time to time. Changes will be reflected on this page with an updated date.</p>
+
+    <h2>10. Contact</h2>
+    <p>For questions or data requests, contact us at: <a href="mailto:nate@aretecollective.com">nate@aretecollective.com</a></p>
+</body>
+</html>
