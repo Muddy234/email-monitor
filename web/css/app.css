@@ -1,32 +1,34 @@
 /* ================================================================
    Email Monitor Dashboard
-   Design tokens inherited from landing.css (--lp-* vars)
+   Warm, clean, minimal design system
    Dashboard classes prefixed with em- to avoid collisions
    ================================================================ */
 
-/* --- 1. Dashboard Design Tokens --- */
+/* --- 1. Design Tokens --- */
 :root {
     --em-sidebar-width: 240px;
-    --em-topbar-height: 56px;
     --em-font: 'Inter', system-ui, -apple-system, sans-serif;
 
-    --em-slate-900: #0F172A;
-    --em-slate-800: #1E293B;
-    --em-slate-700: #334155;
-    --em-slate-500: #64748B;
-    --em-slate-400: #94A3B8;
-    --em-slate-300: #CBD5E1;
-    --em-slate-200: #E2E8F0;
-    --em-slate-100: #F1F5F9;
-    --em-slate-50:  #F8FAFC;
+    /* Warm stone palette (replaces cold slate) */
+    --em-slate-900: #1C1917;
+    --em-slate-800: #292524;
+    --em-slate-700: #44403C;
+    --em-slate-500: #78716C;
+    --em-slate-400: #A8A29E;
+    --em-slate-300: #D6D3D1;
+    --em-slate-200: #E7E5E4;
+    --em-slate-100: #F5F5F4;
+    --em-slate-50:  #FAFAF9;
     --em-white:     #FFFFFF;
 
-    --em-blue-700:  #1D4ED8;
-    --em-blue-600:  #2563EB;
-    --em-blue-500:  #3B82F6;
-    --em-blue-100:  #DBEAFE;
-    --em-blue-50:   #EFF6FF;
+    /* Navy accent */
+    --em-blue-700:  #1E3A5F;
+    --em-blue-600:  #2C4F7C;
+    --em-blue-500:  #3D6898;
+    --em-blue-100:  #E8EEF4;
+    --em-blue-50:   #F4F7FA;
 
+    /* Status colors — muted */
     --em-emerald-600: #059669;
     --em-emerald-500: #10B981;
     --em-emerald-100: #D1FAE5;
@@ -40,21 +42,25 @@
     --em-red-100:   #FEE2E2;
     --em-red-50:    #FEF2F2;
 
+    /* Sizing & effects */
+    --em-radius-lg: 16px;
     --em-radius: 12px;
     --em-radius-sm: 8px;
     --em-radius-xs: 4px;
-    --em-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
-    --em-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
-    --em-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
-    --em-transition: 150ms ease;
+    --em-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+    --em-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.05);
+    --em-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.08);
+    --em-transition: 200ms ease;
+    --em-page-padding: 40px;
+    --em-content-max: 1100px;
 }
 
-/* --- 2. Reset for app pages --- */
+/* --- 2. Reset --- */
 .em-app {
     margin: 0;
     padding: 0;
     font-family: var(--em-font);
-    font-size: 14px;
+    font-size: 15px;
     line-height: 1.5;
     color: var(--em-slate-800);
     background: var(--em-slate-50);
@@ -78,11 +84,28 @@
 }
 
 .em-sidebar-brand {
-    padding: 0 20px 24px;
-    font-size: 16px;
+    padding: 0 20px 28px;
+    font-size: 15px;
     font-weight: 600;
     color: var(--em-white);
     letter-spacing: -0.01em;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.em-sidebar-brand-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: var(--em-blue-600);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--em-white);
+    flex-shrink: 0;
 }
 
 .em-sidebar-nav {
@@ -125,6 +148,28 @@
     padding: 16px 20px;
     border-top: 1px solid var(--em-slate-700);
     margin-top: auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.em-sidebar-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--em-slate-700);
+    color: var(--em-slate-300);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.em-sidebar-user-info {
+    flex: 1;
+    min-width: 0;
 }
 
 .em-sidebar-email {
@@ -133,17 +178,18 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    margin-bottom: 8px;
+    margin-bottom: 2px;
 }
 
 .em-sidebar-logout {
     background: none;
     border: none;
     color: var(--em-slate-500);
-    font-size: 13px;
+    font-size: 12px;
     cursor: pointer;
     padding: 0;
     font-family: var(--em-font);
+    transition: color var(--em-transition);
 }
 
 .em-sidebar-logout:hover {
@@ -154,30 +200,42 @@
     margin-left: var(--em-sidebar-width);
     flex: 1;
     min-height: 100vh;
-    padding: 32px;
+    padding: var(--em-page-padding);
 }
 
 .em-page-header {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
-    margin-bottom: 24px;
+    margin-bottom: 28px;
 }
 
 .em-page-title {
-    font-size: 22px;
-    font-weight: 600;
+    font-size: 24px;
+    font-weight: 700;
     color: var(--em-slate-900);
     margin: 0;
+    letter-spacing: -0.02em;
+}
+
+.em-page-subtitle {
+    font-size: 14px;
+    color: var(--em-slate-500);
+    margin: 4px 0 0;
 }
 
 /* --- 4. Cards --- */
 .em-card {
     background: var(--em-white);
     border: 1px solid var(--em-slate-200);
-    border-radius: var(--em-radius);
-    padding: 20px;
+    border-radius: var(--em-radius-lg);
+    padding: 24px;
     box-shadow: var(--em-shadow-sm);
+    transition: box-shadow var(--em-transition), transform var(--em-transition);
+}
+
+.em-card:hover {
+    box-shadow: var(--em-shadow-md);
 }
 
 .em-card-grid {
@@ -190,25 +248,36 @@
 .em-metric-card {
     background: var(--em-white);
     border: 1px solid var(--em-slate-200);
-    border-radius: var(--em-radius);
-    padding: 20px;
+    border-radius: var(--em-radius-lg);
+    padding: 24px;
     box-shadow: var(--em-shadow-sm);
+    transition: box-shadow var(--em-transition), transform var(--em-transition);
+}
+
+.em-metric-card:hover {
+    box-shadow: var(--em-shadow-md);
+    transform: translateY(-1px);
 }
 
 .em-metric-label {
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
     color: var(--em-slate-500);
     margin-bottom: 8px;
 }
 
 .em-metric-value {
-    font-size: 28px;
+    font-size: 32px;
     font-weight: 700;
     color: var(--em-slate-900);
     line-height: 1;
+}
+
+.em-metric-context {
+    font-size: 13px;
+    color: var(--em-slate-400);
+    margin-top: 10px;
+    line-height: 1.4;
 }
 
 /* --- 5. Badges --- */
@@ -262,11 +331,9 @@
     text-align: left;
     padding: 10px 12px;
     font-weight: 600;
-    font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+    font-size: 13px;
     color: var(--em-slate-500);
-    border-bottom: 2px solid var(--em-slate-200);
+    border-bottom: 1px solid var(--em-slate-200);
     white-space: nowrap;
 }
 
@@ -277,8 +344,20 @@
     vertical-align: top;
 }
 
-.em-table tbody tr:hover {
+.em-table tbody tr:nth-child(even) {
     background: var(--em-slate-50);
+}
+
+.em-table tbody tr:hover {
+    background: var(--em-slate-100);
+}
+
+.em-table tbody tr.em-row-failed {
+    background: var(--em-red-50);
+}
+
+.em-table tbody tr.em-row-failed:hover {
+    background: var(--em-red-100);
 }
 
 .em-table-clickable {
@@ -297,7 +376,7 @@
     font-family: var(--em-font);
     border: none;
     cursor: pointer;
-    transition: background var(--em-transition), opacity var(--em-transition);
+    transition: background var(--em-transition), opacity var(--em-transition), transform var(--em-transition);
     line-height: 1.4;
 }
 
@@ -334,8 +413,13 @@
 }
 
 .em-btn-danger {
-    background: var(--em-red-600);
-    color: var(--em-white);
+    background: var(--em-red-50);
+    color: var(--em-red-600);
+    border: 1px solid var(--em-red-100);
+}
+
+.em-btn-danger:hover:not(:disabled) {
+    background: var(--em-red-100);
 }
 
 .em-btn-sm {
@@ -359,7 +443,7 @@
     font-family: var(--em-font);
     border: 1px solid var(--em-slate-200);
     background: var(--em-white);
-    color: var(--em-slate-600);
+    color: var(--em-slate-500);
     cursor: pointer;
     transition: all var(--em-transition);
 }
@@ -386,11 +470,12 @@
     background: var(--em-white);
     width: 260px;
     outline: none;
-    transition: border-color var(--em-transition);
+    transition: border-color var(--em-transition), box-shadow var(--em-transition);
 }
 
 .em-search:focus {
     border-color: var(--em-blue-500);
+    box-shadow: 0 0 0 3px var(--em-blue-50);
 }
 
 .em-search::placeholder {
@@ -407,7 +492,7 @@
 .em-email-card {
     background: var(--em-white);
     border: 1px solid var(--em-slate-200);
-    border-radius: var(--em-radius);
+    border-radius: var(--em-radius-lg);
     padding: 16px 20px;
     cursor: pointer;
     transition: box-shadow var(--em-transition), border-color var(--em-transition);
@@ -420,6 +505,7 @@
 
 .em-email-card.expanded {
     border-color: var(--em-blue-500);
+    box-shadow: var(--em-shadow-md);
 }
 
 .em-email-sender {
@@ -430,7 +516,7 @@
 
 .em-email-subject {
     font-size: 13px;
-    color: var(--em-slate-700);
+    color: var(--em-slate-500);
     margin-top: 2px;
 }
 
@@ -439,26 +525,80 @@
     align-items: center;
     gap: 8px;
     font-size: 12px;
-    color: var(--em-slate-500);
-    margin-top: 6px;
-}
-
-.em-email-action {
-    font-size: 13px;
-    color: var(--em-slate-600);
+    color: var(--em-slate-400);
     margin-top: 4px;
-    font-style: italic;
 }
 
+.em-email-header-content {
+    flex: 1;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    min-width: 0;
+}
+
+.em-email-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+.em-email-header-badges {
+    text-align: right;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.em-email-completed {
+    opacity: 0.5;
+}
+
+/* --- 11. Email Summary --- */
+.em-email-summary {
+    margin-top: 10px;
+    padding: 10px 14px;
+    background: var(--em-blue-50);
+    border-left: 3px solid var(--em-blue-500);
+    border-radius: 0 var(--em-radius-sm) var(--em-radius-sm) 0;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.em-email-summary-text {
+    color: var(--em-slate-700);
+    margin-bottom: 6px;
+}
+
+.em-email-response-needed {
+    color: var(--em-slate-800);
+    padding-top: 6px;
+    border-top: 1px solid var(--em-blue-100);
+    font-weight: 500;
+}
+
+.em-response-needed-label {
+    font-weight: 600;
+    color: var(--em-slate-500);
+    margin-right: 4px;
+}
+
+/* --- 12. Email Detail (Expand/Collapse) --- */
 .em-email-detail {
-    display: none;
-    margin-top: 16px;
-    padding-top: 16px;
-    border-top: 1px solid var(--em-slate-100);
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 300ms ease, opacity 200ms ease;
+    opacity: 0;
 }
 
 .em-email-card.expanded .em-email-detail {
-    display: block;
+    max-height: 1200px;
+    opacity: 1;
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--em-slate-100);
 }
 
 .em-email-body {
@@ -472,15 +612,38 @@
 }
 
 .em-email-section-label {
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
     color: var(--em-slate-500);
-    margin-bottom: 6px;
+    margin-bottom: 8px;
 }
 
-/* --- 11. Draft Editor --- */
+/* --- 13. Draft Preview (email-like) --- */
+.em-draft-preview {
+    background: var(--em-white);
+    border: 1px solid var(--em-slate-200);
+    border-radius: var(--em-radius);
+    overflow: hidden;
+    margin-top: 8px;
+}
+
+.em-draft-preview-header {
+    padding: 12px 20px;
+    background: var(--em-slate-50);
+    border-bottom: 1px solid var(--em-slate-200);
+    font-size: 13px;
+    color: var(--em-slate-500);
+}
+
+.em-draft-preview-body {
+    padding: 20px;
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--em-slate-800);
+    white-space: pre-wrap;
+}
+
+/* --- 14. Draft Editor --- */
 .em-draft-editor {
     margin-top: 12px;
 }
@@ -491,18 +654,19 @@
     padding: 12px;
     border: 1px solid var(--em-slate-200);
     border-radius: var(--em-radius-sm);
-    font-size: 13px;
+    font-size: 14px;
     font-family: var(--em-font);
     color: var(--em-slate-800);
     line-height: 1.6;
     resize: vertical;
     outline: none;
-    transition: border-color var(--em-transition);
+    transition: border-color var(--em-transition), box-shadow var(--em-transition);
     box-sizing: border-box;
 }
 
 .em-draft-textarea:focus {
     border-color: var(--em-blue-500);
+    box-shadow: 0 0 0 3px var(--em-blue-50);
 }
 
 .em-draft-actions {
@@ -524,7 +688,7 @@
     opacity: 1;
 }
 
-/* --- 12. Group Headers --- */
+/* --- 15. Group Headers --- */
 .em-group {
     margin-bottom: 32px;
 }
@@ -548,7 +712,7 @@
     border-radius: 9999px;
 }
 
-/* --- 13. Loading Skeletons --- */
+/* --- 16. Loading Skeletons --- */
 .em-skeleton {
     background: linear-gradient(90deg, var(--em-slate-100) 25%, var(--em-slate-50) 50%, var(--em-slate-100) 75%);
     background-size: 200% 100%;
@@ -563,7 +727,7 @@
 
 .em-skeleton-card {
     height: 100px;
-    border-radius: var(--em-radius);
+    border-radius: var(--em-radius-lg);
 }
 
 .em-skeleton-row {
@@ -577,7 +741,7 @@
     width: 60%;
 }
 
-/* --- 14. Error Banner --- */
+/* --- 17. Error Banner --- */
 .em-error-banner {
     display: none;
     background: var(--em-red-50);
@@ -606,21 +770,21 @@
     line-height: 1;
 }
 
-/* --- 15. Empty State --- */
+/* --- 18. Empty State --- */
 .em-empty {
     text-align: center;
     padding: 48px 20px;
-    color: var(--em-slate-500);
+    color: var(--em-slate-400);
     font-size: 14px;
 }
 
 .em-empty-icon {
     font-size: 32px;
     margin-bottom: 12px;
-    opacity: 0.5;
+    opacity: 0.4;
 }
 
-/* --- 16. Pagination --- */
+/* --- 19. Pagination --- */
 .em-pagination {
     display: flex;
     align-items: center;
@@ -631,7 +795,7 @@
     color: var(--em-slate-500);
 }
 
-/* --- 17. Expandable Row Detail --- */
+/* --- 20. Expandable Row Detail --- */
 .em-detail-row {
     display: none;
 }
@@ -649,7 +813,7 @@
     line-height: 1.6;
 }
 
-/* --- 18. Login Page --- */
+/* --- 21. Login Page --- */
 .em-login-wrap {
     display: flex;
     align-items: center;
@@ -662,7 +826,7 @@
 .em-login-card {
     background: var(--em-white);
     border: 1px solid var(--em-slate-200);
-    border-radius: var(--em-radius);
+    border-radius: var(--em-radius-lg);
     padding: 40px;
     width: 100%;
     max-width: 400px;
@@ -704,11 +868,12 @@
     color: var(--em-slate-800);
     outline: none;
     box-sizing: border-box;
-    transition: border-color var(--em-transition);
+    transition: border-color var(--em-transition), box-shadow var(--em-transition);
 }
 
 .em-form-input:focus {
     border-color: var(--em-blue-500);
+    box-shadow: 0 0 0 3px var(--em-blue-50);
 }
 
 .em-form-error {
@@ -742,95 +907,202 @@
     text-decoration: underline;
 }
 
-/* --- 19. Metric Card Links --- */
+/* --- 22. Metric Card Links --- */
 .em-metric-link {
     text-decoration: none;
     color: inherit;
     display: block;
-    transition: box-shadow var(--em-transition), border-color var(--em-transition);
+    transition: box-shadow var(--em-transition), border-color var(--em-transition), transform var(--em-transition);
     cursor: pointer;
 }
 
 .em-metric-link:hover {
     box-shadow: var(--em-shadow-md);
     border-color: var(--em-blue-500);
+    transform: translateY(-1px);
 }
 
-/* --- 20. Email Checkbox --- */
-.em-email-checkbox-wrap {
-    flex-shrink: 0;
+/* --- 23. Pipeline Visualization --- */
+.em-pipeline {
     display: flex;
-    align-items: flex-start;
-    padding-top: 2px;
+    align-items: stretch;
+    gap: 0;
+    margin-bottom: 24px;
 }
 
-.em-email-checkbox {
-    width: 18px;
-    height: 18px;
-    cursor: pointer;
-    accent-color: var(--em-emerald-600);
-}
-
-.em-email-checkbox:disabled {
-    cursor: default;
-}
-
-.em-email-header-content {
+.em-pipeline-stage {
     flex: 1;
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 12px;
-    min-width: 0;
+    text-align: center;
+    padding: 24px 16px;
+    background: var(--em-white);
+    border: 1px solid var(--em-slate-200);
+    position: relative;
+    transition: box-shadow var(--em-transition);
 }
 
-.em-email-header {
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
+.em-pipeline-stage:first-child {
+    border-radius: var(--em-radius-lg) 0 0 var(--em-radius-lg);
 }
 
-.em-email-completed {
-    opacity: 0.6;
+.em-pipeline-stage:last-child {
+    border-radius: 0 var(--em-radius-lg) var(--em-radius-lg) 0;
 }
 
-/* --- 21. Email Summary (Needs Response) --- */
-.em-email-summary {
-    margin-top: 10px;
-    padding: 10px 14px;
-    background: var(--em-blue-50);
-    border: 1px solid var(--em-blue-100);
-    border-radius: var(--em-radius-sm);
+.em-pipeline-stage + .em-pipeline-stage {
+    border-left: none;
+}
+
+.em-pipeline-stage-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--em-slate-900);
+    line-height: 1;
+}
+
+.em-pipeline-stage-label {
     font-size: 13px;
-    line-height: 1.5;
+    color: var(--em-slate-500);
+    margin-top: 6px;
 }
 
-.em-email-summary-label {
-    font-size: 11px;
+.em-pipeline-arrow {
+    display: flex;
+    align-items: center;
+    color: var(--em-slate-300);
+    font-size: 18px;
+    padding: 0 2px;
+}
+
+/* --- 24. CTA Cards --- */
+.em-cta-row {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.em-cta-card {
+    flex: 1;
+    background: var(--em-white);
+    border: 1px solid var(--em-slate-200);
+    border-radius: var(--em-radius-lg);
+    padding: 20px 24px;
+    text-decoration: none;
+    color: inherit;
+    transition: box-shadow var(--em-transition), border-color var(--em-transition), transform var(--em-transition);
+    cursor: pointer;
+}
+
+.em-cta-card:hover {
+    box-shadow: var(--em-shadow-md);
+    border-color: var(--em-blue-500);
+    transform: translateY(-1px);
+}
+
+.em-cta-title {
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--em-blue-700);
+    font-size: 14px;
+    color: var(--em-slate-900);
     margin-bottom: 4px;
 }
 
-.em-email-summary-text {
-    color: var(--em-slate-700);
-    margin-bottom: 8px;
+.em-cta-desc {
+    font-size: 13px;
+    color: var(--em-slate-500);
 }
 
-.em-email-response-needed {
-    color: var(--em-slate-800);
-    padding-top: 6px;
-    border-top: 1px solid var(--em-blue-100);
-}
-
-.em-response-needed-label {
+/* --- 25. Latest Run Card --- */
+.em-latest-run-header {
+    font-size: 12px;
     font-weight: 600;
-    color: var(--em-blue-700);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--em-slate-500);
+    margin-bottom: 12px;
 }
 
-/* --- 22. Responsive --- */
+.em-latest-run-body {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    font-size: 13px;
+}
+
+.em-latest-run-time {
+    color: var(--em-slate-700);
+}
+
+.em-latest-run-stats {
+    color: var(--em-slate-400);
+}
+
+.em-latest-run-error {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--em-red-600);
+}
+
+/* --- 26. Fade-in Animations --- */
+@keyframes em-fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.em-fade-in {
+    animation: em-fadeIn 300ms ease both;
+}
+
+.em-stagger > * {
+    animation: em-fadeIn 300ms ease both;
+}
+.em-stagger > *:nth-child(1) { animation-delay: 0ms; }
+.em-stagger > *:nth-child(2) { animation-delay: 60ms; }
+.em-stagger > *:nth-child(3) { animation-delay: 120ms; }
+.em-stagger > *:nth-child(4) { animation-delay: 180ms; }
+.em-stagger > *:nth-child(5) { animation-delay: 240ms; }
+
+/* --- 27. Toast Notifications --- */
+.em-toast-container {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.em-toast {
+    background: var(--em-slate-900);
+    color: var(--em-white);
+    padding: 12px 20px;
+    border-radius: var(--em-radius);
+    font-size: 13px;
+    font-family: var(--em-font);
+    box-shadow: var(--em-shadow-lg);
+    animation: em-toastIn 200ms ease, em-toastOut 200ms ease 3s forwards;
+    max-width: 360px;
+}
+
+.em-toast-success {
+    border-left: 3px solid var(--em-emerald-500);
+}
+
+.em-toast-error {
+    border-left: 3px solid var(--em-red-600);
+}
+
+@keyframes em-toastIn {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes em-toastOut {
+    from { opacity: 1; }
+    to { opacity: 0; }
+}
+
+/* --- 28. Responsive (desktop-only, minimal mobile fallback) --- */
 @media (max-width: 768px) {
     .em-sidebar {
         display: none;
@@ -847,5 +1119,26 @@
 
     .em-search {
         width: 100%;
+    }
+
+    .em-pipeline {
+        flex-direction: column;
+    }
+
+    .em-pipeline-stage:first-child {
+        border-radius: var(--em-radius-lg) var(--em-radius-lg) 0 0;
+    }
+
+    .em-pipeline-stage:last-child {
+        border-radius: 0 0 var(--em-radius-lg) var(--em-radius-lg);
+    }
+
+    .em-pipeline-stage + .em-pipeline-stage {
+        border-left: 1px solid var(--em-slate-200);
+        border-top: none;
+    }
+
+    .em-cta-row {
+        flex-direction: column;
     }
 }

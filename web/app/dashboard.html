@@ -11,23 +11,28 @@
 </head>
 <body class="em-app">
     <nav id="em-sidebar" class="em-sidebar"></nav>
-    <main class="em-main">
+    <main class="em-main em-fade-in">
         <div class="em-page-header">
-            <h1 class="em-page-title">Dashboard</h1>
+            <div>
+                <h1 class="em-page-title">Dashboard</h1>
+                <p class="em-page-subtitle" id="greeting">Here's your overview.</p>
+            </div>
             <div class="em-filter-bar">
                 <button class="em-filter-btn" data-range="1">Today</button>
                 <button class="em-filter-btn active" data-range="7">7 days</button>
                 <button class="em-filter-btn" data-range="30">30 days</button>
-                <button class="em-btn em-btn-secondary em-btn-sm" id="refreshBtn">Refresh</button>
             </div>
         </div>
 
-        <div class="em-card-grid" id="metricsGrid">
-            <div class="em-metric-card"><div class="em-skeleton em-skeleton-card"></div></div>
+        <div class="em-card-grid em-stagger" id="metricsGrid">
             <div class="em-metric-card"><div class="em-skeleton em-skeleton-card"></div></div>
             <div class="em-metric-card"><div class="em-skeleton em-skeleton-card"></div></div>
             <div class="em-metric-card"><div class="em-skeleton em-skeleton-card"></div></div>
         </div>
+
+        <div id="pipelineSection"></div>
+
+        <div id="ctaSection"></div>
 
         <div class="em-card" id="latestRun">
             <div class="em-skeleton em-skeleton-row"></div>

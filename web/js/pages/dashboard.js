@@ -1,5 +1,5 @@
 /**
- * Dashboard page — metrics overview with date range filter.
+ * Dashboard page — metrics overview with pipeline viz and CTAs.
  */
 import { requireAuth, listenAuthChanges } from "../auth.js";
 import { renderNav } from "../nav.js";
@@ -21,9 +21,25 @@ let range = parseInt(getParam("range", "7"), 10);
 // -------------------------------------------------------------------------
 
 const metricsGrid = document.getElementById("metricsGrid");
+const pipelineSection = document.getElementById("pipelineSection");
+const ctaSection = document.getElementById("ctaSection");
 const latestRunEl = document.getElementById("latestRun");
+const greetingEl = document.getElementById("greeting");
 const filterBtns = document.querySelectorAll(".em-filter-btn[data-range]");
-const refreshBtn = document.getElementById("refreshBtn");
+
+// -------------------------------------------------------------------------
+// Greeting
+// -------------------------------------------------------------------------
+
+function setGreeting() {
+    const hour = new Date().getHours();
+    let greeting = "Good evening";
+    if (hour < 12) greeting = "Good morning";
+    else if (hour < 17) greeting = "Good afternoon";
+    greetingEl.textContent = `${greeting}. Here's your overview.`;
+}
+
+setGreeting();
 
 // -------------------------------------------------------------------------
 // Date range helpers
@@ -53,11 +69,6 @@ filterBtns.forEach(btn => {
         syncFilterUI();
         loadMetrics();
     });
-});
-
-refreshBtn.addEventListener("click", () => {
-    loadMetrics();
-    loadLatestRun();
 });
 
 syncFilterUI();
@@ -93,34 +104,108 @@ async function loadMetrics() {
 
         if (emailCount === 0 && draftCount === 0 && scanned === 0) {
             showEmpty(metricsGrid, "No data yet \u2014 run the extension to sync emails.");
+            pipelineSection.innerHTML = "";
+            ctaSection.innerHTML = "";
             return;
         }
 
-        metricsGrid.innerHTML = `
-            <a href="/app/emails.html" class="em-metric-card em-metric-link">
-                <div class="em-metric-label">Emails Synced</div>
-                <div class="em-metric-value">${emailCount}</div>
-            </a>
-            <a href="/app/emails.html?section=needs-response" class="em-metric-card em-metric-link">
-                <div class="em-metric-label">Needs Response</div>
-                <div class="em-metric-value">${needsResponseCount}</div>
-            </a>
-            <a href="/app/emails.html?section=drafts" class="em-metric-card em-metric-link">
-                <div class="em-metric-label">Drafts Generated</div>
-                <div class="em-metric-value">${draftCount}</div>
-            </a>
-            <div class="em-metric-card">
-                <div class="em-metric-label">Pipeline Funnel</div>
-                <div style="font-size: 13px; color: var(--em-slate-700); margin-top: 8px;">
-                    <div>${scanned} scanned</div>
-                    <div>${processed} processed</div>
-                    <div>${generated} drafts</div>
-                </div>
-            </div>
-        `;
+        renderMetrics(emailCount, needsResponseCount, draftCount);
+        renderPipeline(scanned, processed, generated);
+        renderCTA(needsResponseCount, draftCount);
     } catch (err) {
         showError(`Failed to load metrics: ${err.message}`);
     }
+}
+
+// -------------------------------------------------------------------------
+// Render metric cards
+// -------------------------------------------------------------------------
+
+function renderMetrics(emailCount, needsResponseCount, draftCount) {
+    const contextEmails = emailCount === 0 ? "Nothing synced yet" : `${emailCount} in the last ${range} day${range > 1 ? "s" : ""}`;
+    const contextNeeds = needsResponseCount === 0 ? "All caught up" : `${needsResponseCount} awaiting your input`;
+    const contextDrafts = draftCount === 0 ? "No drafts yet" : `${draftCount} ready to review`;
+
+    metricsGrid.innerHTML = `
+        <a href="/app/emails.html" class="em-metric-card em-metric-link">
+            <div class="em-metric-label">Emails Synced</div>
+            <div class="em-metric-value">${emailCount}</div>
+            <div class="em-metric-context">${contextEmails}</div>
+        </a>
+        <a href="/app/emails.html?section=needs-response" class="em-metric-card em-metric-link">
+            <div class="em-metric-label">Needs Response</div>
+            <div class="em-metric-value">${needsResponseCount}</div>
+            <div class="em-metric-context">${contextNeeds}</div>
+        </a>
+        <a href="/app/emails.html?section=drafts" class="em-metric-card em-metric-link">
+            <div class="em-metric-label">Drafts Ready</div>
+            <div class="em-metric-value">${draftCount}</div>
+            <div class="em-metric-context">${contextDrafts}</div>
+        </a>
+    `;
+}
+
+// -------------------------------------------------------------------------
+// Pipeline visualization
+// -------------------------------------------------------------------------
+
+function renderPipeline(scanned, processed, generated) {
+    if (scanned === 0 && processed === 0 && generated === 0) {
+        pipelineSection.innerHTML = "";
+        return;
+    }
+
+    pipelineSection.innerHTML = `
+        <div class="em-pipeline">
+            <div class="em-pipeline-stage">
+                <div class="em-pipeline-stage-value">${scanned}</div>
+                <div class="em-pipeline-stage-label">Scanned</div>
+            </div>
+            <div class="em-pipeline-arrow">\u2192</div>
+            <div class="em-pipeline-stage">
+                <div class="em-pipeline-stage-value">${processed}</div>
+                <div class="em-pipeline-stage-label">Classified</div>
+            </div>
+            <div class="em-pipeline-arrow">\u2192</div>
+            <div class="em-pipeline-stage">
+                <div class="em-pipeline-stage-value">${generated}</div>
+                <div class="em-pipeline-stage-label">Drafts Created</div>
+            </div>
+        </div>
+    `;
+}
+
+// -------------------------------------------------------------------------
+// CTA section
+// -------------------------------------------------------------------------
+
+function renderCTA(needsResponseCount, draftCount) {
+    const cards = [];
+
+    if (draftCount > 0) {
+        cards.push(`
+            <a href="/app/emails.html?section=drafts" class="em-cta-card">
+                <div class="em-cta-title">Review ${draftCount} draft${draftCount > 1 ? "s" : ""}</div>
+                <div class="em-cta-desc">Drafts are ready for your review before sending.</div>
+            </a>
+        `);
+    }
+
+    if (needsResponseCount > 0) {
+        cards.push(`
+            <a href="/app/emails.html?section=needs-response" class="em-cta-card">
+                <div class="em-cta-title">${needsResponseCount} email${needsResponseCount > 1 ? "s" : ""} need attention</div>
+                <div class="em-cta-desc">These emails were flagged as needing a response.</div>
+            </a>
+        `);
+    }
+
+    if (cards.length === 0) {
+        ctaSection.innerHTML = "";
+        return;
+    }
+
+    ctaSection.innerHTML = `<div class="em-cta-row">${cards.join("")}</div>`;
 }
 
 // -------------------------------------------------------------------------
@@ -143,20 +228,20 @@ async function loadLatestRun() {
             return;
         }
 
-        const statusBadge = data.status === "completed"
-            ? `<span class="em-badge em-badge-green">completed</span>`
+        const statusClass = data.status === "completed"
+            ? "em-badge-green"
             : data.status === "failed"
-            ? `<span class="em-badge em-badge-red">failed</span>`
-            : `<span class="em-badge em-badge-amber">${data.status}</span>`;
+            ? "em-badge-red"
+            : "em-badge-amber";
 
         latestRunEl.innerHTML = `
-            <div style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--em-slate-500); margin-bottom: 12px;">Latest Pipeline Run</div>
-            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-                ${statusBadge}
-                <span style="font-size: 13px; color: var(--em-slate-700);">${formatDate(data.started_at)}</span>
-                <span style="font-size: 13px; color: var(--em-slate-500);">${data.emails_scanned || 0} scanned, ${data.emails_processed || 0} processed, ${data.drafts_generated || 0} drafts</span>
+            <div class="em-latest-run-header">Latest Pipeline Run</div>
+            <div class="em-latest-run-body">
+                <span class="em-badge ${statusClass}">${data.status}</span>
+                <span class="em-latest-run-time">${relativeTime(data.started_at)}</span>
+                <span class="em-latest-run-stats">${data.emails_scanned || 0} scanned, ${data.emails_processed || 0} processed, ${data.drafts_generated || 0} drafts</span>
             </div>
-            ${data.error_message ? `<div style="margin-top: 8px; font-size: 12px; color: var(--em-red-600);">${data.error_message}</div>` : ""}
+            ${data.error_message ? `<div class="em-latest-run-error">${data.error_message}</div>` : ""}
         `;
     } catch (err) {
         showError(`Failed to load latest run: ${err.message}`);

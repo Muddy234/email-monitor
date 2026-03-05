@@ -50,9 +50,10 @@ async function loadRuns() {
                 : `<span class="em-badge em-badge-amber">${escapeHtml(run.status)}</span>`;
 
             const hasDetail = run.error_message || run.log_output;
+            const rowClass = run.status === "failed" ? " em-row-failed" : "";
 
             return `
-                <tr class="em-table-clickable" data-run-id="${run.id}">
+                <tr class="em-table-clickable${rowClass}" data-run-id="${run.id}">
                     <td>${formatDate(run.started_at)}</td>
                     <td>${escapeHtml(run.trigger_type || "scheduled")}</td>
                     <td>${statusBadge}</td>

@@ -149,3 +149,26 @@ export function relativeTime(dateStr) {
     if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
     return `${Math.floor(diff / 86_400_000)}d ago`;
 }
+
+// -------------------------------------------------------------------------
+// Toast notifications
+// -------------------------------------------------------------------------
+
+/**
+ * Show a non-blocking toast notification (bottom-right).
+ * @param {string} message
+ * @param {"success"|"error"} type
+ */
+export function showToast(message, type = "success") {
+    let container = document.querySelector(".em-toast-container");
+    if (!container) {
+        container = document.createElement("div");
+        container.className = "em-toast-container";
+        document.body.appendChild(container);
+    }
+    const toast = document.createElement("div");
+    toast.className = `em-toast em-toast-${type}`;
+    toast.textContent = message;
+    container.appendChild(toast);
+    setTimeout(() => toast.remove(), 3400);
+}

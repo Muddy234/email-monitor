@@ -32,6 +32,7 @@ export async function renderNav() {
 
     const currentPath = window.location.pathname;
     const email = await getUserEmail();
+    const initial = (email || "?")[0].toUpperCase();
 
     const links = NAV_ITEMS.map(item => {
         const isActive = currentPath.endsWith(item.href) || currentPath.endsWith(item.href.replace("/app/", ""));
@@ -39,11 +40,17 @@ export async function renderNav() {
     }).join("");
 
     sidebar.innerHTML = `
-        <div class="em-sidebar-brand">Email Monitor</div>
+        <div class="em-sidebar-brand">
+            <div class="em-sidebar-brand-icon">EM</div>
+            <span>Email Monitor</span>
+        </div>
         <div class="em-sidebar-nav">${links}</div>
         <div class="em-sidebar-footer">
-            <div class="em-sidebar-email">${email || "\u2014"}</div>
-            <button class="em-sidebar-logout" id="em-logout-btn">Log out</button>
+            <div class="em-sidebar-avatar">${initial}</div>
+            <div class="em-sidebar-user-info">
+                <div class="em-sidebar-email">${email || "\u2014"}</div>
+                <button class="em-sidebar-logout" id="em-logout-btn">Log out</button>
+            </div>
         </div>
     `;
 
