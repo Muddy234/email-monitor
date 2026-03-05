@@ -81,11 +81,17 @@ async function loadMetrics() {
     const start = rangeStart();
 
     try {
-        // Fetch emails with classification + draft status so counts match emails page logic
-        const [emailsRes, runsRes] = await Promise.all([
+        // Three parallel queries:
+        // 1. ALL emails (no date filter) — for actionable counts (Needs Response, Drafts Ready)
+        // 2. Date-filtered emails — for "Emails Synced" volume metric
+        // 3. Pipeline runs — for funnel stats
+        const [allEmailsRes, rangeEmailsRes, runsRes] = await Promise.all([
             supabase
                 .from("emails")
-                .select("id, status, classifications(needs_response), drafts(id)")
+                .select("id, status, classifications(needs_response), drafts(id)"),
+            supabase
+                .from("emails")
+                .select("id", { count: "exact", head: true })
                 .gte("created_at", start),
             supabase
                 .from("pipeline_runs")
@@ -93,12 +99,12 @@ async function loadMetrics() {
                 .gte("started_at", start),
         ]);
 
-        if (emailsRes.error) throw emailsRes.error;
+        if (allEmailsRes.error) throw allEmailsRes.error;
 
-        const emails = emailsRes.data || [];
-        const emailCount = emails.length;
+        const emails = allEmailsRes.data || [];
+        const emailCount = rangeEmailsRes.count || 0;
 
-        // Count using same grouping logic as emails page
+        // Count using same grouping logic as emails page (no date filter)
         let needsResponseCount = 0;
         let draftCount = 0;
         for (const e of emails) {

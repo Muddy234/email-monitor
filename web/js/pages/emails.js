@@ -14,11 +14,7 @@ await renderNav();
 // State
 // -------------------------------------------------------------------------
 
-const PAGE_SIZE = 50;
 let allEmails = [];
-let totalCount = 0;
-let groupTotals = { "Drafts Ready": 0, "Needs Response": 0, "Other": 0, "Completed": 0 };
-let page = parseInt(getParam("page", "1"), 10);
 let searchQuery = getParam("q", "");
 let activeSection = getParam("section", ""); // from dashboard links
 
@@ -27,7 +23,6 @@ let activeSection = getParam("section", ""); // from dashboard links
 // -------------------------------------------------------------------------
 
 const container = document.getElementById("emailsContainer");
-const paginationEl = document.getElementById("pagination");
 const searchInput = document.getElementById("searchInput");
 const refreshBtn = document.getElementById("refreshBtn");
 
@@ -47,57 +42,23 @@ searchInput.addEventListener("input", () => {
     }, 300);
 });
 
-refreshBtn.addEventListener("click", () => {
-    page = 1;
-    setParam("page", "");
-    loadEmails();
-});
+refreshBtn.addEventListener("click", () => loadEmails());
 
 // -------------------------------------------------------------------------
 // Load emails from Supabase
 // -------------------------------------------------------------------------
 
-async function loadGroupTotals() {
+async function loadEmails() {
     try {
         const { data, error } = await supabase
             .from("emails")
-            .select("id, status, classifications(needs_response), drafts(id)");
+            .select("*, classifications(*), drafts(*)")
+            .order("received_time", { ascending: false });
 
         if (error) throw error;
 
-        const totals = { "Drafts Ready": 0, "Needs Response": 0, "Other": 0, "Completed": 0 };
-        for (const e of (data || [])) {
-            if (e.status === "completed") { totals["Completed"]++; continue; }
-            const hasDraft = e.drafts && e.drafts.length > 0;
-            const needsResponse = e.classifications?.some(c => c.needs_response);
-            if (hasDraft) totals["Drafts Ready"]++;
-            else if (needsResponse) totals["Needs Response"]++;
-            else totals["Other"]++;
-        }
-        groupTotals = totals;
-    } catch (err) {
-        // Non-critical — fall back to page-level counts
-    }
-}
-
-async function loadEmails() {
-    try {
-        const offset = (page - 1) * PAGE_SIZE;
-        const [, emailsResult] = await Promise.all([
-            loadGroupTotals(),
-            supabase
-                .from("emails")
-                .select("*, classifications(*), drafts(*)", { count: "exact" })
-                .order("received_time", { ascending: false })
-                .range(offset, offset + PAGE_SIZE - 1),
-        ]);
-
-        if (emailsResult.error) throw emailsResult.error;
-
-        allEmails = emailsResult.data || [];
-        totalCount = emailsResult.count || 0;
+        allEmails = data || [];
         renderEmails();
-        renderPagination();
     } catch (err) {
         showError(`Failed to load emails: ${err.message}`);
     }
@@ -173,9 +134,7 @@ function renderEmails() {
         const sectionId = Object.entries(SECTION_MAP).find(([, v]) => v === groupName)?.[0] || "";
 
         html += `<div class="em-group em-fade-in" id="section-${sectionId}">`;
-        const total = groupTotals[groupName] || emails.length;
-        const countLabel = total > emails.length ? `${emails.length} of ${total}` : `${total}`;
-        html += `<div class="em-group-title">${groupName}<span class="em-group-count">${countLabel}</span></div>`;
+        html += `<div class="em-group-title">${groupName}<span class="em-group-count">${emails.length}</span></div>`;
         html += `<div class="em-email-list">`;
 
         for (const email of emails) {
@@ -291,48 +250,6 @@ function renderEmailCard(email) {
             </div>
         </div>
     `;
-}
-
-// -------------------------------------------------------------------------
-// Pagination
-// -------------------------------------------------------------------------
-
-function renderPagination() {
-    if (totalCount <= PAGE_SIZE && page === 1) {
-        paginationEl.innerHTML = "";
-        return;
-    }
-
-    const showing = Math.min(page * PAGE_SIZE, totalCount);
-    paginationEl.innerHTML = `
-        <span>Showing ${showing} of ${totalCount} emails</span>
-        ${totalCount > page * PAGE_SIZE
-            ? `<button class="em-btn em-btn-secondary em-btn-sm" id="loadMoreBtn">Load More</button>`
-            : ""}
-    `;
-
-    const loadMoreBtn = document.getElementById("loadMoreBtn");
-    if (loadMoreBtn) {
-        loadMoreBtn.addEventListener("click", async () => {
-            page++;
-            setParam("page", String(page));
-            const offset = (page - 1) * PAGE_SIZE;
-            try {
-                const { data, error } = await supabase
-                    .from("emails")
-                    .select("*, classifications(*), drafts(*)")
-                    .order("received_time", { ascending: false })
-                    .range(offset, offset + PAGE_SIZE - 1);
-
-                if (error) throw error;
-                allEmails = allEmails.concat(data || []);
-                renderEmails();
-                renderPagination();
-            } catch (err) {
-                showError(`Failed to load more: ${err.message}`);
-            }
-        });
-    }
 }
 
 // -------------------------------------------------------------------------
