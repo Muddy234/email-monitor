@@ -14,7 +14,7 @@
     "*://outlook.live.com/*",
     "*://outlook.office365.com/*",
     "*://outlook.office.com/*",
-    "http://localhost/*"
+    "https://*.supabase.co/*"
   ],
 
   "background": {

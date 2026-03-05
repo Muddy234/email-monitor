@@ -7,7 +7,7 @@
 create table public.profiles (
     id uuid primary key references auth.users on delete cascade,
     email_provider_origin text default 'outlook.live.com',
-    process_flagged_only boolean default true,
+    process_flagged_only boolean default false,
     max_emails_to_scan integer default 500,
     start_date timestamptz,
     user_email_aliases text[] default '{}',

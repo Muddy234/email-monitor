@@ -138,10 +138,11 @@ class SupabaseWorkerClient:
     # ------------------------------------------------------------------
 
     def insert_draft(self, email_id, user_id, draft_body):
-        """Insert a new draft with status='pending'.
+        """Insert or update a draft with status='pending'.
 
-        The extension's Realtime subscription will pick this up
-        and write it back to Outlook.
+        Skips overwrite if the user has edited the draft via the dashboard
+        (user_edited=true). The extension's Realtime subscription will pick
+        up new/updated drafts and write them back to Outlook.
 
         Args:
             email_id: UUID string.
@@ -149,15 +150,40 @@ class SupabaseWorkerClient:
             draft_body: The generated reply text.
 
         Returns:
-            dict: The inserted draft row.
+            dict: The inserted/updated draft row, or empty dict if skipped.
         """
+        # Check for existing user-edited draft
+        existing = (
+            self.client.table("drafts")
+            .select("id, user_edited")
+            .eq("email_id", email_id)
+            .eq("user_id", user_id)
+            .maybe_single()
+            .execute()
+        )
+        if existing.data and existing.data.get("user_edited"):
+            logger.info(f"Skipping draft for email {email_id}: user has edited it")
+            return {}
+
         row = {
             "email_id": email_id,
             "user_id": user_id,
             "draft_body": draft_body,
             "status": "pending",
+            "user_edited": False,
         }
-        result = self.client.table("drafts").insert(row).execute()
+
+        if existing.data:
+            # Update existing draft (worker re-run)
+            result = (
+                self.client.table("drafts")
+                .update({"draft_body": draft_body, "status": "pending", "user_edited": False})
+                .eq("id", existing.data["id"])
+                .execute()
+            )
+        else:
+            result = self.client.table("drafts").insert(row).execute()
+
         return result.data[0] if result.data else {}
 
     # ------------------------------------------------------------------

@@ -7,6 +7,7 @@ Ports the core logic from pipeline/runner.py, adapted for Supabase I/O:
 """
 
 import logging
+import re
 
 from pipeline.filter import EmailFilter
 from pipeline.analyzer import ClaudeAnalyzer
@@ -92,6 +93,8 @@ def process_email_batch(db_client, emails, user_id, config):
         system_prompt_template=get_draft_prompt_template(),
     )
 
+    user_aliases = [a.lower() for a in config.get("user_email_aliases", []) if a]
+
     emails_processed = 0
     drafts_generated = 0
 
@@ -99,6 +102,7 @@ def process_email_batch(db_client, emails, user_id, config):
     filtered_emails = []
     for email in emails:
         email_data = supabase_row_to_email_data(email)
+        email_data["signals"] = build_signals(email_data, user_aliases)
         classification = email_filter.classify(email_data)
 
         if classification == "skip":
@@ -183,6 +187,155 @@ def process_email_batch(db_client, emails, user_id, config):
             pass
 
     return {"emails_processed": emails_processed, "drafts_generated": drafts_generated}
+
+
+def build_signals(email_data, user_aliases):
+    """Build response signals from email data and user aliases.
+
+    Computes signals 1-5 from the strategy doc using data already on the
+    email row. Signals that need external data (thread history, response
+    rate, thread velocity) fall back to null/insufficient-data states that
+    the analyzer already handles gracefully.
+
+    Args:
+        email_data: dict from supabase_row_to_email_data().
+        user_aliases: list[str] of the user's email addresses (lowercase).
+
+    Returns:
+        dict: Signals block compatible with analyzer._format_signal_block().
+    """
+    to_field = (email_data.get("to_field") or "").lower()
+    cc_field = (email_data.get("cc_field") or "").lower()
+    recipients = email_data.get("recipients") or []
+    body = email_data.get("body") or ""
+    subject = email_data.get("subject") or ""
+
+    # --- Signal 1: User position + recipient counts ---
+    to_addrs = [r["address"].lower() for r in recipients if r.get("type") == 1 and r.get("address")]
+    cc_addrs = [r["address"].lower() for r in recipients if r.get("type") == 2 and r.get("address")]
+
+    user_position = "UNKNOWN"
+    for alias in user_aliases:
+        if alias in to_field or alias in [a for a in to_addrs]:
+            user_position = "TO"
+            break
+        if alias in cc_field or alias in [a for a in cc_addrs]:
+            user_position = "CC"
+            break
+
+    to_count = len(to_addrs)
+    cc_count = len(cc_addrs)
+    total_recipients = to_count + cc_count
+
+    # --- Signal 2: Name mention ---
+    # Extract name parts from aliases (e.g. "nate.mcbride@..." → "nate", "mcbride")
+    name_tokens = set()
+    for alias in user_aliases:
+        local = alias.split("@")[0]
+        # Split on dots, underscores, hyphens
+        parts = re.split(r'[._\-]', local)
+        for p in parts:
+            if len(p) >= 3:
+                name_tokens.add(p.lower())
+
+    user_mentioned = False
+    mention_context = ""
+    if name_tokens:
+        # Search in new content only (above first "From:" or "-----Original" marker)
+        new_body = body
+        for marker in ["From:", "-----Original Message", "________________________________"]:
+            idx = body.find(marker)
+            if idx > 0:
+                new_body = body[:idx]
+                break
+
+        for token in name_tokens:
+            pattern = rf'\b{re.escape(token)}\b'
+            match = re.search(pattern, new_body, re.IGNORECASE)
+            if match:
+                user_mentioned = True
+                start = max(0, match.start() - 40)
+                end = min(len(new_body), match.end() + 60)
+                mention_context = new_body[start:end].strip()
+                break
+
+    # --- Signal 3: Subject classification ---
+    subject_lower = subject.lower().strip()
+    if subject_lower.startswith("fw: fw:") or subject_lower.startswith("fwd: fwd:"):
+        subject_type = "chain_forward"
+    elif subject_lower.startswith("fw:") or subject_lower.startswith("fwd:"):
+        subject_type = "forward"
+    elif subject_lower.startswith("re:"):
+        subject_type = "reply"
+    else:
+        subject_type = "new"
+
+    # --- Signal 4: FYI / no-response language ---
+    fyi_patterns = [
+        r'\bfyi\b', r'\bfor your information\b', r'\bfor your reference\b',
+        r'\bfor your records\b', r'\bjust a heads up\b', r'\blooping you in\b',
+        r'\bkeeping you in the loop\b', r'\bfor visibility\b', r'\bfor awareness\b',
+    ]
+    terminal_patterns = [
+        r'^thanks[!.]?\s*$', r'^thank you[!.]?\s*$', r'^got it[!.]?\s*$',
+        r'^will do[!.]?\s*$', r'^sounds good[!.]?\s*$', r'^perfect[!.]?\s*$',
+        r'^noted[!.]?\s*$', r'^acknowledged[!.]?\s*$', r'^received[!.]?\s*$',
+    ]
+    no_response_patterns = [
+        r'\bno action needed\b', r'\bno response necessary\b',
+        r'\bnothing needed from you\b', r'\bno reply needed\b',
+    ]
+
+    # Check new content only for FYI
+    new_body_lower = (new_body if user_mentioned else body[:2000]).lower()
+    fyi_detected = any(re.search(p, new_body_lower) for p in fyi_patterns)
+    no_response_detected = any(re.search(p, new_body_lower) for p in no_response_patterns)
+
+    # Terminal acknowledgments — short messages only
+    body_stripped = body.strip()
+    terminal = False
+    if len(body_stripped) < 80:
+        terminal = any(re.search(p, body_stripped.lower()) for p in terminal_patterns)
+
+    # --- Signal 5: Intent classification ---
+    if terminal:
+        intent_category = "acknowledgment"
+    elif fyi_detected or no_response_detected:
+        intent_category = "informational"
+    elif subject_type == "forward" or subject_type == "chain_forward":
+        intent_category = "informational"
+    elif re.search(r'\b(can you|could you|please|would you|need you to)\b', new_body_lower):
+        intent_category = "direct_request"
+        # Check if request is in new vs quoted content
+    elif re.search(r'\b(update|status|progress|where are we)\b', new_body_lower):
+        intent_category = "status_update"
+    elif re.search(r'\b(schedule|meeting|call|calendar|available)\b', new_body_lower):
+        intent_category = "scheduling"
+    else:
+        intent_category = "unclassified"
+
+    return {
+        "user_position": user_position,
+        "to_count": to_count,
+        "cc_count": cc_count,
+        "total_recipients": total_recipients,
+        "user_mentioned_by_name": user_mentioned,
+        "name_mention_context": mention_context,
+        "subject_type": subject_type,
+        "fyi_language_detected": fyi_detected or no_response_detected,
+        "terminal_acknowledgment": terminal,
+        "intent_category": intent_category,
+        "intent_in_new_content": True,
+        # Signals that need external data — null/fallback states
+        "thread_message_count": None,
+        "user_replies_in_thread": 0,
+        "user_active_in_thread": False,
+        "sender_conditional_response_rate": None,
+        "sender_emails_last_30d": None,
+        "thread_velocity": None,
+        "subsequent_replies_count": 0,
+        "unique_subsequent_responders": 0,
+    }
 
 
 def supabase_row_to_email_data(row):

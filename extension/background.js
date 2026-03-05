@@ -3,20 +3,28 @@
  *
  * Responsibilities:
  *  1. Receive + cache MSAL Exchange token from content script.
- *  2. Maintain WebSocket connection to Flask backend.
- *  3. Execute OWA service.svc commands on behalf of Flask.
- *  4. Alarm-driven reconnect for MV3 idle timeout.
+ *  2. Sync emails to Supabase on a recurring alarm.
+ *  3. Execute OWA service.svc commands (FindItem, GetItem, CreateItem).
+ *  4. Listen for drafts via Supabase Realtime and write to Outlook.
+ *  5. Alarm-driven reconnect for MV3 idle timeout.
  */
+
+// Load Supabase modules (must be synchronous, at top of SW)
+importScripts(
+  "supabase-config.js",
+  "supabase-auth.js",
+  "supabase-rest.js",
+  "supabase-realtime.js"
+);
 
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
 
-const WS_URL = "ws://localhost:5000/extension";
-const ALARM_NAME = "ws-reconnect";
-const ALARM_PERIOD_MIN = 0.42; // ~25 s
-const MAX_BACKOFF_MS = 5 * 60 * 1000; // 5 min
-const BASE_BACKOFF_MS = 25_000;
+const EMAIL_SYNC_ALARM = "email-sync";
+const EMAIL_SYNC_PERIOD_MIN = 5;   // 5 min
+const MAX_CATCHUP_EMAILS = 500;    // cap for first-time or stale syncs
+const MAX_CATCHUP_DAYS = 30;       // how far back to look on first sync
 
 // OWA endpoint templates
 const OWA_ENDPOINTS = {
@@ -29,10 +37,23 @@ const OWA_ENDPOINTS = {
 // State
 // ---------------------------------------------------------------------------
 
-let ws = null;
 let token = null;        // { token, expiresOn, cachedAt, clientId, origin }
-let backoffMs = 0;
 let lastCommand = null;  // { action, timestamp }
+let isSyncing = false;   // lock to prevent concurrent Supabase syncs
+let lastSyncTime = null; // ISO string of last successful sync
+
+/** Persist lastSyncTime to chrome.storage.local. */
+function persistSyncTime() {
+  if (lastSyncTime) {
+    chrome.storage.local.set({ lastSyncTime });
+  }
+}
+
+/** Restore lastSyncTime from chrome.storage.local on SW wake. */
+async function restoreSyncTime() {
+  const result = await chrome.storage.local.get("lastSyncTime");
+  if (result.lastSyncTime) lastSyncTime = result.lastSyncTime;
+}
 
 // ---------------------------------------------------------------------------
 // Badge helpers
@@ -40,11 +61,11 @@ let lastCommand = null;  // { action, timestamp }
 
 function setBadge(status) {
   const map = {
-    connected: { text: "", color: "#22c55e" },      // green
-    disconnected: { text: "!", color: "#ef4444" },   // red
-    no_token: { text: "?", color: "#eab308" },       // yellow
+    ok: { text: "", color: "#22c55e" },          // green — token valid
+    no_token: { text: "?", color: "#eab308" },   // yellow — no token
+    error: { text: "!", color: "#ef4444" },       // red — token expired
   };
-  const cfg = map[status] || map.disconnected;
+  const cfg = map[status] || map.no_token;
   chrome.action.setBadgeText({ text: cfg.text });
   chrome.action.setBadgeBackgroundColor({ color: cfg.color });
 }
@@ -52,10 +73,10 @@ function setBadge(status) {
 function updateBadge() {
   if (!token || !token.token) {
     setBadge("no_token");
-  } else if (!ws || ws.readyState !== WebSocket.OPEN) {
-    setBadge("disconnected");
+  } else if (isTokenExpired()) {
+    setBadge("error");
   } else {
-    setBadge("connected");
+    setBadge("ok");
   }
 }
 
@@ -491,7 +512,6 @@ async function handlePing() {
     ok: true,
     has_token: !!(token && token.token),
     token_expired: isTokenExpired(),
-    ws_connected: ws && ws.readyState === WebSocket.OPEN,
   };
 }
 
@@ -530,86 +550,138 @@ async function dispatchCommand(command) {
   }
 }
 
+
 // ---------------------------------------------------------------------------
-// WebSocket connection
+// Supabase email sync
 // ---------------------------------------------------------------------------
 
-function connectWebSocket() {
-  if (ws && ws.readyState === WebSocket.OPEN) return;
+async function syncEmailsToSupabase() {
+  if (isSyncing) return { skipped: true };
+  isSyncing = true;
 
   try {
-    ws = new WebSocket(WS_URL);
-  } catch (_) {
-    ws = null;
-    updateBadge();
+    // Check both tokens exist
+    if (!token || !token.token || isTokenExpired()) {
+      return { error: "No valid Outlook token" };
+    }
+
+    const session = await getSupabaseSession();
+    if (!session || !session.access_token) {
+      return { error: "Not logged in to Supabase" };
+    }
+
+    const userId = session.user.id;
+
+    // Determine date filter: use last sync time, or fall back to MAX_CATCHUP_DAYS
+    let startDate;
+    if (lastSyncTime) {
+      startDate = lastSyncTime;
+    } else {
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - MAX_CATCHUP_DAYS);
+      startDate = cutoff.toISOString();
+    }
+
+    // Set limit: small for incremental syncs, larger for catch-up
+    const maxEmails = lastSyncTime ? 50 : MAX_CATCHUP_EMAILS;
+
+    // Fetch emails via OWA with date filter
+    const result = await handleGetEmails({
+      folder: "inbox",
+      max_scan: maxEmails,
+      flagged_only: false,
+      start_date: startDate,
+    });
+
+    if (!result.emails || result.emails.length === 0) {
+      lastSyncTime = new Date().toISOString();
+      persistSyncTime();
+      return { synced: 0 };
+    }
+
+    // Enrich each email with body/recipients via GetItem
+    const enriched = [];
+    for (const email of result.emails) {
+      try {
+        const detail = await handleGetItem({
+          message_id: email.email_ref,
+          change_key: email._change_key,
+        });
+        enriched.push(detail);
+      } catch (err) {
+        // If GetItem fails for one email, still push the basic info
+        enriched.push(email);
+      }
+    }
+
+    // Transform to Supabase row format
+    const rows = enriched.map((e) => ({
+      user_id: userId,
+      email_ref: e.email_ref,
+      subject: e.subject || "",
+      sender: e.sender || "",
+      sender_name: e.sender_name || "",
+      sender_email: e.sender_email || "",
+      received_time: e.received_time || null,
+      body: (e.body || "").slice(0, 50000), // cap body size
+      has_attachments: e.has_attachments || false,
+      attachment_names: e.attachment_names || [],
+      folder: e.folder || "Inbox",
+      flag_status: e.flag_status || "NotFlagged",
+      conversation_id: e.conversation_id || null,
+      conversation_topic: e.conversation_topic || null,
+      to_field: e.to_field || "",
+      cc_field: e.cc_field || "",
+      importance: ["Low", "Normal", "High"][e.importance] || "Normal",
+      recipients: e.recipients || [],
+      status: "unprocessed",
+    }));
+
+    // Upsert to Supabase
+    await pushEmails(rows);
+    lastSyncTime = new Date().toISOString();
+    persistSyncTime();
+    console.log(`Synced ${rows.length} emails to Supabase`);
+    return { synced: rows.length };
+  } catch (err) {
+    console.error("Email sync error:", err.message);
+    return { error: err.message };
+  } finally {
+    isSyncing = false;
+  }
+}
+
+/**
+ * Initialize Supabase features — start sync alarm + Realtime.
+ * Called on startup and when session changes.
+ */
+async function initSupabase() {
+  const session = await getSupabaseSession();
+  if (!session || !session.access_token) {
+    disconnectRealtime();
     return;
   }
 
-  ws.onopen = () => {
-    backoffMs = 0;
-    updateBadge();
-    // Announce ourselves with token status
-    ws.send(JSON.stringify({
-      type: "extension_hello",
-      has_token: !!(token && token.token),
-      token_expired: isTokenExpired(),
-    }));
-  };
+  // Start email sync alarm
+  chrome.alarms.create(EMAIL_SYNC_ALARM, { periodInMinutes: EMAIL_SYNC_PERIOD_MIN });
 
-  ws.onmessage = async (event) => {
-    let command;
-    try {
-      command = JSON.parse(event.data);
-    } catch (_) {
-      return;
+  // Connect Realtime for draft listening
+  if (!isRealtimeConnected()) {
+    const accessToken = await getValidAccessToken();
+    if (accessToken) {
+      connectRealtime(session.user.id, accessToken);
     }
-
-    const response = await dispatchCommand(command);
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify(response));
-    }
-  };
-
-  ws.onclose = () => {
-    ws = null;
-    updateBadge();
-  };
-
-  ws.onerror = () => {
-    ws = null;
-    updateBadge();
-  };
+  }
 }
 
 // ---------------------------------------------------------------------------
-// Alarm-driven reconnect with exponential backoff
+// Alarm-driven email sync
 // ---------------------------------------------------------------------------
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name !== ALARM_NAME) return;
-
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    return; // alive, nothing to do
+  if (alarm.name === EMAIL_SYNC_ALARM) {
+    syncEmailsToSupabase();
   }
-
-  // Backoff check
-  if (backoffMs > 0) {
-    // Decrease backoff by alarm interval and skip if still waiting
-    backoffMs = Math.max(0, backoffMs - ALARM_PERIOD_MIN * 60 * 1000);
-    if (backoffMs > 0) return;
-  }
-
-  connectWebSocket();
-
-  // If connection fails immediately, increase backoff
-  setTimeout(() => {
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      backoffMs = Math.min(
-        (backoffMs || BASE_BACKOFF_MS) * 2,
-        MAX_BACKOFF_MS
-      );
-    }
-  }, 3000);
 });
 
 // ---------------------------------------------------------------------------
@@ -634,10 +706,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       token_expires: token?.expiresOn
         ? new Date(token.expiresOn * 1000).toISOString()
         : null,
-      ws_connected: ws && ws.readyState === WebSocket.OPEN,
       last_command: lastCommand,
-      backoff_ms: backoffMs,
+      // Supabase state
+      last_sync: lastSyncTime,
+      realtime_connected: isRealtimeConnected(),
+      is_syncing: isSyncing,
     });
+  } else if (msg.type === "supabaseSessionChanged") {
+    initSupabase();
+    sendResponse({ ok: true });
+  } else if (msg.type === "syncNow") {
+    // Manual sync triggered from popup
+    syncEmailsToSupabase().then((result) => {
+      sendResponse(result);
+    });
+    return true; // async response
   }
   return false; // synchronous response
 });
@@ -648,11 +731,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 (async () => {
   await restoreToken();
+  await restoreSyncTime();
   updateBadge();
 
-  // Start alarm for WS reconnect
-  chrome.alarms.create(ALARM_NAME, { periodInMinutes: ALARM_PERIOD_MIN });
-
-  // Attempt initial WS connection
-  connectWebSocket();
+  // Initialize Supabase features (sync alarm + Realtime)
+  await initSupabase();
 })();
