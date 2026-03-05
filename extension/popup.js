@@ -231,6 +231,10 @@ document.getElementById("syncNowBtn").addEventListener("click", () => {
   });
 });
 
+document.getElementById("visitWebBtn").addEventListener("click", () => {
+  chrome.tabs.create({ url: "https://email-monitor-gray.vercel.app/app/dashboard.html" });
+});
+
 // Allow Enter key to submit
 document.getElementById("authPassword").addEventListener("keydown", (e) => {
   if (e.key === "Enter") document.getElementById("loginBtn").click();

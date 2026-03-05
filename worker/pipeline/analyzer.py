@@ -100,7 +100,7 @@ class ClaudeAnalyzer:
             attachments = email_data.get("attachment_names", [])
             body = email_data.get("body", "") or ""
 
-            date_str = received.strftime("%Y-%m-%d %H:%M") if received else "unknown"
+            date_str = str(received)[:16] if received else "unknown"
             attach_str = ", ".join(attachments) if attachments else "None"
 
             if len(body) > self.max_body_chars:
