@@ -84,6 +84,11 @@ def run_cycle(db: SupabaseWorkerClient):
             logger.warning(f"No profile for user {user_id}, skipping")
             continue
 
+        # Only process if user is actively logged in
+        if not profile.get("worker_active", False):
+            logger.info(f"User {user_id[:8]}...: worker_active=false, skipping")
+            continue
+
         # Atomic claim
         claimed = db.claim_unprocessed_emails(user_id, limit=BATCH_SIZE)
         if not claimed:

@@ -1,18 +1,17 @@
-/** Popup script — auth flow + status dashboard. */
-
-// ---------------------------------------------------------------------------
-// Supabase config (duplicated here since popup can't use importScripts)
-// ---------------------------------------------------------------------------
-
-const SUPABASE_URL = "https://frbvdoszenrrlswegsxq.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_QopttEruBVdosoVJGy4j2A__5CFfx8W";
+/** Popup script — auth flow + status dashboard.
+ *  Depends on: supabase-config.js (loaded via <script> in popup.html)
+ */
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function dot(color) {
-  return `<span class="dot ${color}"></span>`;
+function setStatusDot(el, color, text) {
+  el.textContent = "";
+  const span = document.createElement("span");
+  span.className = `dot ${color}`;
+  el.appendChild(span);
+  el.appendChild(document.createTextNode(text));
 }
 
 function relativeTime(ts) {
@@ -52,6 +51,23 @@ async function authRequest(endpoint, body) {
     throw new Error(data.error_description || data.msg || data.error || "Auth failed");
   }
   return data;
+}
+
+async function setWorkerActive(accessToken, userId, active) {
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ worker_active: active }),
+    });
+    if (!resp.ok) console.warn("Failed to set worker_active:", resp.status);
+  } catch (e) {
+    console.warn("Failed to set worker_active:", e);
+  }
 }
 
 function sessionFromResponse(data) {
@@ -94,9 +110,9 @@ function showStatusView(session) {
   const now = Math.floor(Date.now() / 1000);
   const authEl = document.getElementById("supabaseAuth");
   if (session.expires_at > now) {
-    authEl.innerHTML = `${dot("green")}Authenticated`;
+    setStatusDot(authEl, "green", "Authenticated");
   } else {
-    authEl.innerHTML = `${dot("yellow")}Token expired`;
+    setStatusDot(authEl, "yellow", "Token expired");
   }
 
   // Refresh the rest of the dashboard
@@ -186,6 +202,9 @@ document.getElementById("loginBtn").addEventListener("click", async () => {
 
     await chrome.storage.local.set({ supabaseSession: session });
 
+    // Activate worker processing
+    await setWorkerActive(session.access_token, session.user.id, true);
+
     // Notify background to initialize Supabase features
     chrome.runtime.sendMessage({ type: "supabaseSessionChanged" });
 
@@ -213,6 +232,13 @@ document.getElementById("toggleAuth").addEventListener("click", () => {
 });
 
 document.getElementById("logoutBtn").addEventListener("click", async () => {
+  // Deactivate worker processing before clearing session
+  const result = await chrome.storage.local.get("supabaseSession");
+  const session = result.supabaseSession;
+  if (session?.access_token && session?.user?.id) {
+    await setWorkerActive(session.access_token, session.user.id, false);
+  }
+
   await chrome.storage.local.remove("supabaseSession");
   chrome.runtime.sendMessage({ type: "supabaseSessionChanged" });
   showLoginView();
