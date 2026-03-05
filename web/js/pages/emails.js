@@ -246,6 +246,9 @@ function renderEmailCard(email) {
     return `
         <div class="em-email-card${isCompleted ? " em-email-completed" : ""}" data-id="${email.id}">
             <div class="em-email-header">
+                <button class="em-check-btn${isCompleted ? " em-check-done" : ""}" data-email-id="${email.id}" title="${isCompleted ? "Completed" : "Mark done"}">
+                    ${isCompleted ? "&#10003;" : ""}
+                </button>
                 <div class="em-email-header-content">
                     <div>
                         <div class="em-email-sender">${escapeHtml(email.sender_name || email.sender || "Unknown")}</div>
@@ -254,7 +257,6 @@ function renderEmailCard(email) {
                     <div class="em-email-header-badges">
                         <div class="em-email-meta">${formatDate(email.received_time)} ${priorityBadge}</div>
                         ${draft ? `<span class="em-badge em-badge-blue">Draft</span>` : ""}
-                        ${isCompleted ? `<span class="em-badge em-badge-green">Done</span>` : ""}
                     </div>
                 </div>
             </div>
@@ -275,7 +277,7 @@ function renderEmailCard(email) {
 
                 ${!isCompleted ? `
                     <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--em-slate-200);">
-                        <button class="em-btn em-btn-secondary em-btn-sm mark-done-btn" data-email-id="${email.id}">Mark done</button>
+                        <button class="em-btn em-btn-secondary em-btn-sm mark-done-btn" data-email-id="${email.id}">Mark as done</button>
                     </div>
                 ` : ""}
             </div>
@@ -293,6 +295,34 @@ function bindCardEvents() {
         card.addEventListener("click", (e) => {
             if (e.target.closest("button") || e.target.closest("textarea") || e.target.closest("input")) return;
             card.classList.toggle("expanded");
+        });
+    });
+
+    // Check button — quick mark done from card header
+    document.querySelectorAll(".em-check-btn:not(.em-check-done)").forEach(btn => {
+        btn.addEventListener("click", async (e) => {
+            e.stopPropagation();
+            const emailId = btn.dataset.emailId;
+            btn.disabled = true;
+            btn.classList.add("em-check-saving");
+
+            try {
+                const { error } = await supabase
+                    .from("emails")
+                    .update({ status: "completed" })
+                    .eq("id", emailId);
+
+                if (error) throw error;
+
+                const email = allEmails.find(em => em.id === emailId);
+                if (email) email.status = "completed";
+                renderEmails();
+                showToast("Marked as done");
+            } catch (err) {
+                btn.disabled = false;
+                btn.classList.remove("em-check-saving");
+                showError(`Failed to mark completed: ${err.message}`);
+            }
         });
     });
 
