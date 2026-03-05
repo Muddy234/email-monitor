@@ -17,6 +17,7 @@ await renderNav();
 const PAGE_SIZE = 50;
 let allEmails = [];
 let totalCount = 0;
+let groupTotals = { "Drafts Ready": 0, "Needs Response": 0, "Other": 0, "Completed": 0 };
 let page = parseInt(getParam("page", "1"), 10);
 let searchQuery = getParam("q", "");
 let activeSection = getParam("section", ""); // from dashboard links
@@ -56,19 +57,45 @@ refreshBtn.addEventListener("click", () => {
 // Load emails from Supabase
 // -------------------------------------------------------------------------
 
-async function loadEmails() {
+async function loadGroupTotals() {
     try {
-        const offset = (page - 1) * PAGE_SIZE;
-        const { data, error, count } = await supabase
+        const { data, error } = await supabase
             .from("emails")
-            .select("*, classifications(*), drafts(*)", { count: "exact" })
-            .order("received_time", { ascending: false })
-            .range(offset, offset + PAGE_SIZE - 1);
+            .select("id, status, classifications(needs_response), drafts(id)");
 
         if (error) throw error;
 
-        allEmails = data || [];
-        totalCount = count || 0;
+        const totals = { "Drafts Ready": 0, "Needs Response": 0, "Other": 0, "Completed": 0 };
+        for (const e of (data || [])) {
+            if (e.status === "completed") { totals["Completed"]++; continue; }
+            const hasDraft = e.drafts && e.drafts.length > 0;
+            const needsResponse = e.classifications?.some(c => c.needs_response);
+            if (hasDraft) totals["Drafts Ready"]++;
+            else if (needsResponse) totals["Needs Response"]++;
+            else totals["Other"]++;
+        }
+        groupTotals = totals;
+    } catch (err) {
+        // Non-critical — fall back to page-level counts
+    }
+}
+
+async function loadEmails() {
+    try {
+        const offset = (page - 1) * PAGE_SIZE;
+        const [, emailsResult] = await Promise.all([
+            loadGroupTotals(),
+            supabase
+                .from("emails")
+                .select("*, classifications(*), drafts(*)", { count: "exact" })
+                .order("received_time", { ascending: false })
+                .range(offset, offset + PAGE_SIZE - 1),
+        ]);
+
+        if (emailsResult.error) throw emailsResult.error;
+
+        allEmails = emailsResult.data || [];
+        totalCount = emailsResult.count || 0;
         renderEmails();
         renderPagination();
     } catch (err) {
@@ -146,7 +173,9 @@ function renderEmails() {
         const sectionId = Object.entries(SECTION_MAP).find(([, v]) => v === groupName)?.[0] || "";
 
         html += `<div class="em-group em-fade-in" id="section-${sectionId}">`;
-        html += `<div class="em-group-title">${groupName}<span class="em-group-count">${emails.length}</span></div>`;
+        const total = groupTotals[groupName] || emails.length;
+        const countLabel = total > emails.length ? `${emails.length} of ${total}` : `${total}`;
+        html += `<div class="em-group-title">${groupName}<span class="em-group-count">${countLabel}</span></div>`;
         html += `<div class="em-email-list">`;
 
         for (const email of emails) {

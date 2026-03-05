@@ -81,16 +81,33 @@ async function loadMetrics() {
     const start = rangeStart();
 
     try {
-        const [emailsRes, needsResponseRes, draftsRes, runsRes] = await Promise.all([
-            supabase.from("emails").select("*", { count: "exact", head: true }).gte("created_at", start),
-            supabase.from("classifications").select("*", { count: "exact", head: true }).eq("needs_response", true).gte("created_at", start),
-            supabase.from("drafts").select("*", { count: "exact", head: true }).gte("created_at", start),
-            supabase.from("pipeline_runs").select("emails_scanned, emails_processed, drafts_generated").gte("started_at", start),
+        // Fetch emails with classification + draft status so counts match emails page logic
+        const [emailsRes, runsRes] = await Promise.all([
+            supabase
+                .from("emails")
+                .select("id, status, classifications(needs_response), drafts(id)")
+                .gte("created_at", start),
+            supabase
+                .from("pipeline_runs")
+                .select("emails_scanned, emails_processed, drafts_generated")
+                .gte("started_at", start),
         ]);
 
-        const emailCount = emailsRes.count || 0;
-        const needsResponseCount = needsResponseRes.count || 0;
-        const draftCount = draftsRes.count || 0;
+        if (emailsRes.error) throw emailsRes.error;
+
+        const emails = emailsRes.data || [];
+        const emailCount = emails.length;
+
+        // Count using same grouping logic as emails page
+        let needsResponseCount = 0;
+        let draftCount = 0;
+        for (const e of emails) {
+            if (e.status === "completed") continue;
+            const hasDraft = e.drafts && e.drafts.length > 0;
+            const needsResponse = e.classifications?.some(c => c.needs_response);
+            if (hasDraft) draftCount++;
+            else if (needsResponse) needsResponseCount++;
+        }
 
         // Aggregate pipeline funnel
         let scanned = 0, processed = 0, generated = 0;
