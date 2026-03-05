@@ -1,0 +1,770 @@
+/* ================================================================
+   Email Monitor Dashboard
+   Design tokens inherited from landing.css (--lp-* vars)
+   Dashboard classes prefixed with em- to avoid collisions
+   ================================================================ */
+
+/* --- 1. Dashboard Design Tokens --- */
+:root {
+    --em-sidebar-width: 240px;
+    --em-topbar-height: 56px;
+    --em-font: 'Inter', system-ui, -apple-system, sans-serif;
+
+    --em-slate-900: #0F172A;
+    --em-slate-800: #1E293B;
+    --em-slate-700: #334155;
+    --em-slate-500: #64748B;
+    --em-slate-400: #94A3B8;
+    --em-slate-300: #CBD5E1;
+    --em-slate-200: #E2E8F0;
+    --em-slate-100: #F1F5F9;
+    --em-slate-50:  #F8FAFC;
+    --em-white:     #FFFFFF;
+
+    --em-blue-700:  #1D4ED8;
+    --em-blue-600:  #2563EB;
+    --em-blue-500:  #3B82F6;
+    --em-blue-100:  #DBEAFE;
+    --em-blue-50:   #EFF6FF;
+
+    --em-emerald-600: #059669;
+    --em-emerald-500: #10B981;
+    --em-emerald-100: #D1FAE5;
+    --em-emerald-50:  #ECFDF5;
+
+    --em-amber-600: #D97706;
+    --em-amber-100: #FEF3C7;
+    --em-amber-50:  #FFFBEB;
+
+    --em-red-600:   #DC2626;
+    --em-red-100:   #FEE2E2;
+    --em-red-50:    #FEF2F2;
+
+    --em-radius: 12px;
+    --em-radius-sm: 8px;
+    --em-radius-xs: 4px;
+    --em-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
+    --em-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+    --em-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+    --em-transition: 150ms ease;
+}
+
+/* --- 2. Reset for app pages --- */
+.em-app {
+    margin: 0;
+    padding: 0;
+    font-family: var(--em-font);
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--em-slate-800);
+    background: var(--em-slate-50);
+    min-height: 100vh;
+    display: flex;
+}
+
+/* --- 3. Layout: Sidebar + Main --- */
+.em-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: var(--em-sidebar-width);
+    height: 100vh;
+    background: var(--em-slate-900);
+    color: var(--em-slate-300);
+    display: flex;
+    flex-direction: column;
+    padding: 24px 0;
+    z-index: 100;
+}
+
+.em-sidebar-brand {
+    padding: 0 20px 24px;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--em-white);
+    letter-spacing: -0.01em;
+}
+
+.em-sidebar-nav {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 0 8px;
+}
+
+.em-sidebar-link {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: var(--em-radius-sm);
+    color: var(--em-slate-400);
+    text-decoration: none;
+    font-size: 14px;
+    transition: background var(--em-transition), color var(--em-transition);
+}
+
+.em-sidebar-link:hover {
+    background: var(--em-slate-800);
+    color: var(--em-slate-200);
+}
+
+.em-sidebar-link.active {
+    background: var(--em-slate-800);
+    color: var(--em-white);
+}
+
+.em-sidebar-link svg {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+}
+
+.em-sidebar-footer {
+    padding: 16px 20px;
+    border-top: 1px solid var(--em-slate-700);
+    margin-top: auto;
+}
+
+.em-sidebar-email {
+    font-size: 12px;
+    color: var(--em-slate-400);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-bottom: 8px;
+}
+
+.em-sidebar-logout {
+    background: none;
+    border: none;
+    color: var(--em-slate-500);
+    font-size: 13px;
+    cursor: pointer;
+    padding: 0;
+    font-family: var(--em-font);
+}
+
+.em-sidebar-logout:hover {
+    color: var(--em-red-600);
+}
+
+.em-main {
+    margin-left: var(--em-sidebar-width);
+    flex: 1;
+    min-height: 100vh;
+    padding: 32px;
+}
+
+.em-page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 24px;
+}
+
+.em-page-title {
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--em-slate-900);
+    margin: 0;
+}
+
+/* --- 4. Cards --- */
+.em-card {
+    background: var(--em-white);
+    border: 1px solid var(--em-slate-200);
+    border-radius: var(--em-radius);
+    padding: 20px;
+    box-shadow: var(--em-shadow-sm);
+}
+
+.em-card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.em-metric-card {
+    background: var(--em-white);
+    border: 1px solid var(--em-slate-200);
+    border-radius: var(--em-radius);
+    padding: 20px;
+    box-shadow: var(--em-shadow-sm);
+}
+
+.em-metric-label {
+    font-size: 12px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--em-slate-500);
+    margin-bottom: 8px;
+}
+
+.em-metric-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--em-slate-900);
+    line-height: 1;
+}
+
+/* --- 5. Badges --- */
+.em-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.5;
+}
+
+.em-badge-blue {
+    background: var(--em-blue-100);
+    color: var(--em-blue-700);
+}
+
+.em-badge-green {
+    background: var(--em-emerald-100);
+    color: var(--em-emerald-600);
+}
+
+.em-badge-amber {
+    background: var(--em-amber-100);
+    color: var(--em-amber-600);
+}
+
+.em-badge-red {
+    background: var(--em-red-100);
+    color: var(--em-red-600);
+}
+
+.em-badge-slate {
+    background: var(--em-slate-100);
+    color: var(--em-slate-700);
+}
+
+/* --- 6. Tables --- */
+.em-table-wrap {
+    overflow-x: auto;
+}
+
+.em-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.em-table th {
+    text-align: left;
+    padding: 10px 12px;
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--em-slate-500);
+    border-bottom: 2px solid var(--em-slate-200);
+    white-space: nowrap;
+}
+
+.em-table td {
+    padding: 12px;
+    border-bottom: 1px solid var(--em-slate-100);
+    color: var(--em-slate-700);
+    vertical-align: top;
+}
+
+.em-table tbody tr:hover {
+    background: var(--em-slate-50);
+}
+
+.em-table-clickable {
+    cursor: pointer;
+}
+
+/* --- 7. Buttons --- */
+.em-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border-radius: var(--em-radius-sm);
+    font-size: 13px;
+    font-weight: 500;
+    font-family: var(--em-font);
+    border: none;
+    cursor: pointer;
+    transition: background var(--em-transition), opacity var(--em-transition);
+    line-height: 1.4;
+}
+
+.em-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.em-btn-primary {
+    background: var(--em-blue-600);
+    color: var(--em-white);
+}
+
+.em-btn-primary:hover:not(:disabled) {
+    background: var(--em-blue-700);
+}
+
+.em-btn-secondary {
+    background: var(--em-slate-100);
+    color: var(--em-slate-700);
+}
+
+.em-btn-secondary:hover:not(:disabled) {
+    background: var(--em-slate-200);
+}
+
+.em-btn-success {
+    background: var(--em-emerald-600);
+    color: var(--em-white);
+}
+
+.em-btn-success:hover:not(:disabled) {
+    background: var(--em-emerald-500);
+}
+
+.em-btn-danger {
+    background: var(--em-red-600);
+    color: var(--em-white);
+}
+
+.em-btn-sm {
+    padding: 4px 10px;
+    font-size: 12px;
+}
+
+/* --- 8. Filter Bar --- */
+.em-filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.em-filter-btn {
+    padding: 6px 14px;
+    border-radius: 9999px;
+    font-size: 13px;
+    font-weight: 500;
+    font-family: var(--em-font);
+    border: 1px solid var(--em-slate-200);
+    background: var(--em-white);
+    color: var(--em-slate-600);
+    cursor: pointer;
+    transition: all var(--em-transition);
+}
+
+.em-filter-btn:hover {
+    border-color: var(--em-blue-500);
+    color: var(--em-blue-600);
+}
+
+.em-filter-btn.active {
+    background: var(--em-blue-600);
+    border-color: var(--em-blue-600);
+    color: var(--em-white);
+}
+
+/* --- 9. Search Input --- */
+.em-search {
+    padding: 8px 12px;
+    border: 1px solid var(--em-slate-200);
+    border-radius: var(--em-radius-sm);
+    font-size: 13px;
+    font-family: var(--em-font);
+    color: var(--em-slate-800);
+    background: var(--em-white);
+    width: 260px;
+    outline: none;
+    transition: border-color var(--em-transition);
+}
+
+.em-search:focus {
+    border-color: var(--em-blue-500);
+}
+
+.em-search::placeholder {
+    color: var(--em-slate-400);
+}
+
+/* --- 10. Email List --- */
+.em-email-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.em-email-card {
+    background: var(--em-white);
+    border: 1px solid var(--em-slate-200);
+    border-radius: var(--em-radius);
+    padding: 16px 20px;
+    cursor: pointer;
+    transition: box-shadow var(--em-transition), border-color var(--em-transition);
+}
+
+.em-email-card:hover {
+    box-shadow: var(--em-shadow-md);
+    border-color: var(--em-slate-300);
+}
+
+.em-email-card.expanded {
+    border-color: var(--em-blue-500);
+}
+
+.em-email-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.em-email-sender {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--em-slate-900);
+}
+
+.em-email-subject {
+    font-size: 13px;
+    color: var(--em-slate-700);
+    margin-top: 2px;
+}
+
+.em-email-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--em-slate-500);
+    margin-top: 6px;
+}
+
+.em-email-action {
+    font-size: 13px;
+    color: var(--em-slate-600);
+    margin-top: 4px;
+    font-style: italic;
+}
+
+.em-email-detail {
+    display: none;
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--em-slate-100);
+}
+
+.em-email-card.expanded .em-email-detail {
+    display: block;
+}
+
+.em-email-body {
+    font-size: 13px;
+    color: var(--em-slate-700);
+    line-height: 1.6;
+    white-space: pre-wrap;
+    max-height: 300px;
+    overflow-y: auto;
+    margin-bottom: 16px;
+}
+
+.em-email-section-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--em-slate-500);
+    margin-bottom: 6px;
+}
+
+/* --- 11. Draft Editor --- */
+.em-draft-editor {
+    margin-top: 12px;
+}
+
+.em-draft-textarea {
+    width: 100%;
+    min-height: 120px;
+    padding: 12px;
+    border: 1px solid var(--em-slate-200);
+    border-radius: var(--em-radius-sm);
+    font-size: 13px;
+    font-family: var(--em-font);
+    color: var(--em-slate-800);
+    line-height: 1.6;
+    resize: vertical;
+    outline: none;
+    transition: border-color var(--em-transition);
+    box-sizing: border-box;
+}
+
+.em-draft-textarea:focus {
+    border-color: var(--em-blue-500);
+}
+
+.em-draft-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.em-saved-msg {
+    font-size: 12px;
+    color: var(--em-emerald-600);
+    font-weight: 500;
+    opacity: 0;
+    transition: opacity var(--em-transition);
+}
+
+.em-saved-msg.visible {
+    opacity: 1;
+}
+
+/* --- 12. Group Headers --- */
+.em-group {
+    margin-bottom: 32px;
+}
+
+.em-group-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--em-slate-700);
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.em-group-count {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--em-slate-500);
+    background: var(--em-slate-100);
+    padding: 1px 8px;
+    border-radius: 9999px;
+}
+
+/* --- 13. Loading Skeletons --- */
+.em-skeleton {
+    background: linear-gradient(90deg, var(--em-slate-100) 25%, var(--em-slate-50) 50%, var(--em-slate-100) 75%);
+    background-size: 200% 100%;
+    animation: em-pulse 1.5s ease-in-out infinite;
+    border-radius: var(--em-radius-sm);
+}
+
+@keyframes em-pulse {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+.em-skeleton-card {
+    height: 100px;
+    border-radius: var(--em-radius);
+}
+
+.em-skeleton-row {
+    height: 48px;
+    margin-bottom: 8px;
+}
+
+.em-skeleton-text {
+    height: 16px;
+    margin-bottom: 8px;
+    width: 60%;
+}
+
+/* --- 14. Error Banner --- */
+.em-error-banner {
+    display: none;
+    background: var(--em-red-50);
+    border: 1px solid var(--em-red-100);
+    border-radius: var(--em-radius-sm);
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    color: var(--em-red-600);
+    font-size: 13px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.em-error-banner.visible {
+    display: flex;
+}
+
+.em-error-dismiss {
+    background: none;
+    border: none;
+    color: var(--em-red-600);
+    cursor: pointer;
+    font-size: 18px;
+    padding: 0;
+    line-height: 1;
+}
+
+/* --- 15. Empty State --- */
+.em-empty {
+    text-align: center;
+    padding: 48px 20px;
+    color: var(--em-slate-500);
+    font-size: 14px;
+}
+
+.em-empty-icon {
+    font-size: 32px;
+    margin-bottom: 12px;
+    opacity: 0.5;
+}
+
+/* --- 16. Pagination --- */
+.em-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 20px;
+    font-size: 13px;
+    color: var(--em-slate-500);
+}
+
+/* --- 17. Expandable Row Detail --- */
+.em-detail-row {
+    display: none;
+}
+
+.em-detail-row.visible {
+    display: table-row;
+}
+
+.em-detail-cell {
+    padding: 12px 12px 16px;
+    background: var(--em-slate-50);
+    font-size: 12px;
+    color: var(--em-slate-700);
+    white-space: pre-wrap;
+    line-height: 1.6;
+}
+
+/* --- 18. Login Page --- */
+.em-login-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    background: var(--em-slate-50);
+    font-family: var(--em-font);
+}
+
+.em-login-card {
+    background: var(--em-white);
+    border: 1px solid var(--em-slate-200);
+    border-radius: var(--em-radius);
+    padding: 40px;
+    width: 100%;
+    max-width: 400px;
+    box-shadow: var(--em-shadow-md);
+}
+
+.em-login-title {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--em-slate-900);
+    margin: 0 0 4px;
+}
+
+.em-login-subtitle {
+    font-size: 13px;
+    color: var(--em-slate-500);
+    margin: 0 0 24px;
+}
+
+.em-form-group {
+    margin-bottom: 16px;
+}
+
+.em-form-label {
+    display: block;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--em-slate-700);
+    margin-bottom: 4px;
+}
+
+.em-form-input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--em-slate-200);
+    border-radius: var(--em-radius-sm);
+    font-size: 14px;
+    font-family: var(--em-font);
+    color: var(--em-slate-800);
+    outline: none;
+    box-sizing: border-box;
+    transition: border-color var(--em-transition);
+}
+
+.em-form-input:focus {
+    border-color: var(--em-blue-500);
+}
+
+.em-form-error {
+    display: none;
+    background: var(--em-red-50);
+    border: 1px solid var(--em-red-100);
+    border-radius: var(--em-radius-sm);
+    padding: 8px 12px;
+    color: var(--em-red-600);
+    font-size: 13px;
+    margin-bottom: 16px;
+}
+
+.em-form-error.visible {
+    display: block;
+}
+
+.em-login-toggle {
+    display: block;
+    text-align: center;
+    margin-top: 16px;
+    font-size: 13px;
+    color: var(--em-blue-600);
+    cursor: pointer;
+    background: none;
+    border: none;
+    font-family: var(--em-font);
+}
+
+.em-login-toggle:hover {
+    text-decoration: underline;
+}
+
+/* --- 19. Responsive --- */
+@media (max-width: 768px) {
+    .em-sidebar {
+        display: none;
+    }
+
+    .em-main {
+        margin-left: 0;
+        padding: 20px;
+    }
+
+    .em-card-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .em-search {
+        width: 100%;
+    }
+}

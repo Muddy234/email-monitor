@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login — Email Monitor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+    <div class="em-login-wrap">
+        <div class="em-login-card">
+            <h1 class="em-login-title">Email Monitor</h1>
+            <p class="em-login-subtitle">Sign in to your dashboard</p>
+
+            <div id="authError" class="em-form-error"></div>
+
+            <div class="em-form-group">
+                <label class="em-form-label" for="authEmail">Email</label>
+                <input class="em-form-input" type="email" id="authEmail" placeholder="you@company.com" autocomplete="email">
+            </div>
+
+            <div class="em-form-group">
+                <label class="em-form-label" for="authPassword">Password</label>
+                <input class="em-form-input" type="password" id="authPassword" placeholder="Password" autocomplete="current-password">
+            </div>
+
+            <button class="em-btn em-btn-primary" id="loginBtn" style="width: 100%; justify-content: center;">Log In</button>
+
+            <button class="em-login-toggle" id="toggleAuth">Don't have an account? Sign up</button>
+        </div>
+    </div>
+
+    <script type="module" src="/js/pages/login.js"></script>
+</body>
+</html>

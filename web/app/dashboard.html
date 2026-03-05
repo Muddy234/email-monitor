@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard — Email Monitor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/app.css">
+</head>
+<body class="em-app">
+    <nav id="em-sidebar" class="em-sidebar"></nav>
+    <main class="em-main">
+        <div class="em-page-header">
+            <h1 class="em-page-title">Dashboard</h1>
+            <div class="em-filter-bar">
+                <button class="em-filter-btn" data-range="1">Today</button>
+                <button class="em-filter-btn active" data-range="7">7 days</button>
+                <button class="em-filter-btn" data-range="30">30 days</button>
+                <button class="em-btn em-btn-secondary em-btn-sm" id="refreshBtn">Refresh</button>
+            </div>
+        </div>
+
+        <div class="em-card-grid" id="metricsGrid">
+            <div class="em-metric-card"><div class="em-skeleton em-skeleton-card"></div></div>
+            <div class="em-metric-card"><div class="em-skeleton em-skeleton-card"></div></div>
+            <div class="em-metric-card"><div class="em-skeleton em-skeleton-card"></div></div>
+            <div class="em-metric-card"><div class="em-skeleton em-skeleton-card"></div></div>
+        </div>
+
+        <div class="em-card" id="latestRun">
+            <div class="em-skeleton em-skeleton-row"></div>
+        </div>
+    </main>
+
+    <script type="module" src="/js/pages/dashboard.js"></script>
+</body>
+</html>

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Emails — Email Monitor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/app.css">
+</head>
+<body class="em-app">
+    <nav id="em-sidebar" class="em-sidebar"></nav>
+    <main class="em-main">
+        <div class="em-page-header">
+            <h1 class="em-page-title">Emails</h1>
+            <div class="em-filter-bar">
+                <input class="em-search" type="text" id="searchInput" placeholder="Search by sender or subject...">
+                <button class="em-btn em-btn-secondary em-btn-sm" id="refreshBtn">Refresh</button>
+            </div>
+        </div>
+
+        <div id="emailsContainer">
+            <div class="em-email-list">
+                <div class="em-skeleton em-skeleton-card" style="height: 80px;"></div>
+                <div class="em-skeleton em-skeleton-card" style="height: 80px;"></div>
+                <div class="em-skeleton em-skeleton-card" style="height: 80px;"></div>
+            </div>
+        </div>
+
+        <div class="em-pagination" id="pagination"></div>
+    </main>
+
+    <script type="module" src="/js/pages/emails.js"></script>
+</body>
+</html>
