@@ -4,7 +4,7 @@
 import { requireAuth, listenAuthChanges } from "../auth.js";
 import { renderNav } from "../nav.js";
 import { supabase } from "../supabase-client.js";
-import { showError, showEmpty, getParam, setParam, formatDate, relativeTime } from "../ui.js";
+import { showError, showEmpty, getParam, setParam, formatDate, relativeTime, escapeHtml } from "../ui.js";
 
 await requireAuth();
 listenAuthChanges();
@@ -145,7 +145,8 @@ async function loadMetrics() {
 // -------------------------------------------------------------------------
 
 function renderMetrics(emailCount, needsResponseCount, draftCount) {
-    const contextEmails = emailCount === 0 ? "Nothing synced yet" : `${emailCount} in the last ${range} day${range > 1 ? "s" : ""}`;
+    const rangeLabel = range <= 1 ? "today" : `in the last ${range} days`;
+    const contextEmails = emailCount === 0 ? "Nothing synced yet" : `${emailCount} ${rangeLabel}`;
     const contextNeeds = needsResponseCount === 0 ? "All caught up" : `${needsResponseCount} awaiting your input`;
     const contextDrafts = draftCount === 0 ? "No drafts yet" : `${draftCount} ready to review`;
 
@@ -258,11 +259,11 @@ async function loadLatestRun() {
         latestRunEl.innerHTML = `
             <div class="em-latest-run-header">Latest Pipeline Run</div>
             <div class="em-latest-run-body">
-                <span class="em-badge ${statusClass}">${data.status}</span>
+                <span class="em-badge ${statusClass}">${escapeHtml(data.status)}</span>
                 <span class="em-latest-run-time">${relativeTime(data.started_at)}</span>
                 <span class="em-latest-run-stats">${data.emails_scanned || 0} scanned, ${data.emails_processed || 0} processed, ${data.drafts_generated || 0} drafts</span>
             </div>
-            ${data.error_message ? `<div class="em-latest-run-error">${data.error_message}</div>` : ""}
+            ${data.error_message ? `<div class="em-latest-run-error">${escapeHtml(data.error_message)}</div>` : ""}
         `;
     } catch (err) {
         showError(`Failed to load latest run: ${err.message}`);

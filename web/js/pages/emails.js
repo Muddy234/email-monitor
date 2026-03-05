@@ -111,6 +111,17 @@ const SECTION_MAP = {
     "completed": "Completed",
 };
 
+// How many cards to show per group before "Show more"
+const GROUP_LIMITS = {
+    "Drafts Ready": Infinity,
+    "Needs Response": Infinity,
+    "Other": 20,
+    "Completed": 10,
+};
+
+// Track which groups have been expanded by the user
+const expandedGroups = new Set();
+
 function renderEmails() {
     const filtered = filterEmails();
 
@@ -132,20 +143,31 @@ function renderEmails() {
         if (!emails || emails.length === 0) continue;
 
         const sectionId = Object.entries(SECTION_MAP).find(([, v]) => v === groupName)?.[0] || "";
+        const limit = GROUP_LIMITS[groupName] || Infinity;
+        const isExpanded = expandedGroups.has(groupName);
+        const visibleEmails = isExpanded ? emails : emails.slice(0, limit);
+        const hasMore = emails.length > limit && !isExpanded;
 
         html += `<div class="em-group em-fade-in" id="section-${sectionId}">`;
         html += `<div class="em-group-title">${groupName}<span class="em-group-count">${emails.length}</span></div>`;
         html += `<div class="em-email-list">`;
 
-        for (const email of emails) {
+        for (const email of visibleEmails) {
             html += renderEmailCard(email);
         }
 
-        html += `</div></div>`;
+        html += `</div>`;
+
+        if (hasMore) {
+            html += `<button class="em-btn em-btn-secondary em-btn-sm em-show-more-btn" data-group="${groupName}" style="margin: 12px auto; display: block;">Show all ${emails.length} ${groupName.toLowerCase()} emails</button>`;
+        }
+
+        html += `</div>`;
     }
 
     container.innerHTML = html;
     bindCardEvents();
+    bindShowMoreButtons();
 
     // Scroll to target section if linked from dashboard
     if (targetGroup) {
@@ -156,6 +178,15 @@ function renderEmails() {
             setParam("section", "");
         }
     }
+}
+
+function bindShowMoreButtons() {
+    document.querySelectorAll(".em-show-more-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+            expandedGroups.add(btn.dataset.group);
+            renderEmails();
+        });
+    });
 }
 
 function renderEmailCard(email) {
