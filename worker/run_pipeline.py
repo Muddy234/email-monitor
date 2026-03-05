@@ -44,7 +44,7 @@ def build_config_from_profile(profile):
         # Claude settings — from env vars (not stored in user profile)
         "anthropic_api_key": os.environ.get("ANTHROPIC_API_KEY", ""),
         "claude_backend": "api",
-        "claude_cli_model": os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-20250514"),
+        "claude_cli_model": os.environ.get("CLAUDE_MODEL", "opus"),
         "claude_cli_timeout_seconds": int(os.environ.get("CLAUDE_TIMEOUT", "120")),
         "max_body_chars": int(os.environ.get("MAX_BODY_CHARS", "8000")),
         "enable_response_signals": True,
