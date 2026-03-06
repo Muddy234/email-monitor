@@ -531,7 +531,7 @@ async function dispatchCommand(command) {
   const { action, request_id, ...params } = command;
 
   if (action === "release") {
-    chrome.alarms.clear(ALARM_NAME);
+    chrome.alarms.clear(EMAIL_SYNC_ALARM);
     return { request_id, action, success: true };
   }
 
@@ -684,14 +684,75 @@ async function syncEmailsToSupabase() {
 
     // Upsert to Supabase
     await pushEmails(rows);
+    if (DEBUG) console.log(`Synced ${rows.length} inbox emails to Supabase`);
+
+    // On first sync, also fetch sent items for onboarding analysis
+    let sentCount = 0;
+    if (!lastSyncTime) {
+      try {
+        const sentResult = await handleGetSentItems({
+          max_scan: MAX_CATCHUP_EMAILS,
+          flagged_only: false,
+        });
+
+        if (sentResult.emails && sentResult.emails.length > 0) {
+          // Enrich sent emails with body/recipients
+          const sentEnriched = [];
+          for (const email of sentResult.emails) {
+            try {
+              const detail = await handleGetItem({
+                message_id: email.email_ref,
+                change_key: email._change_key,
+              });
+              sentEnriched.push(detail);
+            } catch (err) {
+              sentEnriched.push(email);
+            }
+          }
+
+          // Transform sent items — status is "completed" (not queued for classification)
+          const sentRows = sentEnriched.map((e) => ({
+            user_id: userId,
+            email_ref: e.email_ref,
+            subject: e.subject || "",
+            sender: e.sender || "",
+            sender_name: e.sender_name || "",
+            sender_email: e.sender_email || "",
+            received_time: e.received_time || null,
+            body: (e.body || "").slice(0, 50000),
+            has_attachments: e.has_attachments || false,
+            attachment_names: e.attachment_names || [],
+            folder: "Sent Items",
+            flag_status: e.flag_status || "NotFlagged",
+            conversation_id: e.conversation_id || null,
+            conversation_topic: e.conversation_topic || null,
+            to_field: e.to_field || "",
+            cc_field: e.cc_field || "",
+            importance: ["Low", "Normal", "High"][e.importance] || "Normal",
+            recipients: e.recipients || [],
+            status: "completed",
+          }));
+
+          await pushEmails(sentRows);
+          sentCount = sentRows.length;
+          if (DEBUG) console.log(`Synced ${sentCount} sent emails to Supabase`);
+        }
+      } catch (err) {
+        // Sent item sync failure is non-blocking — inbox sync already succeeded
+        if (DEBUG) console.error("Sent items sync error:", err.message);
+      }
+    }
+
     lastSyncTime = new Date().toISOString();
     persistSyncTime();
-    if (DEBUG) console.log(`Synced ${rows.length} emails to Supabase`);
 
     // Auto-detect user's Outlook email and update profile aliases if needed
     await detectAndUpdateAliases(userId, enriched);
 
-    return { synced: rows.length };
+    // Update heartbeat so the worker knows we're active
+    updateHeartbeat(userId).catch(() => {});
+
+    return { synced: rows.length, sent_synced: sentCount };
   } catch (err) {
     if (DEBUG) console.error("Email sync error:", err.message);
     return { error: err.message };
@@ -729,7 +790,9 @@ async function initSupabase() {
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === EMAIL_SYNC_ALARM) {
-    syncEmailsToSupabase();
+    syncEmailsToSupabase().catch((err) => {
+      if (DEBUG) console.error("Alarm sync error:", err.message);
+    });
   }
 });
 
@@ -785,4 +848,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   // Initialize Supabase features (sync alarm + Realtime)
   await initSupabase();
+
+  // Send initial heartbeat if logged in
+  const initSession = await getSupabaseSession();
+  if (initSession?.user?.id) {
+    updateHeartbeat(initSession.user.id).catch(() => {});
+  }
 })();

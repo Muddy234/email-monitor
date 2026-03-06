@@ -8,6 +8,15 @@ from .prompts import DEFAULT_DRAFT_PROMPT_TEMPLATE
 logger = logging.getLogger("email_monitor")
 
 
+def _strip_quoted_content(body):
+    """Strip quoted reply chains, keeping only the newest message."""
+    for marker in ["From:", "-----Original Message", "________________________________"]:
+        idx = body.find(marker)
+        if idx > 0:
+            return body[:idx].rstrip()
+    return body
+
+
 class DraftGenerator:
     """Generates draft email replies via Claude.
 
@@ -18,7 +27,7 @@ class DraftGenerator:
 
     def __init__(self, config, system_prompt_template=None):
         self.backend = config.get("claude_backend", "api")
-        self.model = config.get("draft_cli_model", "sonnet")
+        self.model = config.get("draft_model", "sonnet")
         self.timeout = config.get("draft_cli_timeout_seconds", 90)
         self.user_name = config.get("draft_user_name", "")
         self.user_title = config.get("draft_user_title", "")
@@ -40,7 +49,9 @@ class DraftGenerator:
         subject = email_data.get("subject", "(no subject)")
         sender_name = email_data.get("sender_name", "Unknown")
         sender = email_data.get("sender", "")
-        body = email_data.get("body", "") or ""
+        body = _strip_quoted_content(email_data.get("body", "") or "")
+        if len(body) > 4000:
+            body = body[:4000] + "\n[... truncated]"
         action = action_context.get("action", "")
         context = action_context.get("context", "")
 
@@ -84,6 +95,33 @@ Generate the reply body text only (no subject, no headers)."""
 
         return prompt
 
+    def build_batch_params(self, email_data, action_context, custom_id):
+        """Build a Batches API request dict for a single draft.
+
+        Args:
+            email_data: Email data dict.
+            action_context: Dict with 'action' and 'context' keys.
+            custom_id: Unique ID for this request in the batch.
+
+        Returns:
+            dict with 'custom_id' and 'params' keys.
+        """
+        from .api_client import resolve_model
+
+        prompt_text = self._build_draft_prompt(email_data, action_context)
+        return {
+            "custom_id": custom_id,
+            "params": {
+                "model": resolve_model(self.model),
+                "max_tokens": 4096,
+                "temperature": 0.3,
+                "system": [
+                    {"type": "text", "text": self.system_prompt, "cache_control": {"type": "ephemeral"}}
+                ],
+                "messages": [{"role": "user", "content": prompt_text}],
+            },
+        }
+
     def generate_draft(self, email_data, action_context):
         """Generate a draft reply for an email. Returns draft_body string or None.
 
@@ -111,6 +149,8 @@ Generate the reply body text only (no subject, no headers)."""
                 max_tokens=4096,
                 timeout=self.timeout,
                 api_key=self.api_key,
+                temperature=0.3,
+                cache_system_prompt=True,
             )
         except Exception as e:
             subject = email_data.get("subject", "unknown")

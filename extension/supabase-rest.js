@@ -100,3 +100,22 @@ async function updateDraftStatus(draftId, status, outlookDraftId) {
     body,
   });
 }
+
+// ---------------------------------------------------------------------------
+// Heartbeat
+// ---------------------------------------------------------------------------
+
+/**
+ * Update the user's heartbeat timestamp and timezone on their profile.
+ * Called after every sync cycle so the worker knows the user is active.
+ */
+async function updateHeartbeat(userId) {
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Chicago";
+  return supabaseRequest(`/profiles?id=eq.${userId}`, {
+    method: "PATCH",
+    body: {
+      last_heartbeat_at: new Date().toISOString(),
+      timezone: tz,
+    },
+  });
+}

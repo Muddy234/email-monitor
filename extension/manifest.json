@@ -1,6 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Email Monitor — Outlook Bridge",
+  "short_name": "Email Mon",
   "version": "1.0.0",
   "description": "Syncs your Outlook emails for AI-powered analysis and draft generation.",
 
@@ -10,11 +11,11 @@
   ],
 
   "host_permissions": [
-    "*://outlook.cloud.microsoft/*",
-    "*://outlook.live.com/*",
-    "*://outlook.office365.com/*",
-    "*://outlook.office.com/*",
-    "https://*.supabase.co/*"
+    "https://outlook.cloud.microsoft/*",
+    "https://outlook.live.com/*",
+    "https://outlook.office365.com/*",
+    "https://outlook.office.com/*",
+    "https://frbvdoszenrrlswegsxq.supabase.co/*"
   ],
 
   "background": {
@@ -26,7 +27,8 @@
       "matches": [
         "https://outlook.cloud.microsoft/*",
         "https://outlook.live.com/*",
-        "https://outlook.office365.com/*"
+        "https://outlook.office365.com/*",
+        "https://outlook.office.com/*"
       ],
       "js": ["content.js"],
       "run_at": "document_idle"

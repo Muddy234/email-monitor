@@ -47,7 +47,8 @@ def build_config_from_profile(profile):
         # Claude settings — from env vars (not stored in user profile)
         "anthropic_api_key": os.environ.get("ANTHROPIC_API_KEY", ""),
         "claude_backend": "api",
-        "claude_cli_model": os.environ.get("CLAUDE_MODEL", "opus"),
+        "classification_model": os.environ.get("CLASSIFICATION_MODEL", "haiku"),
+        "draft_model": os.environ.get("DRAFT_MODEL", "sonnet"),
         "claude_cli_timeout_seconds": int(os.environ.get("CLAUDE_TIMEOUT", "120")),
         "max_body_chars": int(os.environ.get("MAX_BODY_CHARS", "8000")),
         "enable_response_signals": True,
@@ -63,52 +64,75 @@ def build_config_from_profile(profile):
         "enable_conversation_grouping": True,
         "max_emails_per_run": int(os.environ.get("MAX_EMAILS_PER_RUN", "20")),
 
-        # Filter settings — defaults (could be moved to profile later)
-        "filter_blacklist_senders": "",
-        "filter_blacklist_subject_patterns": "",
-        "filter_whitelist_senders": "",
-        "filter_whitelist_domains": "",
-        "filter_project_keywords": "",
-        "filter_auto_important_patterns": "",
+        # Filter settings
+        "filter_blacklist_senders": [
+            "noreply@",
+            "no-reply@",
+            "mailer-daemon@",
+            "postmaster@",
+            "notifications@github.com",
+            "builds@travis-ci.org",
+            "jira@",
+            "calendar-notification@google.com",
+            "notify@",
+            "donotreply@",
+            "automated@",
+            "newsletter@",
+            "marketing@",
+            "updates@",
+        ],
+        "filter_blacklist_subject_patterns": [
+            "accepted:",
+            "declined:",
+            "tentatively accepted:",
+            "canceled:",
+            "undeliverable:",
+            "out of office",
+            "automatic reply",
+            "auto-reply",
+            "delivery status notification",
+            "read receipt:",
+            "unsubscribe confirmation",
+        ],
+        "filter_whitelist_senders": [],
+        "filter_whitelist_domains": [],
+        "filter_project_keywords": [
+            "thomas ranch",
+            "turtle bay",
+            "north shore",
+            "loraloma",
+            "lore loma",
+            "kaikani",
+            "wasatch highlands",
+            "ocean club",
+            "zone 8",
+            "hc2",
+            "rr3",
+        ],
+        "filter_auto_important_patterns": ["/o=exchangelabs/"],
         "filter_direct_recipient": "",
     }
 
     return config
 
 
-def process_email_batch(db_client, emails, user_id, config):
-    """Process a batch of claimed emails through the pipeline.
+def filter_emails(db_client, emails, user_id, config):
+    """Filter and signal-enrich a batch of emails, writing skip results to DB.
 
-    Args:
-        db_client: SupabaseWorkerClient instance.
-        emails: list[dict] — claimed email rows from Supabase.
-        user_id: UUID string.
-        config: dict — built from build_config_from_profile().
-
-    Returns:
-        dict: Summary with emails_processed, drafts_generated counts.
+    Returns list of email_data dicts that passed filtering (with _db_id set).
+    Skipped emails are marked completed and classified in the DB immediately.
     """
     email_filter = EmailFilter(config)
-    analyzer = ClaudeAnalyzer(config, system_prompt=get_analysis_prompt())
-    draft_generator = DraftGenerator(
-        config,
-        system_prompt_template=get_draft_prompt_template(),
-    )
-
     user_aliases = [a.lower() for a in config.get("user_email_aliases", []) if a]
 
-    emails_processed = 0
-    drafts_generated = 0
-
-    # Step 1: Filter emails
-    filtered_emails = []
+    filtered = []
     for email in emails:
         email_data = supabase_row_to_email_data(email)
         email_data["signals"] = build_signals(email_data, user_aliases)
         classification = email_filter.classify(email_data)
 
         if classification == "skip":
-            logger.info(f"  Skipped: {email_data.get('subject', '?')[:60]}")
+            logger.info(f"  Skipped (filter): {email_data.get('subject', '?')[:60]}")
             db_client.update_email_status(email["id"], "completed")
             db_client.insert_classification(
                 email["id"], user_id,
@@ -116,27 +140,39 @@ def process_email_batch(db_client, emails, user_id, config):
             )
             continue
 
+        skip_reason = _should_auto_skip(email_data, email_data["signals"])
+        if skip_reason:
+            logger.info(f"  Auto-skipped ({skip_reason}): {email_data.get('subject', '?')[:60]}")
+            db_client.update_email_status(email["id"], "completed")
+            db_client.insert_classification(
+                email["id"], user_id,
+                {
+                    "needs_response": False,
+                    "action": "Auto-skipped by signal rules",
+                    "context": f"Skipped: {skip_reason}",
+                },
+            )
+            continue
+
         email_data["_filter_result"] = classification
         email_data["_db_id"] = email["id"]
-        filtered_emails.append(email_data)
+        filtered.append(email_data)
 
-    if not filtered_emails:
-        logger.info("  No emails passed filter")
-        return {"emails_processed": 0, "drafts_generated": 0}
+    return filtered
 
-    # Step 2: Claude analysis (batch)
-    logger.info(f"  Analyzing {len(filtered_emails)} emails with Claude...")
-    action_items = analyzer.analyze_batch(filtered_emails)
 
-    if not action_items:
-        logger.warning("  Claude analysis returned no results")
-        for ed in filtered_emails:
-            db_client.update_email_status(ed["_db_id"], "completed")
-        return {"emails_processed": len(filtered_emails), "drafts_generated": 0}
+def process_classification_results(db_client, action_items, filtered_emails,
+                                   user_id, config, draft_generator):
+    """Write classification results to DB and collect draft candidates.
 
-    # Step 3: Process action items — classify + generate drafts
-    # Build index map: email_index (1-based) → email_data
+    Returns:
+        tuple: (emails_processed count, list of draft_candidate dicts)
+            Each draft_candidate has keys: db_id, email_data, action_context
+    """
     email_index_map = {i + 1: ed for i, ed in enumerate(filtered_emails)}
+    draft_max_age_hours = int(os.environ.get("DRAFT_MAX_AGE_HOURS", "24"))
+    emails_processed = 0
+    draft_candidates = []
 
     for item in action_items:
         email_idx = item.get("email_index", 0)
@@ -147,7 +183,6 @@ def process_email_batch(db_client, emails, user_id, config):
         db_id = email_data["_db_id"]
         needs_response = item.get("needs_response", False)
 
-        # Insert classification
         db_client.insert_classification(db_id, user_id, {
             "needs_response": needs_response,
             "action": item.get("action", ""),
@@ -156,41 +191,84 @@ def process_email_batch(db_client, emails, user_id, config):
             "priority": _parse_priority(item.get("priority", "")),
         })
 
-        # Generate draft only for recent emails (older ones are for behavioral context)
-        draft_max_age_hours = int(os.environ.get("DRAFT_MAX_AGE_HOURS", "24"))
         email_age_ok = _is_recent(email_data.get("received_time"), draft_max_age_hours)
         if not email_age_ok and needs_response:
             logger.info(f"  Skipping draft (too old): {email_data.get('subject', '?')[:60]}")
+
         if needs_response and email_age_ok and config.get("enable_draft_generation", True):
             action_context = {
                 "action": item.get("action", ""),
                 "context": item.get("context", ""),
             }
-
-            # Fetch conversation context if available
             conv_id = email_data.get("conversation_id")
             if conv_id:
                 conv_messages = db_client.fetch_conversation_context(user_id, conv_id)
                 if conv_messages:
                     action_context["conversation_history"] = conv_messages
 
-            draft_body = draft_generator.generate_draft(email_data, action_context)
-            if draft_body:
-                db_client.insert_draft(db_id, user_id, draft_body)
-                drafts_generated += 1
-                logger.info(f"  Draft generated for: {email_data.get('subject', '?')[:60]}")
+            draft_candidates.append({
+                "db_id": db_id,
+                "email_data": email_data,
+                "action_context": action_context,
+            })
 
         db_client.update_email_status(db_id, "completed")
         emails_processed += 1
 
     # Mark any remaining filtered emails that didn't get an action item
     for ed in filtered_emails:
-        db_id = ed["_db_id"]
-        # If not already completed above, mark completed
         try:
-            db_client.update_email_status(db_id, "completed")
+            db_client.update_email_status(ed["_db_id"], "completed")
         except Exception:
             pass
+
+    return emails_processed, draft_candidates
+
+
+def process_email_batch(db_client, emails, user_id, config):
+    """Process a batch of claimed emails through the pipeline (sync path).
+
+    This is the original synchronous flow — filter → classify → draft.
+    The batch-based main loop uses filter_emails / process_classification_results
+    directly for async batching.
+    """
+    analyzer = ClaudeAnalyzer(config, system_prompt=get_analysis_prompt())
+    draft_generator = DraftGenerator(
+        config,
+        system_prompt_template=get_draft_prompt_template(),
+    )
+
+    # Step 1: Filter
+    filtered_emails = filter_emails(db_client, emails, user_id, config)
+    if not filtered_emails:
+        logger.info("  No emails passed filter")
+        return {"emails_processed": 0, "drafts_generated": 0}
+
+    # Step 2: Claude analysis
+    logger.info(f"  Analyzing {len(filtered_emails)} emails with Claude...")
+    action_items = analyzer.analyze_batch(filtered_emails)
+
+    if not action_items:
+        logger.warning("  Claude analysis returned no results")
+        for ed in filtered_emails:
+            db_client.update_email_status(ed["_db_id"], "completed")
+        return {"emails_processed": len(filtered_emails), "drafts_generated": 0}
+
+    # Step 3: Classify + collect draft candidates
+    emails_processed, draft_candidates = process_classification_results(
+        db_client, action_items, filtered_emails, user_id, config, draft_generator
+    )
+
+    # Step 4: Generate drafts (sync, one at a time)
+    drafts_generated = 0
+    for candidate in draft_candidates:
+        draft_body = draft_generator.generate_draft(
+            candidate["email_data"], candidate["action_context"]
+        )
+        if draft_body:
+            db_client.insert_draft(candidate["db_id"], user_id, draft_body)
+            drafts_generated += 1
+            logger.info(f"  Draft generated for: {candidate['email_data'].get('subject', '?')[:60]}")
 
     return {"emails_processed": emails_processed, "drafts_generated": drafts_generated}
 
@@ -388,6 +466,28 @@ def _parse_priority(priority_val):
     if priority_val == "x":
         return 1
     return 0
+
+
+def _should_auto_skip(email_data, signals):
+    """Return a skip reason string if signals alone can resolve this email.
+
+    Conservative rules only — when in doubt, return None to send to Claude.
+    Does NOT auto-skip based on user_position=CC alone.
+    """
+    if signals.get("terminal_acknowledgment") is True:
+        return "terminal acknowledgment"
+
+    sender = (email_data.get("sender", "") or "").lower()
+    if "/o=exchangelabs/" in sender:
+        return "automated Exchange system message"
+
+    if (
+        signals.get("fyi_language_detected") is True
+        and signals.get("intent_category") in ("informational", "acknowledgment")
+    ):
+        return "FYI/no-response language detected"
+
+    return None
 
 
 def _is_recent(received_time, max_age_hours):

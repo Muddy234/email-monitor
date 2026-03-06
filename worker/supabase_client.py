@@ -6,7 +6,7 @@ All database operations for the worker go through this module.
 
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from supabase import create_client, Client
 
@@ -241,3 +241,185 @@ class SupabaseWorkerClient:
         if "finished_at" not in update and update.get("status") in ("completed", "failed"):
             update["finished_at"] = datetime.utcnow().isoformat()
         self.client.table("pipeline_runs").update(update).eq("id", run_id).execute()
+
+    # ------------------------------------------------------------------
+    # Onboarding
+    # ------------------------------------------------------------------
+
+    def get_users_needing_onboarding(self, min_emails=20):
+        """Find users who haven't completed onboarding and have enough emails.
+
+        Returns:
+            list[str]: User IDs ready for onboarding.
+        """
+        # Users with no onboarding_completed_at and not currently running
+        result = (
+            self.client.table("profiles")
+            .select("id, onboarding_status")
+            .is_("onboarding_completed_at", "null")
+            .execute()
+        )
+        if not result.data:
+            return []
+
+        ready = []
+        for row in result.data:
+            uid = row["id"]
+            # Skip users already mid-onboarding (unless failed)
+            status = row.get("onboarding_status")
+            if status and status != "failed":
+                continue
+            # Check email count
+            count_result = (
+                self.client.table("emails")
+                .select("id", count="exact")
+                .eq("user_id", uid)
+                .execute()
+            )
+            if count_result.count and count_result.count >= min_emails:
+                ready.append(uid)
+        return ready
+
+    def fetch_emails_for_onboarding(self, user_id, days=30):
+        """Fetch all emails (inbox + sent) for the last N days.
+
+        Returns:
+            list[dict]: Email rows.
+        """
+        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+
+        result = (
+            self.client.table("emails")
+            .select("*")
+            .eq("user_id", user_id)
+            .gte("received_time", cutoff)
+            .order("received_time", desc=False)
+            .execute()
+        )
+        return result.data or []
+
+    def update_onboarding_status(self, user_id, status, **kwargs):
+        """Update a user's onboarding status and optional timestamp fields.
+
+        Args:
+            user_id: UUID string.
+            status: Onboarding phase name.
+            **kwargs: Optional fields like started_at, completed_at.
+        """
+        update = {"onboarding_status": status}
+        if "started_at" in kwargs:
+            update["onboarding_started_at"] = kwargs["started_at"]
+        if "completed_at" in kwargs:
+            update["onboarding_completed_at"] = kwargs["completed_at"]
+        self.client.table("profiles").update(update).eq("id", user_id).execute()
+
+    def upsert_contacts(self, user_id, contacts_list):
+        """Batch upsert contacts for a user.
+
+        Args:
+            user_id: UUID string.
+            contacts_list: List of contact dicts with at minimum 'email' key.
+        """
+        rows = []
+        now = datetime.utcnow().isoformat()
+        for contact in contacts_list:
+            row = {
+                "user_id": user_id,
+                "email": contact["email"],
+                "name": contact.get("name"),
+                "organization": contact.get("organization") or contact.get("inferred_organization"),
+                "role": contact.get("role") or contact.get("inferred_role"),
+                "expertise_areas": contact.get("expertise_areas", []),
+                "contact_type": contact.get("contact_type", "unknown"),
+                "relationship_significance": contact.get("relationship_significance", "medium"),
+                "relationship_summary": contact.get("relationship_summary"),
+                "emails_per_month": contact.get("emails_per_month", 0),
+                "response_rate": contact.get("response_rate"),
+                "avg_response_time_hours": contact.get("avg_response_time_hours"),
+                "user_initiates_pct": contact.get("user_initiates_pct"),
+                "common_co_recipients": contact.get("common_co_recipients", []),
+                "last_interaction_at": contact.get("last_interaction_at"),
+                "last_profiled_at": now,
+                "updated_at": now,
+            }
+            rows.append(row)
+
+        if rows:
+            self.client.table("contacts").upsert(
+                rows, on_conflict="user_id,email"
+            ).execute()
+
+    def upsert_topic_profile(self, user_id, data):
+        """Upsert a user's topic profile (domains, keywords, stats).
+
+        Args:
+            user_id: UUID string.
+            data: Dict with keys like domains, high_signal_keywords,
+                  token_frequencies, baseline_statistics.
+        """
+        row = {
+            "user_id": user_id,
+            "domains": data.get("domains", []),
+            "high_signal_keywords": data.get("high_signal_keywords", []),
+            "token_frequencies": data.get("token_frequencies"),
+            "baseline_statistics": data.get("baseline_statistics", {}),
+            "updated_at": datetime.utcnow().isoformat(),
+        }
+        self.client.table("user_topic_profile").upsert(
+            row, on_conflict="user_id"
+        ).execute()
+
+    def update_topic_profile_calibration(self, user_id, worked_examples, classification_rules):
+        """Update calibration fields on an existing topic profile.
+
+        Args:
+            user_id: UUID string.
+            worked_examples: List of worked example dicts from Opus.
+            classification_rules: List of classification rule dicts from Opus.
+        """
+        self.client.table("user_topic_profile").update({
+            "worked_examples": worked_examples,
+            "classification_rules": classification_rules,
+            "updated_at": datetime.utcnow().isoformat(),
+        }).eq("user_id", user_id).execute()
+
+    def update_writing_style(self, user_id, style_guide, sample_count):
+        """Store the writing style guide on the user's profile.
+
+        Args:
+            user_id: UUID string.
+            style_guide: Plain text style guide.
+            sample_count: Number of sent emails analyzed.
+        """
+        self.client.table("profiles").update({
+            "writing_style_guide": style_guide,
+            "style_profiled_at": datetime.utcnow().isoformat(),
+            "style_sample_count": sample_count,
+        }).eq("id", user_id).execute()
+
+    def get_users_needing_calibration(self):
+        """Find users who completed onboarding but haven't been calibrated.
+
+        Returns:
+            list[str]: User IDs needing Opus calibration.
+        """
+        result = (
+            self.client.table("user_topic_profile")
+            .select("user_id")
+            .is_("worked_examples", "null")
+            .execute()
+        )
+        if not result.data:
+            return []
+
+        user_ids = [row["user_id"] for row in result.data]
+
+        # Only return users whose onboarding is complete
+        completed = (
+            self.client.table("profiles")
+            .select("id")
+            .in_("id", user_ids)
+            .not_.is_("onboarding_completed_at", "null")
+            .execute()
+        )
+        return [row["id"] for row in (completed.data or [])]

@@ -205,6 +205,20 @@ document.getElementById("loginBtn").addEventListener("click", async () => {
     // Activate worker processing
     await setWorkerActive(session.access_token, session.user.id, true);
 
+    // Set timezone on profile so the worker knows business hours
+    try {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Chicago";
+      await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${session.user.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ timezone: tz }),
+      });
+    } catch (_) {}
+
     // Notify background to initialize Supabase features
     chrome.runtime.sendMessage({ type: "supabaseSessionChanged" });
 

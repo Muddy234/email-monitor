@@ -494,6 +494,23 @@ h3 { font-size: 1.125rem; font-weight: 600; }
 }
 
 
+/* --- 8b. Showcase Screenshots --- */
+.lp-how-it-works__screenshot,
+.lp-feature-showcase {
+    margin-top: 48px;
+    border-radius: var(--lp-radius);
+    overflow: hidden;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+    background: var(--lp-slate-100);
+}
+
+.lp-showcase__img {
+    width: 100%;
+    height: auto;
+    display: block;
+}
+
+
 /* --- 9. Features Grid --- */
 .lp-features {
     padding: 64px 0;
