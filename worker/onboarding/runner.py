@@ -46,7 +46,7 @@ def run_onboarding(db, user_id, profile):
 
         # ── Phase 1: Collect ─────────────────────────────────────
         db.update_onboarding_status(user_id, "collecting")
-        email_data = collect_onboarding_emails(db, user_id, aliases, days=30)
+        email_data = collect_onboarding_emails(db, user_id, aliases, days=120)
         received = email_data["received"]
         sent = email_data["sent"]
 

@@ -55,7 +55,7 @@ _DISCLAIMER_RE = re.compile(
 )
 
 
-def collect_onboarding_emails(db, user_id, user_aliases, days=30):
+def collect_onboarding_emails(db, user_id, user_aliases, days=120):
     """Fetch and split emails into received vs sent.
 
     Args:
