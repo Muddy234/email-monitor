@@ -104,11 +104,6 @@ class SupabaseWorkerClient:
             {"status": status}
         ).eq("id", email_id).execute()
 
-    def bulk_update_email_status(self, email_ids, status):
-        """Update status for multiple emails."""
-        for eid in email_ids:
-            self.update_email_status(eid, status)
-
     # ------------------------------------------------------------------
     # Classifications
     # ------------------------------------------------------------------
@@ -380,20 +375,6 @@ class SupabaseWorkerClient:
             row, on_conflict="user_id"
         ).execute()
 
-    def update_topic_profile_calibration(self, user_id, worked_examples, classification_rules):
-        """Update calibration fields on an existing topic profile.
-
-        Args:
-            user_id: UUID string.
-            worked_examples: List of worked example dicts from Opus.
-            classification_rules: List of classification rule dicts from Opus.
-        """
-        self.client.table("user_topic_profile").update({
-            "worked_examples": worked_examples,
-            "classification_rules": classification_rules,
-            "updated_at": datetime.utcnow().isoformat(),
-        }).eq("user_id", user_id).execute()
-
     def update_writing_style(self, user_id, style_guide, sample_count):
         """Store the writing style guide on the user's profile.
 
@@ -407,33 +388,6 @@ class SupabaseWorkerClient:
             "style_profiled_at": datetime.utcnow().isoformat(),
             "style_sample_count": sample_count,
         }).eq("id", user_id).execute()
-
-    def get_users_needing_calibration(self):
-        """Find users who completed onboarding but haven't been calibrated.
-
-        Returns:
-            list[str]: User IDs needing Opus calibration.
-        """
-        result = (
-            self.client.table("user_topic_profile")
-            .select("user_id")
-            .is_("worked_examples", "null")
-            .execute()
-        )
-        if not result.data:
-            return []
-
-        user_ids = [row["user_id"] for row in result.data]
-
-        # Only return users whose onboarding is complete
-        completed = (
-            self.client.table("profiles")
-            .select("id")
-            .in_("id", user_ids)
-            .not_.is_("onboarding_completed_at", "null")
-            .execute()
-        )
-        return [row["id"] for row in (completed.data or [])]
 
     # ------------------------------------------------------------------
     # Batch context fetchers (for enrichment pipeline)
