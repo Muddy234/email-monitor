@@ -1,32 +1,17 @@
-"""Draft email reply generation — supports both Anthropic API and Claude CLI backends."""
+"""Draft email reply generation via Anthropic API."""
 
 import logging
-import subprocess
 
+from .analyzer import _strip_quoted_content
 from .prompts import DEFAULT_DRAFT_PROMPT_TEMPLATE
 
 logger = logging.getLogger("clarion")
 
 
-def _strip_quoted_content(body):
-    """Strip quoted reply chains, keeping only the newest message."""
-    for marker in ["From:", "-----Original Message", "________________________________"]:
-        idx = body.find(marker)
-        if idx > 0:
-            return body[:idx].rstrip()
-    return body
-
-
 class DraftGenerator:
-    """Generates draft email replies via Claude.
-
-    Supports two backends controlled by config["claude_backend"]:
-      - "api" (default): Anthropic Messages API via pipeline.api_client
-      - "cli": Claude CLI subprocess via pipeline.cli (local fallback)
-    """
+    """Generates draft email replies via the Anthropic Messages API."""
 
     def __init__(self, config, system_prompt_template=None):
-        self.backend = config.get("claude_backend", "api")
         self.model = config.get("draft_model", "sonnet")
         self.timeout = config.get("draft_cli_timeout_seconds", 90)
         self.user_name = config.get("draft_user_name", "")
@@ -38,10 +23,6 @@ class DraftGenerator:
             user_title=self.user_title
         )
 
-        # CLI-specific settings
-        self.cli_path = config.get("claude_cli_path", "claude")
-
-        # API-specific settings
         self.api_key = config.get("anthropic_api_key")  # None → env var
 
     def _build_draft_prompt(self, email_data, action_context):
@@ -146,19 +127,6 @@ Generate the reply body text only (no subject, no headers)."""
         }
 
     def generate_draft(self, email_data, action_context):
-        """Generate a draft reply for an email. Returns draft_body string or None.
-
-        Routes to the API or CLI backend based on self.backend.
-        """
-        if self.backend == "cli":
-            return self._generate_via_cli(email_data, action_context)
-        return self._generate_via_api(email_data, action_context)
-
-    # ------------------------------------------------------------------
-    # API backend
-    # ------------------------------------------------------------------
-
-    def _generate_via_api(self, email_data, action_context):
         """Generate a draft via the Anthropic Messages API."""
         from .api_client import call_claude, resolve_model
 
@@ -181,54 +149,6 @@ Generate the reply body text only (no subject, no headers)."""
             return None
 
         return self._validate_output(raw_output, email_data)
-
-    # ------------------------------------------------------------------
-    # CLI backend (local fallback)
-    # ------------------------------------------------------------------
-
-    def _generate_via_cli(self, email_data, action_context):
-        """Generate a draft via Claude CLI subprocess (original implementation)."""
-        from .cli import run_claude_cli
-
-        prompt_text = self._build_draft_prompt(email_data, action_context)
-
-        cmd = [
-            self.cli_path,
-            "--print",
-            "--model", self.model,
-            "--dangerously-skip-permissions",
-            "--disallowedTools", "Bash,Read,Write,Edit,Glob,Grep,WebFetch,WebSearch,TodoWrite,NotebookEdit,Task,AskUserQuestion,Skill,EnterPlanMode,ExitPlanMode,KillShell,TaskOutput",
-            "--append-system-prompt", self.system_prompt,
-            "-p", "-",
-        ]
-
-        try:
-            stdout, stderr, returncode = run_claude_cli(cmd, timeout=self.timeout, stdin_text=prompt_text)
-        except subprocess.TimeoutExpired:
-            subject = email_data.get("subject", "unknown")
-            logger.error(f"  Draft generation timed out after {self.timeout}s for '{subject}'")
-            return None
-        except FileNotFoundError:
-            logger.error(f"  Claude CLI not found at: {self.cli_path}")
-            return None
-        except Exception as e:
-            subject = email_data.get("subject", "unknown")
-            logger.error(f"  Draft generation failed for '{subject}': {e}")
-            return None
-
-        if returncode != 0:
-            stderr_preview = stderr[:500]
-            subject = email_data.get("subject", "unknown")
-            logger.warning(f"  Draft generation failed for '{subject}': CLI returned code {returncode}")
-            if stderr_preview:
-                logger.warning(f"  stderr: {stderr_preview}")
-            return None
-
-        return self._validate_output(stdout, email_data)
-
-    # ------------------------------------------------------------------
-    # Output validation (shared by both backends)
-    # ------------------------------------------------------------------
 
     def _validate_output(self, raw_output, email_data):
         """Validate draft output. Returns cleaned text or None."""

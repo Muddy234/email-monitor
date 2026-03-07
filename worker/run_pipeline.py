@@ -17,7 +17,7 @@ from pipeline.filter import EmailFilter
 from pipeline.analyzer import ClaudeAnalyzer
 from pipeline.drafts import DraftGenerator
 from pipeline.prompts import get_analysis_prompt, get_draft_prompt_template
-from pipeline.scorer import UserScoringArtifacts, ModelArtifacts, score_email, check_triage_gate
+from pipeline.scorer import UserScoringArtifacts, score_email, check_triage_gate
 from pipeline.enrichment import assemble_enrichment
 
 logger = logging.getLogger("worker")
@@ -54,7 +54,7 @@ def build_config_from_profile(profile):
     EmailFilter, ClaudeAnalyzer, and DraftGenerator expect.
 
     The existing pipeline classes read config keys like
-    'filter_blacklist_senders', 'claude_backend', etc.
+    'filter_blacklist_senders', etc.
     Profile rows store per-user settings; env vars fill in API keys.
 
     Args:
@@ -76,12 +76,10 @@ def build_config_from_profile(profile):
 
         # Claude settings — from env vars (not stored in user profile)
         "anthropic_api_key": os.environ.get("ANTHROPIC_API_KEY", ""),
-        "claude_backend": "api",
         "classification_model": os.environ.get("CLASSIFICATION_MODEL", "haiku"),
         "draft_model": os.environ.get("DRAFT_MODEL", "sonnet"),
         "claude_cli_timeout_seconds": int(os.environ.get("CLAUDE_TIMEOUT", "120")),
         "max_body_chars": int(os.environ.get("MAX_BODY_CHARS", "8000")),
-        "enable_response_signals": True,
 
         # Draft settings
         "draft_user_name": os.environ.get("DRAFT_USER_NAME", ""),

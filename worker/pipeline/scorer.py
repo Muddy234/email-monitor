@@ -6,17 +6,14 @@ live data shapes (signals dict, contact row, thread info dict).
 
 Classes:
     UserScoringArtifacts: Loads per-user model artifacts from DB JSON.
-    ModelArtifacts: Legacy loader from prediction_results.json (deprecated).
 
 Functions:
     score_email: Score a single email → (raw_score, calibrated_prob, tier, factors).
     check_triage_gate: Decide whether to gate (skip LLM) an email.
 """
 
-import json
 import logging
 import re
-from pathlib import Path
 
 logger = logging.getLogger("worker.scorer")
 
@@ -122,46 +119,6 @@ def _convert_rate_x_to(raw):
     return result
 
 
-# Legacy alias — loads from static JSON file (deprecated)
-class ModelArtifacts:
-    """Loads prediction_results.json (deprecated — use UserScoringArtifacts)."""
-
-    _ARTIFACTS_PATH = Path(__file__).resolve().parent.parent / "scripts" / "prediction_results.json"
-
-    def __init__(self, path=None):
-        path = path or self._ARTIFACTS_PATH
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-
-        meta = data.get("meta", {})
-        self.version = meta.get("version", "unknown")
-        self.global_rate = meta.get("global_reply_rate", 0.2214)
-        self.prior_weight = meta.get("bayesian_prior_weight", 3)
-
-        lifts = data.get("lift_factors", {})
-        self.boolean_lifts = lifts.get("boolean", {})
-        self.msg_type_lifts = lifts.get("msg_type", {})
-        self.recipient_multipliers = lifts.get("recipient", [])
-        self.depth_multipliers = lifts.get("depth", [])
-        self.rate_x_to_interaction = lifts.get("rate_x_to", {})
-
-        self.iso_breakpoints = data.get("iso_breakpoints", [])
-
-        triage = data.get("triage", {})
-        self.hard_gate_threshold = triage.get("hard_gate_threshold", 0.01)
-        self.soft_gate_threshold = 0.03
-
-        self.recurring_patterns = {}
-        for p in data.get("recurring_patterns", []):
-            key = (p["sender"], p["normalized_subject"])
-            self.recurring_patterns[key] = p.get("pattern_reply_rate", 0.0)
-
-        logger.info(
-            f"ModelArtifacts v{self.version} loaded (legacy): "
-            f"global_rate={self.global_rate:.4f}"
-        )
-
-
 # ---------------------------------------------------------------------------
 # Bin lookup helpers
 # ---------------------------------------------------------------------------
@@ -224,7 +181,7 @@ def score_email(email_data, signals, contact, thread_info, artifacts):
             - user_initiated (bool)
             - hours_since_user_reply (float or None)
             - sender_events_count (int) — total emails from this sender
-        artifacts: ModelArtifacts instance.
+        artifacts: UserScoringArtifacts instance.
 
     Returns:
         tuple: (raw_score, calibrated_prob, confidence_tier, factors)
@@ -391,7 +348,7 @@ def check_triage_gate(calibrated_prob, thread_info, artifacts):
     Args:
         calibrated_prob: float from score_email().
         thread_info: dict with thread context.
-        artifacts: ModelArtifacts instance.
+        artifacts: UserScoringArtifacts instance.
 
     Returns:
         tuple: (should_gate: bool, reason: str or None)
