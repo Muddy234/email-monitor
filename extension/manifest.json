@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "Email Monitor — Outlook Bridge",
+  "name": "Clarion AI",
+  "short_name": "Clarion",
   "version": "1.0.0",
-  "description": "Bridges Outlook Online with the Email Monitor pipeline via WebSocket.",
+  "description": "Syncs your Outlook emails for AI-powered analysis and draft generation.",
 
   "permissions": [
     "alarms",
@@ -10,11 +11,11 @@
   ],
 
   "host_permissions": [
-    "*://outlook.cloud.microsoft/*",
-    "*://outlook.live.com/*",
-    "*://outlook.office365.com/*",
-    "*://outlook.office.com/*",
-    "http://localhost/*"
+    "https://outlook.cloud.microsoft/*",
+    "https://outlook.live.com/*",
+    "https://outlook.office365.com/*",
+    "https://outlook.office.com/*",
+    "https://frbvdoszenrrlswegsxq.supabase.co/*"
   ],
 
   "background": {
@@ -26,7 +27,8 @@
       "matches": [
         "https://outlook.cloud.microsoft/*",
         "https://outlook.live.com/*",
-        "https://outlook.office365.com/*"
+        "https://outlook.office365.com/*",
+        "https://outlook.office.com/*"
       ],
       "js": ["content.js"],
       "run_at": "document_idle"

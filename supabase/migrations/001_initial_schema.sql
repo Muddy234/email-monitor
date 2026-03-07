@@ -1,4 +1,4 @@
--- Email Monitor: Initial Supabase schema
+-- Clarion AI: Initial Supabase schema
 -- Tables, RLS policies, and RPC functions for the extension + worker architecture.
 
 -- ============================================================
@@ -7,7 +7,7 @@
 create table public.profiles (
     id uuid primary key references auth.users on delete cascade,
     email_provider_origin text default 'outlook.live.com',
-    process_flagged_only boolean default true,
+    process_flagged_only boolean default false,
     max_emails_to_scan integer default 500,
     start_date timestamptz,
     user_email_aliases text[] default '{}',
@@ -29,7 +29,8 @@ create policy "Users can insert own profile"
 create or replace function public.handle_new_user()
 returns trigger as $$
 begin
-    insert into public.profiles (id) values (new.id);
+    insert into public.profiles (id, user_email_aliases, process_flagged_only)
+    values (new.id, ARRAY[new.email], false);
     return new;
 end;
 $$ language plpgsql security definer;

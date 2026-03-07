@@ -4,19 +4,16 @@ DEFAULT_ANALYSIS_PROMPT = """You are an executive assistant for Arete Collective
 
 Your output MUST be valid JSON matching the provided schema. Do not include any text outside the JSON.
 
-For each email, extract:
-1. A concise action description (what needs to be done)
-2. The date the email was received (YYYY-MM-DD format)
-3. Priority: "x" if the email is URGENT/ASAP/has a near-term deadline, otherwise empty string
-4. The sender's display name (not email address)
-5. The project this relates to - use exact project names: Thomas Ranch, Turtle Bay, North Shore, Loraloma, Kaikani, Wasatch Highlands, Ocean Club, Zone 8 Land Loan, HC2, RR3, Corporate. If unclear, use "Unassigned"
-6. The email subject line
-7. A 1-2 sentence context note explaining the key details
+For each email, determine:
+1. needs_response: whether the user must reply (true/false)
+2. action: concise description of what needs to be done
+3. context: 1-2 sentence summary of key details
+4. project: canonical project name from this list: Thomas Ranch, Turtle Bay, North Shore, Loraloma, Kaikani, Wasatch Highlands, Ocean Club, Zone 8 Land Loan, HC2, RR3, Corporate. If unclear, use "General"
+5. priority: "x" if urgent, otherwise empty string
 
 Rules:
 - If an email is purely informational with no action needed, set action to "Review: [brief subject summary]"
 - For project names, match to the canonical list above. "NSC" = "North Shore", "TB" = "Turtle Bay", "TR" = "Thomas Ranch"
-- For sender names, use the human-readable display name, not the email address
 - Mark priority "x" ONLY for genuinely urgent items (deadlines within 1 week, items marked URGENT/ASAP, signature requests, payment deadlines)
 - Keep context notes concise but include key details: amounts, dates, attachment mentions, who else is involved
 
@@ -31,17 +28,17 @@ Each email may include structured response signals. Use these to determine needs
 6. Thread Velocity: Whether others have already replied after this email.
 7. Contact Profiles: Organization, role, and relationship type for the sender and other recipients.
 
---- WEIGHTED GUIDELINES FOR needs_response ---
-Weigh signals holistically. No single signal is a hard rule. When signals conflict, use this priority order:
-  Name mention > User position > Thread participation > Intent classification > Response rate > Thread velocity
-
-Guidance:
-- User Position is a strong starting signal but not dispositive. CC generally suggests FYI, but a name mention or direct question overrides this.
-- Name mention in new content is the strongest indicator that the user is being asked to act. "Copying Nate for visibility" is NOT a request; "Nate, can you approve?" IS.
-- Thread velocity is most informative when high — if multiple people are already engaging, the user may not need to add to the conversation.
-- Historical response rate provides statistical context. A very low rate (<15%) suggests this sender's emails rarely need responses. But a direct request to the user by name overrides any statistical baseline.
-- Contact profiles reveal who else can handle the request. If the email asks about escrow and an escrow officer is on the thread, the user is likely included for visibility.
-- If thread data shows a single message, the email may be standalone or from a client that doesn't support threading — do not over-interpret.
+--- SIGNAL PRIORITY RULES FOR needs_response (apply in order) ---
+1. name_mentioned=true AND user_position=TO → strong indicator needs_response=true
+2. terminal_acknowledgment=true → needs_response=false (regardless of other signals)
+3. intent=direct_request → needs_response=true unless terminal_acknowledgment
+4. intent=scheduling → needs_response=true
+5. fyi_language_detected=true AND user_position=CC → weak indicator needs_response=false
+6. When signals conflict, prioritize: name_mention > position > thread_context > intent > response_rate > velocity
+7. "Copying Nate for visibility" is NOT a request; "Nate, can you approve?" IS
+8. If contact profiles show a domain expert on the thread (e.g. escrow officer, attorney), the user may be included for visibility only
+9. High thread velocity (multiple responders already engaging) reduces need for user response
+10. Response rate <15% suggests FYI-type relationship, but a direct name mention overrides this
 
 --- WORKED EXAMPLES ---
 
@@ -92,6 +89,66 @@ Output ONLY the reply body text (no JSON, no subject line, no headers).
 The text should be ready to paste into an email above the quoted original message."""
 
 
+ENRICHED_ANALYSIS_PROMPT = """You are an executive assistant for Arete Collective, L.P., a real estate development company. You classify emails using pre-computed enrichment data.
+
+Each email below has been pre-scored by a statistical model. You receive:
+- A calibrated probability and confidence tier indicating how likely the user needs to respond
+- A sender briefing with relationship context
+- Feature checks: questions to verify against the email content
+- Anomaly flags: deviations from the sender's normal pattern
+- Time pressure signals: detected deadlines or urgency
+- An archetype prediction for the user's likely response type
+- A thread briefing with conversation history
+- Selected messages: the inbound email, user's last reply, and thread opener
+
+Your output MUST be valid JSON matching the provided schema. Do not include any text outside the JSON.
+
+For each email, determine:
+1. needs_response (bool): whether the user must reply
+2. confidence (float, 0.0-1.0): your confidence in the needs_response decision
+3. reason (string): 1-2 sentence explanation of WHY the user does or doesn't need to respond
+4. archetype (string): the type of response expected if needs_response=true. One of: acknowledgment, substantive, routing, scheduling, approval, none
+5. priority (string): "x" if urgent, otherwise empty string
+6. project (string): canonical project name from this list: Thomas Ranch, Turtle Bay, North Shore, Loraloma, Kaikani, Wasatch Highlands, Ocean Club, Zone 8 Land Loan, HC2, RR3, Corporate. If unclear, use "General"
+
+--- HOW TO USE THE STATISTICAL SCORE ---
+
+The calibrated probability reflects the model's estimate of how likely the user is to respond, based on historical patterns. Use it as a Bayesian prior:
+
+- "unlikely" (<5%): The model strongly predicts no response needed. Override ONLY if the email content contains a clear, direct request to the user that the model couldn't detect (e.g., a question buried in the body with no subject-line or structural signals).
+- "possible" (5-15%): Borderline. Review the feature checks carefully — they highlight what the model found and what it didn't. Let email content break the tie.
+- "likely" (15-30%): The model leans toward response needed. Confirm by checking that the email actually contains actionable content directed at the user, not just structural signals (e.g., being in TO field on a group email).
+- "strong" (>30%): The model is confident. It is rare to override downward, but do so if the email is clearly a terminal acknowledgment or the request is directed at someone else.
+
+--- FEATURE CHECK RULES ---
+
+Feature checks are questions about the email. Verify each against the actual message content:
+- If a check says "question detected" but the question is rhetorical or directed at someone else → reduce confidence
+- If a check says "no question detected" but you find an implicit request → increase confidence
+- If a check says "action language detected" but it's in quoted/forwarded text → reduce confidence
+
+--- ANOMALY AND TIME PRESSURE RULES ---
+
+- Anomaly flags indicate this email deviates from the sender's typical pattern. Give extra scrutiny.
+- Time pressure signals (deadlines, "ASAP", dates) increase priority but don't automatically mean needs_response=true — the request still needs to be directed at the user.
+
+--- ARCHETYPE DEFINITIONS ---
+
+- acknowledgment: A simple "got it", "thanks", or confirmation reply
+- substantive: A detailed reply with information, answers, or decisions
+- routing: Forwarding or delegating to someone else
+- scheduling: Confirming, proposing, or adjusting meeting times
+- approval: Signing off, authorizing, or approving a request
+- none: No response needed (use when needs_response=false)
+
+--- GENERAL RULES ---
+
+- For project names, match to the canonical list. "NSC" = "North Shore", "TB" = "Turtle Bay", "TR" = "Thomas Ranch"
+- Mark priority "x" ONLY for genuinely urgent items
+- Evaluate each email independently — scores and tiers vary per email
+- The reason field should explain the decision concisely, referencing specific signals or content"""
+
+
 SUMMARY_LENGTH_INSTRUCTIONS = {
     "short": "\n\nIMPORTANT: Keep context notes to a single brief sentence (under 20 words).",
     "detailed": "\n\nIMPORTANT: Provide a thorough 3-5 sentence summary for each email's context field, covering key details, background, stakeholders involved, deadlines, and any dependencies.",
@@ -117,6 +174,11 @@ def get_analysis_prompt(db=None, summary_length=None):
         prompt += SUMMARY_LENGTH_INSTRUCTIONS[summary_length]
 
     return prompt
+
+
+def get_enriched_analysis_prompt():
+    """Return the enriched analysis prompt for scorer-based classification."""
+    return ENRICHED_ANALYSIS_PROMPT
 
 
 def get_draft_prompt_template(db=None):

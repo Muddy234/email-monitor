@@ -5,7 +5,7 @@ import os
 import subprocess
 import sys
 
-logger = logging.getLogger("email_monitor")
+logger = logging.getLogger("clarion")
 
 # Windows-specific: suppress console window for subprocesses
 _CREATION_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0

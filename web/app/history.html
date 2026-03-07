@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://esm.sh; connect-src https://*.supabase.co wss://*.supabase.co; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:;">
+    <title>History — Clarion AI</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/app.css">
+</head>
+<body class="em-app">
+    <nav id="em-sidebar" class="em-sidebar"></nav>
+    <main class="em-main em-fade-in">
+        <div class="em-page-header">
+            <div>
+                <h1 class="em-page-title">Pipeline History</h1>
+                <p class="em-page-subtitle">Recent processing runs</p>
+            </div>
+            <button class="em-btn em-btn-secondary em-btn-sm" id="refreshBtn">Refresh</button>
+        </div>
+
+        <div class="em-card">
+            <div class="em-table-wrap">
+                <table class="em-table" id="historyTable">
+                    <thead>
+                        <tr>
+                            <th>Started</th>
+                            <th>Trigger</th>
+                            <th>Status</th>
+                            <th>Scanned</th>
+                            <th>Processed</th>
+                            <th>Drafts</th>
+                            <th>Duration</th>
+                        </tr>
+                    </thead>
+                    <tbody id="historyBody">
+                        <tr><td colspan="7"><div class="em-skeleton em-skeleton-row"></div></td></tr>
+                        <tr><td colspan="7"><div class="em-skeleton em-skeleton-row"></div></td></tr>
+                        <tr><td colspan="7"><div class="em-skeleton em-skeleton-row"></div></td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <script type="module" src="/js/pages/history.js"></script>
+</body>
+</html>

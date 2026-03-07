@@ -5,9 +5,9 @@ import logging
 import re
 import subprocess
 
-from .prompts import DEFAULT_ANALYSIS_PROMPT
+from .prompts import DEFAULT_ANALYSIS_PROMPT, ENRICHED_ANALYSIS_PROMPT
 
-logger = logging.getLogger("email_monitor")
+logger = logging.getLogger("clarion")
 
 CLAUDE_JSON_SCHEMA = {
     "type": "object",
@@ -21,40 +21,28 @@ CLAUDE_JSON_SCHEMA = {
                         "type": "integer",
                         "description": "1-based index matching the EMAIL N header"
                     },
+                    "needs_response": {
+                        "type": "boolean",
+                        "description": "Whether the user needs to reply to this email"
+                    },
                     "action": {
                         "type": "string",
-                        "description": "Concise action description"
-                    },
-                    "date": {
-                        "type": "string",
-                        "description": "YYYY-MM-DD format"
-                    },
-                    "priority": {
-                        "type": "string",
-                        "description": "x if urgent, empty string otherwise"
-                    },
-                    "from_name": {
-                        "type": "string",
-                        "description": "Sender display name"
-                    },
-                    "project": {
-                        "type": "string",
-                        "description": "Canonical project name"
-                    },
-                    "subject": {
-                        "type": "string",
-                        "description": "Email subject line"
+                        "description": "Concise action the user should take (1-2 sentences)"
                     },
                     "context": {
                         "type": "string",
-                        "description": "Summary of the email"
+                        "description": "Brief summary of the email content"
                     },
-                    "needs_response": {
-                        "type": "boolean",
-                        "description": "True if this email requires a reply from the user"
+                    "project": {
+                        "type": "string",
+                        "description": "Canonical project name from the project list, or 'General'"
+                    },
+                    "priority": {
+                        "type": "string",
+                        "description": "'x' if urgent (deadline <1 week, URGENT keyword, signature/payment request), else empty string"
                     }
                 },
-                "required": ["email_index", "action", "date", "priority", "from_name", "project", "subject", "context", "needs_response"],
+                "required": ["email_index", "needs_response", "action", "context", "project", "priority"],
                 "additionalProperties": False
             }
         }
@@ -62,6 +50,136 @@ CLAUDE_JSON_SCHEMA = {
     "required": ["email_actions"],
     "additionalProperties": False
 }
+
+# Schema for enriched classification pipeline (reason + archetype + confidence)
+ENRICHED_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "email_actions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "email_index": {
+                        "type": "integer",
+                        "description": "1-based index matching the EMAIL N header"
+                    },
+                    "needs_response": {
+                        "type": "boolean",
+                        "description": "Whether the user needs to reply to this email"
+                    },
+                    "confidence": {
+                        "type": "number",
+                        "description": "Confidence in the needs_response decision (0.0-1.0)"
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "1-2 sentence explanation of why the user does or doesn't need to respond"
+                    },
+                    "archetype": {
+                        "type": "string",
+                        "enum": ["acknowledgment", "substantive", "routing", "scheduling", "approval", "none"],
+                        "description": "Type of response expected"
+                    },
+                    "priority": {
+                        "type": "string",
+                        "description": "'x' if urgent, else empty string"
+                    },
+                    "project": {
+                        "type": "string",
+                        "description": "Canonical project name from the project list, or 'General'"
+                    }
+                },
+                "required": ["email_index", "needs_response", "confidence", "reason", "archetype", "priority", "project"],
+                "additionalProperties": False
+            }
+        }
+    },
+    "required": ["email_actions"],
+    "additionalProperties": False
+}
+
+
+def _strip_quoted_content(body):
+    """Strip quoted reply chains, keeping only the newest message."""
+    for marker in ["From:", "-----Original Message", "________________________________"]:
+        idx = body.find(marker)
+        if idx > 0:
+            return body[:idx].rstrip()
+    return body
+
+
+def _validate_results(claude_results):
+    """Validate each classification individually.
+
+    Returns (valid_list, invalid_indices) so a single bad entry
+    doesn't sink the whole batch.
+    """
+    valid = []
+    invalid_indices = []
+
+    for result in claude_results:
+        if (
+            isinstance(result.get("email_index"), int)
+            and isinstance(result.get("needs_response"), bool)
+            and isinstance(result.get("action"), str)
+            and result.get("action", "").strip()
+        ):
+            valid.append(result)
+        else:
+            invalid_indices.append(result.get("email_index"))
+            logger.warning(f"  Invalid classification for email {result.get('email_index')}: {result}")
+
+    return valid, invalid_indices
+
+
+def _validate_enriched_results(claude_results):
+    """Validate enriched classification results (reason/archetype/confidence schema).
+
+    Returns (valid_list, invalid_indices).
+    """
+    valid_archetypes = {"acknowledgment", "substantive", "routing", "scheduling", "approval", "none"}
+    valid = []
+    invalid_indices = []
+
+    for result in claude_results:
+        if (
+            isinstance(result.get("email_index"), int)
+            and isinstance(result.get("needs_response"), bool)
+            and isinstance(result.get("reason"), str)
+            and result.get("reason", "").strip()
+            and result.get("archetype", "") in valid_archetypes
+        ):
+            # Clamp confidence to [0, 1]
+            conf = result.get("confidence")
+            if isinstance(conf, (int, float)):
+                result["confidence"] = max(0.0, min(1.0, float(conf)))
+            else:
+                result["confidence"] = 0.5
+            valid.append(result)
+        else:
+            invalid_indices.append(result.get("email_index"))
+            logger.warning(f"  Invalid enriched classification for email {result.get('email_index')}: {result}")
+
+    return valid, invalid_indices
+
+
+def _merge_known_fields(claude_results, email_batch):
+    """Merge pre-known email metadata back into Claude's classification results.
+
+    Claude no longer returns from_name, subject, or date — we stitch them
+    back in from the original email data so downstream consumers stay unchanged.
+    """
+    email_lookup = {i + 1: email for i, email in enumerate(email_batch)}
+
+    for result in claude_results:
+        email = email_lookup.get(result.get("email_index"))
+        if email:
+            result.setdefault("from_name", email.get("sender_name", email.get("sender", "")))
+            result.setdefault("subject", email.get("subject", ""))
+            result.setdefault("date", str(email.get("received_time", ""))[:10])
+
+    return claude_results
 
 
 class ClaudeAnalyzer:
@@ -74,7 +192,7 @@ class ClaudeAnalyzer:
 
     def __init__(self, config, system_prompt=None):
         self.backend = config.get("claude_backend", "api")
-        self.model = config.get("claude_cli_model", "sonnet")
+        self.model = config.get("classification_model", "haiku")
         self.timeout = config.get("claude_cli_timeout_seconds", 120)
         self.max_body_chars = config.get("max_body_chars", 5000)
         self.system_prompt = system_prompt or DEFAULT_ANALYSIS_PROMPT
@@ -98,9 +216,10 @@ class ClaudeAnalyzer:
             received = email_data.get("received_time")
             folder = email_data.get("folder", "Inbox")
             attachments = email_data.get("attachment_names", [])
-            body = email_data.get("body", "") or ""
+            raw_body = email_data.get("body", "") or ""
+            body = _strip_quoted_content(raw_body)
 
-            date_str = received.strftime("%Y-%m-%d %H:%M") if received else "unknown"
+            date_str = str(received)[:16] if received else "unknown"
             attach_str = ", ".join(attachments) if attachments else "None"
 
             if len(body) > self.max_body_chars:
@@ -242,14 +361,80 @@ class ClaudeAnalyzer:
         lines.append("--- END SIGNALS ---")
         return "\n".join(lines)
 
+    def _build_system_prompt(self):
+        """Build the full system prompt (schema + analysis instructions)."""
+        return (
+            "You must return ONLY a valid JSON object matching this exact schema:\n\n"
+            + json.dumps(CLAUDE_JSON_SCHEMA, indent=2)
+            + "\n\nOutput ONLY the raw JSON object. "
+            "No markdown fences. No preamble. No explanation. "
+            "Start your response with { and end with }.\n\n"
+            + self.system_prompt
+        )
+
+    def build_batch_params(self, email_batch):
+        """Build a Batches API request dict for a batch of emails.
+
+        Returns a dict with 'custom_id' and 'params' keys, suitable for
+        passing to api_client.create_message_batch().
+        """
+        from .api_client import resolve_model
+
+        prompt_text = self._build_prompt(email_batch)
+        system_text = self._build_system_prompt()
+        scaled_max_tokens = min(2048, 256 + len(email_batch) * 150)
+
+        return {
+            "custom_id": "classification",
+            "params": {
+                "model": resolve_model(self.model),
+                "max_tokens": scaled_max_tokens,
+                "temperature": 0,
+                "system": [
+                    {"type": "text", "text": system_text, "cache_control": {"type": "ephemeral"}}
+                ],
+                "messages": [{"role": "user", "content": prompt_text}],
+            },
+        }
+
+    def parse_batch_result(self, raw_text, email_batch):
+        """Parse a raw text response (from Batches API) into validated results.
+
+        Same parsing/validation pipeline as _analyze_via_api, but without
+        making the API call — the caller already has the response text.
+        """
+        if not raw_text:
+            return None
+
+        actions = self._extract_json_from_text(raw_text)
+        if actions is None:
+            logger.warning("  Batch result parse failed")
+            logger.debug(f"  Response ({len(raw_text)} chars): {raw_text[:500]}")
+            return None
+
+        valid, invalid_indices = _validate_results(actions)
+        if invalid_indices:
+            logger.warning(f"  Dropped {len(invalid_indices)} malformed entries: indices {invalid_indices}")
+
+        if valid:
+            valid = _merge_known_fields(valid, email_batch)
+        return valid if valid else None
+
     def analyze_batch(self, email_batch):
         """Send a batch of emails to Claude, return list of action item dicts.
 
         Routes to the API or CLI backend based on self.backend.
+        Merges known fields (from_name, subject, date) back into results
+        so Claude doesn't need to echo them.
         """
         if self.backend == "cli":
-            return self._analyze_via_cli(email_batch)
-        return self._analyze_via_api(email_batch)
+            results = self._analyze_via_cli(email_batch)
+        else:
+            results = self._analyze_via_api(email_batch)
+
+        if results is not None:
+            results = _merge_known_fields(results, email_batch)
+        return results
 
     # ------------------------------------------------------------------
     # API backend
@@ -260,23 +445,21 @@ class ClaudeAnalyzer:
         from .api_client import call_claude, resolve_model
 
         prompt_text = self._build_prompt(email_batch)
+        system = self._build_system_prompt()
 
-        system = (
-            self.system_prompt
-            + "\n\nYou are a text analysis assistant. "
-            "Simply analyze the emails provided and respond with valid JSON "
-            "matching the schema. Output ONLY the JSON object, no other text.\n\n"
-            + json.dumps(CLAUDE_JSON_SCHEMA, indent=2)
-        )
+        # Scale max_tokens to batch size (≈150 tokens per email + overhead)
+        scaled_max_tokens = min(2048, 256 + len(email_batch) * 150)
 
         try:
             raw_output = call_claude(
                 prompt=prompt_text,
                 system_prompt=system,
                 model=resolve_model(self.model),
-                max_tokens=8192,
+                max_tokens=scaled_max_tokens,
                 timeout=self.timeout,
                 api_key=self.api_key,
+                temperature=0,
+                cache_system_prompt=True,
             )
         except Exception as e:
             logger.error(f"  Anthropic API call failed: {e}")
@@ -287,12 +470,51 @@ class ClaudeAnalyzer:
             return None
 
         actions = self._extract_json_from_text(raw_output)
-        if actions is not None:
-            return actions
 
-        logger.error("  Could not extract JSON from Claude API response")
-        logger.debug(f"  Response ({len(raw_output)} chars): {raw_output[:500]}")
-        return None
+        # Single retry on parse failure
+        if actions is None:
+            logger.warning("  Initial parse failed, retrying with repair prompt")
+            actions = self._retry_parse(raw_output)
+
+        if actions is None:
+            logger.error("  Retry parse also failed — batch lost")
+            logger.debug(f"  Response ({len(raw_output)} chars): {raw_output[:500]}")
+            return None
+
+        # Validate individual entries; drop malformed ones instead of losing the batch
+        valid, invalid_indices = _validate_results(actions)
+        if invalid_indices:
+            logger.warning(f"  Dropped {len(invalid_indices)} malformed entries: indices {invalid_indices}")
+        return valid if valid else None
+
+    def _retry_parse(self, original_response):
+        """Make one retry call with a tight prompt when the initial parse fails."""
+        from .api_client import call_claude, resolve_model
+
+        retry_prompt = (
+            "Your previous response could not be parsed as valid JSON. "
+            "Here is what you returned (truncated):\n\n"
+            f"{original_response[:500]}\n\n"
+            "Please return ONLY the JSON object with the email_actions array. "
+            "No markdown fences. No explanation. No preamble. "
+            "Start with { and end with }."
+        )
+
+        try:
+            raw_output = call_claude(
+                prompt=retry_prompt,
+                system_prompt="You are a JSON repair assistant. Return only valid JSON.",
+                model=resolve_model(self.model),
+                max_tokens=2048,
+                timeout=self.timeout,
+                api_key=self.api_key,
+                temperature=0,
+            )
+        except Exception as e:
+            logger.error(f"  Retry API call failed: {e}")
+            return None
+
+        return self._extract_json_from_text(raw_output)
 
     # ------------------------------------------------------------------
     # CLI backend (local fallback)
@@ -391,3 +613,133 @@ class ClaudeAnalyzer:
                 pass
 
         return None
+
+    # ------------------------------------------------------------------
+    # Enriched classification (scorer-based pipeline)
+    # ------------------------------------------------------------------
+
+    def _build_enriched_prompt(self, enrichment_records):
+        """Format enrichment records into a structured prompt for Haiku."""
+        parts = [
+            "Classify the following emails using the enrichment data provided.\n"
+        ]
+
+        for i, rec in enumerate(enrichment_records, 1):
+            prob = rec["calibrated_probability"]
+            tier = rec["confidence_tier"]
+            sb = rec["sender_briefing"]
+            tb = rec["thread_briefing"]
+
+            parts.append(f"=== EMAIL {i} (score: {prob:.0%} {tier}) ===")
+            parts.append(f"SENDER: {sb['summary']}")
+            parts.append(f"SCORE: {rec['score_explanation']}")
+
+            if rec["feature_checks"]:
+                parts.append("FEATURE CHECKS:")
+                for check in rec["feature_checks"]:
+                    parts.append(f"- {check}")
+
+            flags = rec.get("anomaly_flags", [])
+            parts.append(f"ANOMALIES: {'; '.join(flags) if flags else 'None'}")
+
+            tp = rec.get("time_pressure")
+            parts.append(f"TIME PRESSURE: {tp if tp else 'None'}")
+
+            parts.append(f"ARCHETYPE: {rec.get('archetype_prediction', 'standard_reply')}")
+            parts.append(f"THREAD: {tb['summary']}")
+
+            # Messages
+            parts.append("--- MESSAGES ---")
+            msgs = rec.get("messages", {})
+            inbound = msgs.get("inbound")
+            if inbound:
+                parts.append(f"[Inbound] From: {inbound['sender']}")
+                parts.append(inbound.get("body", "")[:2000])
+
+            user_last = msgs.get("user_last")
+            if user_last:
+                parts.append(f"\n[User's last reply] {user_last.get('received_time', '')}")
+                parts.append(user_last.get("body", "")[:1000])
+
+            opener = msgs.get("thread_opener")
+            if opener:
+                parts.append(f"\n[Thread opener] From: {opener['sender']}")
+                parts.append(opener.get("body", "")[:500])
+
+            parts.append("")
+
+        parts.append("=== END ===")
+        return "\n".join(parts)
+
+    def build_enriched_batch_params(self, enrichment_records, custom_id="classification"):
+        """Build a Batches API request dict for enriched classification.
+
+        Args:
+            enrichment_records: list of enrichment dicts from assemble_enrichment().
+            custom_id: identifier for this request in the batch.
+
+        Returns:
+            dict with 'custom_id' and 'params' keys.
+        """
+        from .api_client import resolve_model
+
+        prompt_text = self._build_enriched_prompt(enrichment_records)
+
+        system_text = (
+            "You must return ONLY a valid JSON object matching this exact schema:\n\n"
+            + json.dumps(ENRICHED_JSON_SCHEMA, indent=2)
+            + "\n\nOutput ONLY the raw JSON object. "
+            "No markdown fences. No preamble. No explanation. "
+            "Start your response with { and end with }.\n\n"
+            + ENRICHED_ANALYSIS_PROMPT
+        )
+
+        scaled_max_tokens = min(2048, 256 + len(enrichment_records) * 150)
+
+        return {
+            "custom_id": custom_id,
+            "params": {
+                "model": resolve_model(self.model),
+                "max_tokens": scaled_max_tokens,
+                "temperature": 0,
+                "system": [
+                    {"type": "text", "text": system_text, "cache_control": {"type": "ephemeral"}}
+                ],
+                "messages": [{"role": "user", "content": prompt_text}],
+            },
+        }
+
+    def parse_enriched_batch_result(self, raw_text, enrichment_records):
+        """Parse a batch response and map results back to email IDs.
+
+        Uses the same JSON extraction as parse_batch_result, but maps
+        email_index back to the original email_id from enrichment records.
+        Validates enriched schema fields (reason, archetype, confidence).
+        """
+        if not raw_text:
+            return None
+
+        actions = self._extract_json_from_text(raw_text)
+        if actions is None:
+            logger.warning("  Enriched batch result parse failed")
+            return None
+
+        valid, invalid_indices = _validate_enriched_results(actions)
+        if invalid_indices:
+            logger.warning(f"  Dropped {len(invalid_indices)} malformed entries: indices {invalid_indices}")
+
+        if not valid:
+            return None
+
+        # Map email_index (1-based) back to email_id + merge metadata
+        for result in valid:
+            idx = result.get("email_index", 0) - 1
+            if 0 <= idx < len(enrichment_records):
+                rec = enrichment_records[idx]
+                result["_email_id"] = rec["email_id"]
+                # Merge sender/subject from the enrichment record messages
+                inbound = rec.get("messages", {}).get("inbound", {})
+                result.setdefault("from_name", inbound.get("sender", ""))
+                result.setdefault("date", str(inbound.get("received_time", ""))[:10])
+
+        return valid

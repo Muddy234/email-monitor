@@ -3,17 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Email Monitor uses AI to read, prioritize, and draft replies to your Outlook email. Save 2+ hours every morning. Free Chrome Extension, zero IT approval.">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:;">
+    <meta name="description" content="Clarion AI uses AI to read, prioritize, and draft replies to your Outlook email. Save 2+ hours every morning. Free Chrome Extension, zero IT approval.">
     <meta name="author" content="Arete Collective, L.P.">
 
     <!-- Open Graph -->
-    <meta property="og:title" content="Email Monitor — AI-Powered Email Intelligence">
+    <meta property="og:title" content="Clarion AI — AI-Powered Email Intelligence">
     <meta property="og:description" content="Your inbox, handled. Before your first meeting. AI reads, prioritizes, and drafts replies.">
     <meta property="og:type" content="website">
 
     <!-- Twitter Card -->
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="Email Monitor — AI-Powered Email Intelligence">
+    <meta name="twitter:title" content="Clarion AI — AI-Powered Email Intelligence">
     <meta name="twitter:description" content="Your inbox, handled. Before your first meeting.">
 
     <!-- Favicon -->
@@ -30,7 +31,7 @@
     {
         "@context": "https://schema.org",
         "@type": "SoftwareApplication",
-        "name": "Email Monitor",
+        "name": "Clarion AI",
         "applicationCategory": "BusinessApplication",
         "browserRequirements": "Google Chrome",
         "description": "AI-powered email intelligence that reads, prioritizes, and drafts replies to your Outlook email.",
@@ -44,7 +45,7 @@
     }
     </script>
 
-    <title>Email Monitor — AI-Powered Email Intelligence for Outlook</title>
+    <title>Clarion AI — AI-Powered Email Intelligence for Outlook</title>
 </head>
 <body>
     <!-- Skip Link -->
@@ -56,12 +57,12 @@
     <header class="lp-navbar" id="navbar">
         <nav class="lp-container lp-navbar__inner" aria-label="Main navigation">
             <!-- Logo -->
-            <a href="#" class="lp-navbar__logo" aria-label="Email Monitor home">
+            <a href="#" class="lp-navbar__logo" aria-label="Clarion AI home">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28" aria-hidden="true">
                     <rect x="2" y="4" width="20" height="16" rx="2"/>
                     <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
                 </svg>
-                <span>Email Monitor</span>
+                <span>Clarion AI</span>
             </a>
 
             <!-- Nav Links (desktop) -->
@@ -73,6 +74,7 @@
 
             <!-- CTA + Hamburger -->
             <div class="lp-navbar__actions">
+                <a href="app/login.html" class="lp-navbar__login">Log In</a>
                 <a href="#" class="lp-btn lp-btn--primary lp-navbar__cta">Add to Chrome — Free</a>
                 <button class="lp-navbar__hamburger" id="nav-toggle" aria-label="Open menu" aria-expanded="false">
                     <span></span>
@@ -92,7 +94,7 @@
                 <div class="lp-hero__content">
                     <span class="lp-badge">AI-Powered Email Intelligence</span>
                     <h1 class="lp-hero__headline">Your inbox, handled.<br>Before your first meeting.</h1>
-                    <p class="lp-hero__subtitle">Email Monitor uses AI to read, prioritize, and draft replies to your email — saving 2+ hours every morning. Works with Outlook, requires zero IT approval.</p>
+                    <p class="lp-hero__subtitle">Clarion AI uses AI to read, prioritize, and draft replies to your email — saving 2+ hours every morning. Works with Outlook, requires zero IT approval.</p>
                     <div class="lp-hero__cta-group">
                         <a href="#" class="lp-btn lp-btn--primary lp-btn--lg">Add to Chrome — It's Free</a>
                         <a href="#how-it-works" class="lp-hero__secondary-link">
@@ -106,7 +108,7 @@
                 </div>
                 <div class="lp-hero__visual">
                     <div class="lp-hero__screenshot-wrapper">
-                        <img src="assets/images/hero-dashboard-mock.png" alt="Email Monitor dashboard showing priority inbox with AI-scored emails, category tags, and one-line summaries" width="720" height="450" class="lp-hero__screenshot">
+                        <img src="assets/images/hero-dashboard.png" alt="Clarion AI dashboard showing priority inbox with AI-scored emails, category tags, and one-line summaries" width="720" height="450" class="lp-hero__screenshot">
                     </div>
                 </div>
             </div>
@@ -158,7 +160,7 @@
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20" aria-hidden="true" class="lp-callout__icon">
                         <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
                     </svg>
-                    <p>Email Monitor requires no API access, no OAuth tokens, and no admin permissions. It works at the browser layer — the same way you already read email.</p>
+                    <p>Clarion AI requires no API access, no OAuth tokens, and no admin permissions. It works at the browser layer — the same way you already read email.</p>
                 </div>
             </div>
         </section>
@@ -180,13 +182,17 @@
                     <div class="lp-step">
                         <span class="lp-step__number">2</span>
                         <h3 class="lp-step__title">Open Outlook Web</h3>
-                        <p class="lp-step__desc">Email Monitor reads your inbox through the browser — the same Outlook you already use.</p>
+                        <p class="lp-step__desc">Clarion AI reads your inbox through the browser — the same Outlook you already use.</p>
                     </div>
                     <div class="lp-step">
                         <span class="lp-step__number">3</span>
                         <h3 class="lp-step__title">Let AI Handle the Rest</h3>
                         <p class="lp-step__desc">Every email is scored, categorized, and summarized. Reply drafts are written in your voice.</p>
                     </div>
+                </div>
+
+                <div class="lp-how-it-works__screenshot lp-animate">
+                    <img src="assets/images/feature-emails.png" alt="Clarion AI emails view showing AI-generated summaries and action items for each email" width="1280" height="579" class="lp-showcase__img">
                 </div>
             </div>
         </section>
@@ -277,6 +283,10 @@
                         <p class="lp-feature-card__desc">Full audit trail of every email processed. See exactly what happened and when.</p>
                     </div>
                 </div>
+
+                <div class="lp-feature-showcase lp-animate">
+                    <img src="assets/images/feature-history.png" alt="Pipeline history showing completed processing runs with scan counts and durations" width="1280" height="579" class="lp-showcase__img">
+                </div>
             </div>
         </section>
 
@@ -291,7 +301,7 @@
                 <div class="lp-comparison__grid lp-animate">
                     <!-- Without -->
                     <div class="lp-comparison__card lp-comparison__card--without">
-                        <h3 class="lp-comparison__card-title">Without Email Monitor</h3>
+                        <h3 class="lp-comparison__card-title">Without Clarion AI</h3>
                         <ul class="lp-timeline">
                             <li class="lp-timeline__item">
                                 <time class="lp-timeline__time">7:00 AM</time>
@@ -315,7 +325,7 @@
 
                     <!-- With -->
                     <div class="lp-comparison__card lp-comparison__card--with">
-                        <h3 class="lp-comparison__card-title">With Email Monitor</h3>
+                        <h3 class="lp-comparison__card-title">With Clarion AI</h3>
                         <ul class="lp-timeline">
                             <li class="lp-timeline__item lp-timeline__item--done">
                                 <time class="lp-timeline__time">6:50 AM</time>
@@ -389,7 +399,7 @@
                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20" aria-hidden="true" class="lp-faq__chevron"><path d="m6 9 6 6 6-6"/></svg>
                         </button>
                         <div class="lp-faq__answer" id="faq-1" role="region">
-                            <p>Email Monitor processes email locally through your browser. Content is sent to AI over encrypted HTTPS and is never stored on our servers. We never see your password or have access to your email account.</p>
+                            <p>Clarion AI processes email locally through your browser. Content is sent to AI over encrypted HTTPS and is never stored on our servers. We never see your password or have access to your email account.</p>
                         </div>
                     </div>
 
@@ -409,7 +419,7 @@
                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20" aria-hidden="true" class="lp-faq__chevron"><path d="m6 9 6 6 6-6"/></svg>
                         </button>
                         <div class="lp-faq__answer" id="faq-3" role="region">
-                            <p>Email Monitor works at the browser layer — the same way you read email. It doesn't use Microsoft's Mail API or OAuth tokens, so there's nothing for IT to approve. It's the same approach trusted by extensions like Grammarly and HubSpot Sales.</p>
+                            <p>Clarion AI works at the browser layer — the same way you read email. It doesn't use Microsoft's Mail API or OAuth tokens, so there's nothing for IT to approve. It's the same approach trusted by extensions like Grammarly and HubSpot Sales.</p>
                         </div>
                     </div>
 
@@ -452,7 +462,7 @@
         <section class="lp-final-cta" id="cta">
             <div class="lp-container lp-final-cta__inner">
                 <h2 class="lp-final-cta__heading">Take back your mornings.</h2>
-                <p class="lp-final-cta__subtitle">Install Email Monitor in 60 seconds. Free forever for the Chrome Extension.</p>
+                <p class="lp-final-cta__subtitle">Install Clarion AI in 60 seconds. Free forever for the Chrome Extension.</p>
                 <a href="#" class="lp-btn lp-btn--primary lp-btn--xl">Add to Chrome — It's Free</a>
                 <p class="lp-final-cta__note">No credit card required. No IT approval needed.</p>
             </div>
@@ -465,12 +475,12 @@
     <footer class="lp-footer">
         <div class="lp-container lp-footer__inner">
             <div class="lp-footer__brand">
-                <a href="#" class="lp-navbar__logo lp-navbar__logo--light" aria-label="Email Monitor home">
+                <a href="#" class="lp-navbar__logo lp-navbar__logo--light" aria-label="Clarion AI home">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="24" height="24" aria-hidden="true">
                         <rect x="2" y="4" width="20" height="16" rx="2"/>
                         <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
                     </svg>
-                    <span>Email Monitor</span>
+                    <span>Clarion AI</span>
                 </a>
                 <p class="lp-footer__tagline">AI-powered email intelligence.</p>
             </div>
@@ -486,9 +496,9 @@
             <div class="lp-footer__links">
                 <h4>Company</h4>
                 <ul>
-                    <li><a href="#">Privacy Policy</a></li>
+                    <li><a href="privacy.html">Privacy Policy</a></li>
                     <li><a href="#">Terms of Service</a></li>
-                    <li><a href="mailto:contact@emailmonitor.com">Contact</a></li>
+                    <li><a href="mailto:contact@clarion-ai.app">Contact</a></li>
                 </ul>
             </div>
         </div>

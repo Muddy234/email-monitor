@@ -1,0 +1,1205 @@
+/* ================================================================
+   Clarion AI Dashboard
+   Warm, clean, minimal design system
+   Dashboard classes prefixed with em- to avoid collisions
+   ================================================================ */
+
+/* --- 1. Design Tokens --- */
+:root {
+    --em-sidebar-width: 240px;
+    --em-font: 'Inter', system-ui, -apple-system, sans-serif;
+
+    /* Warm stone palette (replaces cold slate) */
+    --em-slate-900: #1C1917;
+    --em-slate-800: #292524;
+    --em-slate-700: #44403C;
+    --em-slate-500: #78716C;
+    --em-slate-400: #A8A29E;
+    --em-slate-300: #D6D3D1;
+    --em-slate-200: #E7E5E4;
+    --em-slate-100: #F5F5F4;
+    --em-slate-50:  #FAFAF9;
+    --em-white:     #FFFFFF;
+
+    /* Navy accent */
+    --em-blue-700:  #1E3A5F;
+    --em-blue-600:  #2C4F7C;
+    --em-blue-500:  #3D6898;
+    --em-blue-100:  #E8EEF4;
+    --em-blue-50:   #F4F7FA;
+
+    /* Status colors — muted */
+    --em-emerald-600: #059669;
+    --em-emerald-500: #10B981;
+    --em-emerald-100: #D1FAE5;
+    --em-emerald-50:  #ECFDF5;
+
+    --em-amber-600: #D97706;
+    --em-amber-100: #FEF3C7;
+    --em-amber-50:  #FFFBEB;
+
+    --em-red-600:   #DC2626;
+    --em-red-100:   #FEE2E2;
+    --em-red-50:    #FEF2F2;
+
+    /* Sizing & effects */
+    --em-radius-lg: 16px;
+    --em-radius: 12px;
+    --em-radius-sm: 8px;
+    --em-radius-xs: 4px;
+    --em-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+    --em-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.05);
+    --em-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.08);
+    --em-transition: 200ms ease;
+    --em-page-padding: 40px;
+    --em-content-max: 1100px;
+}
+
+/* --- 2. Reset --- */
+.em-app {
+    margin: 0;
+    padding: 0;
+    font-family: var(--em-font);
+    font-size: 15px;
+    line-height: 1.5;
+    color: var(--em-slate-800);
+    background: var(--em-slate-50);
+    min-height: 100vh;
+    display: flex;
+}
+
+/* --- 3. Layout: Sidebar + Main --- */
+.em-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: var(--em-sidebar-width);
+    height: 100vh;
+    background: var(--em-slate-900);
+    color: var(--em-slate-300);
+    display: flex;
+    flex-direction: column;
+    padding: 24px 0;
+    z-index: 100;
+}
+
+.em-sidebar-brand {
+    padding: 0 20px 28px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--em-white);
+    letter-spacing: -0.01em;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.em-sidebar-brand-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: var(--em-blue-600);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--em-white);
+    flex-shrink: 0;
+}
+
+.em-sidebar-nav {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 0 8px;
+}
+
+.em-sidebar-link {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: var(--em-radius-sm);
+    color: var(--em-slate-400);
+    text-decoration: none;
+    font-size: 14px;
+    transition: background var(--em-transition), color var(--em-transition);
+}
+
+.em-sidebar-link:hover {
+    background: var(--em-slate-800);
+    color: var(--em-slate-200);
+}
+
+.em-sidebar-link.active {
+    background: var(--em-slate-800);
+    color: var(--em-white);
+}
+
+.em-sidebar-link svg {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+}
+
+.em-sidebar-footer {
+    padding: 16px 20px;
+    border-top: 1px solid var(--em-slate-700);
+    margin-top: auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.em-sidebar-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--em-slate-700);
+    color: var(--em-slate-300);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.em-sidebar-user-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.em-sidebar-email {
+    font-size: 12px;
+    color: var(--em-slate-400);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-bottom: 2px;
+}
+
+.em-sidebar-logout {
+    background: none;
+    border: none;
+    color: var(--em-slate-500);
+    font-size: 12px;
+    cursor: pointer;
+    padding: 0;
+    font-family: var(--em-font);
+    transition: color var(--em-transition);
+}
+
+.em-sidebar-logout:hover {
+    color: var(--em-red-600);
+}
+
+.em-main {
+    margin-left: var(--em-sidebar-width);
+    flex: 1;
+    min-width: 0;
+    max-width: calc(100vw - var(--em-sidebar-width));
+    min-height: 100vh;
+    padding: var(--em-page-padding);
+    box-sizing: border-box;
+}
+
+.em-page-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 28px;
+}
+
+.em-page-title {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--em-slate-900);
+    margin: 0;
+    letter-spacing: -0.02em;
+}
+
+.em-page-subtitle {
+    font-size: 14px;
+    color: var(--em-slate-500);
+    margin: 4px 0 0;
+}
+
+/* --- 4. Cards --- */
+.em-card {
+    background: var(--em-white);
+    border: 1px solid var(--em-slate-200);
+    border-radius: var(--em-radius-lg);
+    padding: 24px;
+    box-shadow: var(--em-shadow-sm);
+    transition: box-shadow var(--em-transition), transform var(--em-transition);
+}
+
+.em-card:hover {
+    box-shadow: var(--em-shadow-md);
+}
+
+.em-card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.em-metric-card {
+    background: var(--em-white);
+    border: 1px solid var(--em-slate-200);
+    border-radius: var(--em-radius-lg);
+    padding: 24px;
+    box-shadow: var(--em-shadow-sm);
+    transition: box-shadow var(--em-transition), transform var(--em-transition);
+    position: relative;
+    overflow: hidden;
+}
+
+.em-metric-card::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: var(--em-slate-300);
+    transition: background var(--em-transition);
+}
+
+.em-metric-card:nth-child(1)::before { background: var(--em-blue-600); }
+.em-metric-card:nth-child(2)::before { background: var(--em-amber-600); }
+.em-metric-card:nth-child(3)::before { background: var(--em-emerald-600); }
+
+.em-metric-card:hover {
+    box-shadow: var(--em-shadow-md);
+    transform: translateY(-1px);
+}
+
+.em-metric-label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--em-slate-500);
+    margin-bottom: 8px;
+}
+
+.em-metric-value {
+    font-size: 32px;
+    font-weight: 700;
+    color: var(--em-slate-900);
+    line-height: 1;
+}
+
+.em-metric-context {
+    font-size: 13px;
+    color: var(--em-slate-400);
+    margin-top: 10px;
+    line-height: 1.4;
+}
+
+/* --- 5. Badges --- */
+.em-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.5;
+}
+
+.em-badge-blue {
+    background: var(--em-blue-100);
+    color: var(--em-blue-700);
+}
+
+.em-badge-green {
+    background: var(--em-emerald-100);
+    color: var(--em-emerald-600);
+}
+
+.em-badge-amber {
+    background: var(--em-amber-100);
+    color: var(--em-amber-600);
+}
+
+.em-badge-red {
+    background: var(--em-red-100);
+    color: var(--em-red-600);
+}
+
+.em-badge-slate {
+    background: var(--em-slate-100);
+    color: var(--em-slate-700);
+}
+
+/* --- 6. Tables --- */
+.em-table-wrap {
+    overflow-x: auto;
+}
+
+.em-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.em-table th {
+    text-align: left;
+    padding: 10px 12px;
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--em-slate-500);
+    border-bottom: 1px solid var(--em-slate-200);
+    white-space: nowrap;
+}
+
+.em-table td {
+    padding: 12px;
+    border-bottom: 1px solid var(--em-slate-100);
+    color: var(--em-slate-700);
+    vertical-align: top;
+}
+
+.em-table tbody tr:nth-child(even) {
+    background: var(--em-slate-50);
+}
+
+.em-table tbody tr:hover {
+    background: var(--em-slate-100);
+}
+
+.em-table tbody tr.em-row-failed {
+    background: var(--em-red-50);
+}
+
+.em-table tbody tr.em-row-failed:hover {
+    background: var(--em-red-100);
+}
+
+.em-table-clickable {
+    cursor: pointer;
+}
+
+/* --- 7. Buttons --- */
+.em-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border-radius: var(--em-radius-sm);
+    font-size: 13px;
+    font-weight: 500;
+    font-family: var(--em-font);
+    border: none;
+    cursor: pointer;
+    transition: background var(--em-transition), opacity var(--em-transition), transform var(--em-transition);
+    line-height: 1.4;
+}
+
+.em-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.em-btn-primary {
+    background: var(--em-blue-600);
+    color: var(--em-white);
+}
+
+.em-btn-primary:hover:not(:disabled) {
+    background: var(--em-blue-700);
+}
+
+.em-btn-secondary {
+    background: var(--em-slate-100);
+    color: var(--em-slate-700);
+}
+
+.em-btn-secondary:hover:not(:disabled) {
+    background: var(--em-slate-200);
+}
+
+.em-btn-success {
+    background: var(--em-emerald-600);
+    color: var(--em-white);
+}
+
+.em-btn-success:hover:not(:disabled) {
+    background: var(--em-emerald-500);
+}
+
+.em-btn-danger {
+    background: var(--em-red-50);
+    color: var(--em-red-600);
+    border: 1px solid var(--em-red-100);
+}
+
+.em-btn-danger:hover:not(:disabled) {
+    background: var(--em-red-100);
+}
+
+.em-btn-sm {
+    padding: 4px 10px;
+    font-size: 12px;
+}
+
+/* --- 8. Filter Bar --- */
+.em-filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.em-filter-btn {
+    padding: 6px 14px;
+    border-radius: 9999px;
+    font-size: 13px;
+    font-weight: 500;
+    font-family: var(--em-font);
+    border: 1px solid var(--em-slate-200);
+    background: var(--em-white);
+    color: var(--em-slate-500);
+    cursor: pointer;
+    transition: all var(--em-transition);
+}
+
+.em-filter-btn:hover {
+    border-color: var(--em-blue-500);
+    color: var(--em-blue-600);
+}
+
+.em-filter-btn.active {
+    background: var(--em-blue-600);
+    border-color: var(--em-blue-600);
+    color: var(--em-white);
+}
+
+/* --- 9. Search Input --- */
+.em-search {
+    padding: 8px 12px;
+    border: 1px solid var(--em-slate-200);
+    border-radius: var(--em-radius-sm);
+    font-size: 13px;
+    font-family: var(--em-font);
+    color: var(--em-slate-800);
+    background: var(--em-white);
+    width: 260px;
+    outline: none;
+    transition: border-color var(--em-transition), box-shadow var(--em-transition);
+}
+
+.em-search:focus {
+    border-color: var(--em-blue-500);
+    box-shadow: 0 0 0 3px var(--em-blue-50);
+}
+
+.em-search::placeholder {
+    color: var(--em-slate-400);
+}
+
+/* --- 10. Email List --- */
+.em-email-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.em-email-card {
+    background: var(--em-white);
+    border: 1px solid var(--em-slate-200);
+    border-radius: var(--em-radius-lg);
+    padding: 16px 20px;
+    cursor: pointer;
+    transition: box-shadow var(--em-transition), border-color var(--em-transition);
+}
+
+.em-email-card:hover {
+    box-shadow: var(--em-shadow-md);
+    border-color: var(--em-slate-300);
+}
+
+.em-email-card.expanded {
+    border-color: var(--em-blue-500);
+    box-shadow: var(--em-shadow-md);
+}
+
+.em-email-sender {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--em-slate-900);
+}
+
+.em-email-subject {
+    font-size: 13px;
+    color: var(--em-slate-500);
+    margin-top: 2px;
+}
+
+.em-email-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--em-slate-400);
+    margin-top: 4px;
+}
+
+.em-email-header-content {
+    flex: 1;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    min-width: 0;
+}
+
+.em-email-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+.em-email-header-badges {
+    text-align: right;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.em-email-completed {
+    opacity: 0.5;
+}
+
+/* Check button — always visible in card header */
+.em-check-btn {
+    width: 22px;
+    height: 22px;
+    min-width: 22px;
+    border-radius: 50%;
+    border: 2px solid var(--em-slate-300);
+    background: transparent;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0;
+    color: transparent;
+    padding: 0;
+    margin-top: 2px;
+    transition: border-color var(--em-transition), background var(--em-transition), color var(--em-transition);
+    flex-shrink: 0;
+}
+
+.em-check-btn:hover {
+    border-color: var(--em-green-600, #16a34a);
+    background: var(--em-green-50, #f0fdf4);
+}
+
+.em-check-btn.em-check-done {
+    border-color: var(--em-green-600, #16a34a);
+    background: var(--em-green-600, #16a34a);
+    color: white;
+    font-size: 13px;
+    cursor: default;
+}
+
+.em-check-btn.em-check-saving {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+/* --- 11. Email Summary --- */
+.em-email-summary {
+    margin-top: 10px;
+    padding: 10px 14px;
+    background: var(--em-blue-50);
+    border-left: 3px solid var(--em-blue-500);
+    border-radius: 0 var(--em-radius-sm) var(--em-radius-sm) 0;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.em-email-summary-text {
+    color: var(--em-slate-700);
+    margin-bottom: 6px;
+}
+
+.em-email-response-needed {
+    color: var(--em-slate-800);
+    padding-top: 6px;
+    border-top: 1px solid var(--em-blue-100);
+    font-weight: 500;
+}
+
+.em-response-needed-label {
+    font-weight: 600;
+    color: var(--em-slate-500);
+    margin-right: 4px;
+}
+
+/* --- 12. Email Detail (Expand/Collapse) --- */
+.em-email-detail {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 300ms ease, opacity 200ms ease;
+    opacity: 0;
+}
+
+.em-email-card.expanded .em-email-detail {
+    max-height: 1200px;
+    opacity: 1;
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--em-slate-100);
+}
+
+.em-email-body {
+    font-size: 13px;
+    color: var(--em-slate-700);
+    line-height: 1.6;
+    white-space: pre-wrap;
+    max-height: 300px;
+    overflow-y: auto;
+    margin-bottom: 16px;
+}
+
+.em-email-section-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--em-slate-500);
+    margin-bottom: 8px;
+}
+
+/* --- 13. Draft Preview (email-like) --- */
+.em-draft-preview {
+    background: var(--em-white);
+    border: 1px solid var(--em-slate-200);
+    border-radius: var(--em-radius);
+    overflow: hidden;
+    margin-top: 8px;
+}
+
+.em-draft-preview-header {
+    padding: 12px 20px;
+    background: var(--em-slate-50);
+    border-bottom: 1px solid var(--em-slate-200);
+    font-size: 13px;
+    color: var(--em-slate-500);
+}
+
+.em-draft-preview-body {
+    padding: 20px;
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--em-slate-800);
+    white-space: pre-wrap;
+}
+
+/* --- 14. Draft Editor --- */
+.em-draft-editor {
+    margin-top: 12px;
+}
+
+.em-draft-textarea {
+    width: 100%;
+    min-height: 120px;
+    padding: 12px;
+    border: 1px solid var(--em-slate-200);
+    border-radius: var(--em-radius-sm);
+    font-size: 14px;
+    font-family: var(--em-font);
+    color: var(--em-slate-800);
+    line-height: 1.6;
+    resize: vertical;
+    outline: none;
+    transition: border-color var(--em-transition), box-shadow var(--em-transition);
+    box-sizing: border-box;
+}
+
+.em-draft-textarea:focus {
+    border-color: var(--em-blue-500);
+    box-shadow: 0 0 0 3px var(--em-blue-50);
+}
+
+.em-draft-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.em-saved-msg {
+    font-size: 12px;
+    color: var(--em-emerald-600);
+    font-weight: 500;
+    opacity: 0;
+    transition: opacity var(--em-transition);
+}
+
+.em-saved-msg.visible {
+    opacity: 1;
+}
+
+/* --- 15. Group Headers --- */
+.em-group {
+    margin-bottom: 32px;
+}
+
+.em-group-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--em-slate-700);
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.em-group-count {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--em-slate-500);
+    background: var(--em-slate-100);
+    padding: 1px 8px;
+    border-radius: 9999px;
+}
+
+/* --- 16. Loading Skeletons --- */
+.em-skeleton {
+    background: linear-gradient(90deg, var(--em-slate-100) 25%, var(--em-slate-50) 50%, var(--em-slate-100) 75%);
+    background-size: 200% 100%;
+    animation: em-pulse 1.5s ease-in-out infinite;
+    border-radius: var(--em-radius-sm);
+}
+
+@keyframes em-pulse {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+.em-skeleton-card {
+    height: 100px;
+    border-radius: var(--em-radius-lg);
+}
+
+.em-skeleton-row {
+    height: 48px;
+    margin-bottom: 8px;
+}
+
+.em-skeleton-text {
+    height: 16px;
+    margin-bottom: 8px;
+    width: 60%;
+}
+
+/* --- 17. Error Banner --- */
+.em-error-banner {
+    display: none;
+    background: var(--em-red-50);
+    border: 1px solid var(--em-red-100);
+    border-radius: var(--em-radius-sm);
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    color: var(--em-red-600);
+    font-size: 13px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.em-error-banner.visible {
+    display: flex;
+}
+
+.em-error-dismiss {
+    background: none;
+    border: none;
+    color: var(--em-red-600);
+    cursor: pointer;
+    font-size: 18px;
+    padding: 0;
+    line-height: 1;
+}
+
+/* --- 18. Empty State --- */
+.em-empty {
+    text-align: center;
+    padding: 48px 20px;
+    color: var(--em-slate-400);
+    font-size: 14px;
+}
+
+.em-empty-icon {
+    font-size: 32px;
+    margin-bottom: 12px;
+    opacity: 0.4;
+}
+
+/* --- 19. Pagination --- */
+.em-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 20px;
+    font-size: 13px;
+    color: var(--em-slate-500);
+}
+
+/* --- 20. Expandable Row Detail --- */
+.em-detail-row {
+    display: none;
+}
+
+.em-detail-row.visible {
+    display: table-row;
+}
+
+.em-detail-cell {
+    padding: 12px 12px 16px;
+    background: var(--em-slate-50);
+    font-size: 12px;
+    color: var(--em-slate-700);
+    white-space: pre-wrap;
+    line-height: 1.6;
+}
+
+/* --- 21. Login Page --- */
+.em-login-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    background: var(--em-slate-50);
+    font-family: var(--em-font);
+}
+
+.em-login-card {
+    background: var(--em-white);
+    border: 1px solid var(--em-slate-200);
+    border-radius: var(--em-radius-lg);
+    padding: 40px;
+    width: 100%;
+    max-width: 400px;
+    box-shadow: var(--em-shadow-md);
+}
+
+.em-login-title {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--em-slate-900);
+    margin: 0 0 4px;
+}
+
+.em-login-subtitle {
+    font-size: 13px;
+    color: var(--em-slate-500);
+    margin: 0 0 24px;
+}
+
+.em-form-group {
+    margin-bottom: 16px;
+}
+
+.em-form-label {
+    display: block;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--em-slate-700);
+    margin-bottom: 4px;
+}
+
+.em-form-input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--em-slate-200);
+    border-radius: var(--em-radius-sm);
+    font-size: 14px;
+    font-family: var(--em-font);
+    color: var(--em-slate-800);
+    outline: none;
+    box-sizing: border-box;
+    transition: border-color var(--em-transition), box-shadow var(--em-transition);
+}
+
+.em-form-input:focus {
+    border-color: var(--em-blue-500);
+    box-shadow: 0 0 0 3px var(--em-blue-50);
+}
+
+.em-form-error {
+    display: none;
+    background: var(--em-red-50);
+    border: 1px solid var(--em-red-100);
+    border-radius: var(--em-radius-sm);
+    padding: 8px 12px;
+    color: var(--em-red-600);
+    font-size: 13px;
+    margin-bottom: 16px;
+}
+
+.em-form-error.visible {
+    display: block;
+}
+
+.em-login-toggle {
+    display: block;
+    text-align: center;
+    margin-top: 16px;
+    font-size: 13px;
+    color: var(--em-blue-600);
+    cursor: pointer;
+    background: none;
+    border: none;
+    font-family: var(--em-font);
+}
+
+.em-login-toggle:hover {
+    text-decoration: underline;
+}
+
+/* --- 22. Metric Card Links --- */
+.em-metric-link {
+    text-decoration: none;
+    color: inherit;
+    display: block;
+    transition: box-shadow var(--em-transition), border-color var(--em-transition), transform var(--em-transition);
+    cursor: pointer;
+}
+
+.em-metric-link:hover {
+    box-shadow: var(--em-shadow-md);
+    border-color: var(--em-blue-500);
+    transform: translateY(-1px);
+}
+
+/* --- 23. Pipeline Visualization --- */
+.em-pipeline {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    margin-bottom: 24px;
+    background: var(--em-white);
+    border: 1px solid var(--em-slate-200);
+    border-radius: var(--em-radius-lg);
+    overflow: hidden;
+    box-shadow: var(--em-shadow-sm);
+}
+
+.em-pipeline-stage {
+    flex: 1;
+    text-align: center;
+    padding: 28px 16px;
+    position: relative;
+}
+
+.em-pipeline-stage + .em-pipeline-stage {
+    border-left: 1px solid var(--em-slate-200);
+}
+
+.em-pipeline-stage + .em-pipeline-stage::before {
+    content: '';
+    position: absolute;
+    left: -9px;
+    top: 50%;
+    transform: translateY(-50%) rotate(45deg);
+    width: 16px;
+    height: 16px;
+    background: var(--em-white);
+    border-right: 1px solid var(--em-slate-200);
+    border-top: 1px solid var(--em-slate-200);
+    z-index: 1;
+}
+
+.em-pipeline-stage-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--em-slate-900);
+    line-height: 1;
+}
+
+.em-pipeline-stage-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--em-slate-500);
+    margin-top: 8px;
+    letter-spacing: 0.02em;
+}
+
+/* --- 24. CTA Cards --- */
+.em-cta-row {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.em-cta-card {
+    flex: 1;
+    background: var(--em-blue-50);
+    border: 1px solid var(--em-blue-100);
+    border-left: 3px solid var(--em-blue-600);
+    border-radius: var(--em-radius);
+    padding: 18px 24px;
+    text-decoration: none;
+    color: inherit;
+    transition: box-shadow var(--em-transition), background var(--em-transition), transform var(--em-transition);
+    cursor: pointer;
+}
+
+.em-cta-card:hover {
+    box-shadow: var(--em-shadow-md);
+    background: var(--em-blue-100);
+    transform: translateY(-1px);
+}
+
+.em-cta-title {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--em-blue-700);
+    margin-bottom: 4px;
+}
+
+.em-cta-desc {
+    font-size: 13px;
+    color: var(--em-slate-500);
+}
+
+/* --- 25. Latest Run Card --- */
+.em-latest-run-header {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--em-slate-700);
+    margin-bottom: 12px;
+}
+
+.em-latest-run-body {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    font-size: 13px;
+}
+
+.em-latest-run-time {
+    color: var(--em-slate-500);
+}
+
+.em-latest-run-stats {
+    color: var(--em-slate-400);
+    font-size: 12px;
+}
+
+.em-latest-run-error {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--em-red-600);
+    padding: 8px 12px;
+    background: var(--em-red-50);
+    border-radius: var(--em-radius-sm);
+}
+
+/* --- 26. Fade-in Animations --- */
+@keyframes em-fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.em-fade-in {
+    animation: em-fadeIn 300ms ease both;
+}
+
+.em-stagger > * {
+    animation: em-fadeIn 300ms ease both;
+}
+.em-stagger > *:nth-child(1) { animation-delay: 0ms; }
+.em-stagger > *:nth-child(2) { animation-delay: 60ms; }
+.em-stagger > *:nth-child(3) { animation-delay: 120ms; }
+.em-stagger > *:nth-child(4) { animation-delay: 180ms; }
+.em-stagger > *:nth-child(5) { animation-delay: 240ms; }
+
+/* --- 27. Toast Notifications --- */
+.em-toast-container {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.em-toast {
+    background: var(--em-slate-900);
+    color: var(--em-white);
+    padding: 12px 20px;
+    border-radius: var(--em-radius);
+    font-size: 13px;
+    font-family: var(--em-font);
+    box-shadow: var(--em-shadow-lg);
+    animation: em-toastIn 200ms ease, em-toastOut 200ms ease 3s forwards;
+    max-width: 360px;
+}
+
+.em-toast-success {
+    border-left: 3px solid var(--em-emerald-500);
+}
+
+.em-toast-error {
+    border-left: 3px solid var(--em-red-600);
+}
+
+@keyframes em-toastIn {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes em-toastOut {
+    from { opacity: 1; }
+    to { opacity: 0; }
+}
+
+/* --- 28. Responsive (desktop-only, minimal mobile fallback) --- */
+@media (max-width: 768px) {
+    .em-sidebar {
+        display: none;
+    }
+
+    .em-main {
+        margin-left: 0;
+        padding: 20px;
+    }
+
+    .em-card-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .em-search {
+        width: 100%;
+    }
+
+    .em-pipeline {
+        flex-direction: column;
+    }
+
+    .em-pipeline-stage + .em-pipeline-stage {
+        border-left: none;
+        border-top: 1px solid var(--em-slate-200);
+    }
+
+    .em-pipeline-stage + .em-pipeline-stage::before {
+        display: none;
+    }
+
+    .em-cta-row {
+        flex-direction: column;
+    }
+}
