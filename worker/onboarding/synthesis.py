@@ -167,16 +167,6 @@ def synthesize_style_guide(style_features, contact_profiles):
 
 def _build_contact_inputs(contact_freq, response_rates, extractions):
     """Aggregate per-contact data for Sonnet profile synthesis."""
-    # Index extractions by sender
-    keywords_by_sender = {}
-    types_by_sender = {}
-
-    for ext in (extractions or []):
-        # Extractions don't have sender directly — they have email_index
-        # We need to map back. For now, use topic_keywords and email_type
-        # aggregated at the contact level later.
-        pass
-
     contacts = {}
     for sender, freq_data in contact_freq.items():
         rates = response_rates.get(sender, {})

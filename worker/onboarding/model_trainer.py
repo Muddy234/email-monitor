@@ -8,10 +8,11 @@ Ported from scripts/prediction_model.py, adapted for runtime use.
 """
 
 import logging
-import re
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from statistics import mean
+
+from onboarding.stats_extraction import _parse_time, _normalize_subject
 
 logger = logging.getLogger("worker.onboarding")
 
@@ -29,13 +30,6 @@ RECURRING_CV_THRESHOLD = 0.5
 MIN_CADENCE_OBSERVATIONS = 3
 RETRAIN_EVENT_THRESHOLD = 500
 RETRAIN_DAYS_THRESHOLD = 30
-
-_STRIP_PATTERNS = re.compile(
-    r'\b(?:\d{1,2}[/\-]\d{1,2}[/\-]?\d{0,4}|'
-    r'(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d+'
-    r'|\d{4}|#\d+|v\d+)\b',
-    re.IGNORECASE,
-)
 
 # Default parameters for users with insufficient data
 DEFAULT_PARAMETERS = {
@@ -343,15 +337,6 @@ def _derive_lift_factors(feature_results, global_rate):
 # Recurring pattern detection
 # ---------------------------------------------------------------------------
 
-def _normalize_subject(subject):
-    if not subject:
-        return ""
-    s = re.sub(r'^(?:re|fw|fwd)\s*:\s*', '', str(subject), flags=re.IGNORECASE).strip()
-    s = _STRIP_PATTERNS.sub('', s).strip()
-    s = re.sub(r'\s+', ' ', s).lower()
-    return s
-
-
 def _detect_recurring_patterns(events):
     """Detect recurring email patterns."""
     groups = defaultdict(list)
@@ -615,23 +600,3 @@ def _compute_triage(predictions, iso_breakpoints):
         "hard_gate_threshold": 0.01,
         "soft_gate_threshold": round(soft_gate, 4),
     }
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _parse_time(value):
-    if not value:
-        return None
-    if isinstance(value, datetime):
-        if value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value
-    try:
-        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt
-    except (ValueError, AttributeError, TypeError):
-        return None

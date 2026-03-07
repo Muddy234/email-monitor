@@ -57,16 +57,8 @@ async function pushEmails(emails) {
 }
 
 // ---------------------------------------------------------------------------
-// Drafts
+// Profiles
 // ---------------------------------------------------------------------------
-
-/**
- * Get pending drafts for the current user, with parent email info.
- */
-async function getPendingDrafts(userId) {
-  const path = `/drafts?user_id=eq.${userId}&status=eq.pending&select=*,emails(email_ref,sender_email,sender_name,subject)`;
-  return supabaseRequest(path);
-}
 
 /**
  * Fetch the current user's profile (user_email_aliases, etc).

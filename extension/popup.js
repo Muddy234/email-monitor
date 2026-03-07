@@ -152,14 +152,6 @@ function refreshStatus() {
     syncEl.textContent = status.last_sync
       ? relativeTime(status.last_sync)
       : "never";
-
-    // Last command
-    const cmdEl = document.getElementById("lastCmd");
-    if (status.last_command) {
-      cmdEl.textContent = `${status.last_command.action} — ${relativeTime(status.last_command.timestamp)}`;
-    } else {
-      cmdEl.textContent = "none";
-    }
   });
 }
 

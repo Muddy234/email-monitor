@@ -26,21 +26,9 @@ import time
 from datetime import datetime, timezone
 
 from supabase_client import SupabaseWorkerClient
-from run_pipeline import (
-    build_config_from_profile,
-    filter_emails,
-    process_classification_results,
-    process_user_batch_enriched,
-)
-from pipeline.analyzer import ClaudeAnalyzer
-from pipeline.drafts import DraftGenerator
-from pipeline.prompts import get_analysis_prompt, get_draft_prompt_template
-from pipeline.api_client import submit_and_wait
+from run_pipeline import process_user_batch_enriched
 from onboarding import run_onboarding
 from onboarding.model_trainer import check_retrain_needed, train_user_model
-
-# Feature flag: use enriched scorer pipeline (set to "false" to revert)
-USE_ENRICHED_PIPELINE = os.environ.get("USE_ENRICHED_PIPELINE", "true").lower() == "true"
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -62,8 +50,6 @@ POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL_SECONDS", "30"))
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", "10"))
 INITIAL_WINDOW = int(os.environ.get("INITIAL_WINDOW_SECONDS", "180"))  # 3 min
 MAX_WINDOW = int(os.environ.get("MAX_WINDOW_SECONDS", "3600"))  # 1 hour
-BATCH_POLL_INTERVAL = int(os.environ.get("BATCH_POLL_INTERVAL", "10"))
-BATCH_MAX_WAIT = int(os.environ.get("BATCH_MAX_WAIT", "900"))  # 15 min
 
 # ---------------------------------------------------------------------------
 # Graceful shutdown
@@ -199,123 +185,6 @@ def accumulate_emails(db, window_seconds):
 # ---------------------------------------------------------------------------
 
 
-def process_user_batch(db, user_id, profile, emails):
-    """Process all accumulated emails for a single user via Batches API.
-
-    Falls back to sync processing if batch submission fails.
-    """
-    config = build_config_from_profile(profile)
-    run_id = db.create_pipeline_run(user_id, trigger_type="scheduled")
-
-    try:
-        # Step 1: Filter
-        filtered = filter_emails(db, emails, user_id, config)
-        if not filtered:
-            logger.info(f"  User {user_id[:8]}...: all emails filtered out")
-            db.update_pipeline_run(run_id, status="completed",
-                                   emails_scanned=len(emails), emails_processed=0, drafts_generated=0)
-            return 0, 0
-
-        # Step 2: Classification via Batches API
-        analyzer = ClaudeAnalyzer(config, system_prompt=get_analysis_prompt())
-        api_key = config.get("anthropic_api_key")
-
-        classify_request = analyzer.build_batch_params(filtered)
-        logger.info(f"  User {user_id[:8]}...: submitting classification batch ({len(filtered)} emails)")
-
-        try:
-            batch_results = submit_and_wait(
-                [classify_request],
-                api_key=api_key,
-                poll_interval=BATCH_POLL_INTERVAL,
-                max_wait=BATCH_MAX_WAIT,
-            )
-            raw_text = batch_results.get("classification")
-        except Exception as e:
-            logger.warning(f"  Batch classification failed, falling back to sync: {e}")
-            raw_text = None
-
-        # Parse classification results (batch or sync fallback)
-        if raw_text:
-            action_items = analyzer.parse_batch_result(raw_text, filtered)
-        else:
-            logger.info(f"  User {user_id[:8]}...: using sync classification fallback")
-            action_items = analyzer.analyze_batch(filtered)
-
-        if not action_items:
-            logger.warning(f"  User {user_id[:8]}...: classification returned no results")
-            for ed in filtered:
-                db.update_email_status(ed["_db_id"], "completed")
-            db.update_pipeline_run(run_id, status="completed",
-                                   emails_scanned=len(emails), emails_processed=len(filtered), drafts_generated=0)
-            return len(filtered), 0
-
-        # Step 3: Process classifications, collect draft candidates
-        draft_generator = DraftGenerator(config, system_prompt_template=get_draft_prompt_template())
-        emails_processed, draft_candidates = process_classification_results(
-            db, action_items, filtered, user_id, config, draft_generator
-        )
-
-        # Step 4: Draft generation via Batches API
-        drafts_generated = 0
-        if draft_candidates:
-            draft_requests = []
-            for candidate in draft_candidates:
-                req = draft_generator.build_batch_params(
-                    candidate["email_data"],
-                    candidate["action_context"],
-                    custom_id=candidate["db_id"],
-                )
-                draft_requests.append(req)
-
-            logger.info(f"  User {user_id[:8]}...: submitting draft batch ({len(draft_requests)} drafts)")
-
-            try:
-                draft_results = submit_and_wait(
-                    draft_requests,
-                    api_key=api_key,
-                    poll_interval=BATCH_POLL_INTERVAL,
-                    max_wait=BATCH_MAX_WAIT,
-                )
-            except Exception as e:
-                logger.warning(f"  Batch draft generation failed, falling back to sync: {e}")
-                draft_results = {}
-
-            # Write batch draft results
-            for candidate in draft_candidates:
-                db_id = candidate["db_id"]
-                draft_body = draft_results.get(db_id)
-
-                # Sync fallback for any that failed in batch
-                if not draft_body:
-                    draft_body = draft_generator.generate_draft(
-                        candidate["email_data"], candidate["action_context"]
-                    )
-
-                if draft_body and draft_generator._validate_output(draft_body, candidate["email_data"]):
-                    db.insert_draft(db_id, user_id, draft_body)
-                    drafts_generated += 1
-                    logger.info(f"  Draft generated for: {candidate['email_data'].get('subject', '?')[:60]}")
-
-        db.update_pipeline_run(
-            run_id, status="completed",
-            emails_scanned=len(emails),
-            emails_processed=emails_processed,
-            drafts_generated=drafts_generated,
-        )
-        return emails_processed, drafts_generated
-
-    except Exception as e:
-        logger.exception(f"  User {user_id[:8]}...: pipeline error: {e}")
-        for email in emails:
-            try:
-                db.update_email_status(email["id"], "error")
-            except Exception:
-                pass
-        db.update_pipeline_run(run_id, status="failed", error_message=str(e)[:500])
-        return 0, 0
-
-
 # ---------------------------------------------------------------------------
 # Main loop
 # ---------------------------------------------------------------------------
@@ -391,14 +260,9 @@ def main():
                 continue
 
             logger.info(f"Processing user {user_id[:8]}...: {len(data['emails'])} emails")
-            if USE_ENRICHED_PIPELINE:
-                processed, drafts = process_user_batch_enriched(
-                    db, user_id, data["profile"], data["emails"]
-                )
-            else:
-                processed, drafts = process_user_batch(
-                    db, user_id, data["profile"], data["emails"]
-                )
+            processed, drafts = process_user_batch_enriched(
+                db, user_id, data["profile"], data["emails"]
+            )
             total_processed += processed
             total_drafts += drafts
 

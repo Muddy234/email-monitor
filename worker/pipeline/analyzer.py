@@ -1,9 +1,8 @@
-"""Claude email analysis — supports both Anthropic API and Claude CLI backends."""
+"""Claude email analysis via Anthropic API."""
 
 import json
 import logging
 import re
-import subprocess
 
 from .prompts import DEFAULT_ANALYSIS_PROMPT, ENRICHED_ANALYSIS_PROMPT
 
@@ -183,26 +182,13 @@ def _merge_known_fields(claude_results, email_batch):
 
 
 class ClaudeAnalyzer:
-    """Sends batches of emails to Claude for structured analysis.
-
-    Supports two backends controlled by config["claude_backend"]:
-      - "api" (default): Anthropic Messages API via pipeline.api_client
-      - "cli": Claude CLI subprocess via pipeline.cli (local fallback)
-    """
+    """Sends batches of emails to Claude for structured analysis via the Anthropic API."""
 
     def __init__(self, config, system_prompt=None):
-        self.backend = config.get("claude_backend", "api")
         self.model = config.get("classification_model", "haiku")
         self.timeout = config.get("claude_cli_timeout_seconds", 120)
         self.max_body_chars = config.get("max_body_chars", 5000)
         self.system_prompt = system_prompt or DEFAULT_ANALYSIS_PROMPT
-        self.enable_signals = config.get("enable_response_signals", True)
-
-        # CLI-specific settings (only used when backend == "cli")
-        self.cli_path = config.get("claude_cli_path", "claude")
-        self.max_budget = config.get("claude_cli_max_budget_usd", 0.50)
-
-        # API-specific settings (only used when backend == "api")
         self.api_key = config.get("anthropic_api_key")  # None → env var
 
     def _build_prompt(self, email_batch):
@@ -237,11 +223,9 @@ class ClaudeAnalyzer:
             parts.append(f"Folder: {folder}")
             parts.append(f"Attachments: {attach_str}")
 
-            # Inject response signals if available and enabled
-            if self.enable_signals:
-                signal_block = self._format_signal_block(email_data)
-                if signal_block:
-                    parts.append(signal_block)
+            signal_block = self._format_signal_block(email_data)
+            if signal_block:
+                parts.append(signal_block)
 
             parts.append(f"\n{body}\n")
 
@@ -421,26 +405,6 @@ class ClaudeAnalyzer:
         return valid if valid else None
 
     def analyze_batch(self, email_batch):
-        """Send a batch of emails to Claude, return list of action item dicts.
-
-        Routes to the API or CLI backend based on self.backend.
-        Merges known fields (from_name, subject, date) back into results
-        so Claude doesn't need to echo them.
-        """
-        if self.backend == "cli":
-            results = self._analyze_via_cli(email_batch)
-        else:
-            results = self._analyze_via_api(email_batch)
-
-        if results is not None:
-            results = _merge_known_fields(results, email_batch)
-        return results
-
-    # ------------------------------------------------------------------
-    # API backend
-    # ------------------------------------------------------------------
-
-    def _analyze_via_api(self, email_batch):
         """Analyze emails via the Anthropic Messages API."""
         from .api_client import call_claude, resolve_model
 
@@ -485,6 +449,8 @@ class ClaudeAnalyzer:
         valid, invalid_indices = _validate_results(actions)
         if invalid_indices:
             logger.warning(f"  Dropped {len(invalid_indices)} malformed entries: indices {invalid_indices}")
+        if valid:
+            valid = _merge_known_fields(valid, email_batch)
         return valid if valid else None
 
     def _retry_parse(self, original_response):
@@ -517,74 +483,7 @@ class ClaudeAnalyzer:
         return self._extract_json_from_text(raw_output)
 
     # ------------------------------------------------------------------
-    # CLI backend (local fallback)
-    # ------------------------------------------------------------------
-
-    def _analyze_via_cli(self, email_batch):
-        """Analyze emails via Claude CLI subprocess (original implementation)."""
-        from .cli import run_claude_cli
-
-        prompt_text = self._build_prompt(email_batch)
-        user_prompt = self.system_prompt + "\n\n" + prompt_text
-
-        append_prompt = (
-            "You are a text analysis assistant. Do NOT use any tools. Do NOT read any files. "
-            "Simply analyze the emails provided in the user message and respond with valid JSON "
-            "matching the schema. Output ONLY the JSON object, no other text.\n\n"
-            + json.dumps(CLAUDE_JSON_SCHEMA, indent=2)
-        )
-
-        cmd = [
-            self.cli_path,
-            "--print",
-            "--model", self.model,
-            "--max-budget-usd", str(self.max_budget),
-            "--dangerously-skip-permissions",
-            "--disallowedTools", "Bash,Read,Write,Edit,Glob,Grep,WebFetch,WebSearch,TodoWrite,NotebookEdit,Task,AskUserQuestion,Skill,EnterPlanMode,ExitPlanMode,KillShell,TaskOutput",
-            "--append-system-prompt", append_prompt,
-            "-p", "-",
-        ]
-
-        try:
-            stdout, stderr, returncode = run_claude_cli(cmd, timeout=self.timeout, stdin_text=user_prompt)
-        except subprocess.TimeoutExpired:
-            logger.error(f"  Claude CLI timed out after {self.timeout}s")
-            return None
-        except FileNotFoundError:
-            import os
-            logger.error(f"  Claude CLI not found at: {self.cli_path}")
-            logger.error(f"  File exists check: {os.path.isfile(self.cli_path)}")
-            logger.error(f"  GIT_BASH_PATH: {os.environ.get('CLAUDE_CODE_GIT_BASH_PATH', 'NOT SET')}")
-            logger.error(f"  Phase 3 (analysis) will be skipped.")
-            return None
-        except Exception as e:
-            logger.error(f"  Claude CLI call failed: {e}")
-            return None
-
-        if returncode != 0:
-            stderr_preview = stderr[:500]
-            logger.warning(f"  Claude CLI returned code {returncode}")
-            if stderr_preview:
-                logger.warning(f"  stderr: {stderr_preview}")
-            return None
-
-        raw_output = stdout
-
-        if not raw_output:
-            logger.debug(f"  stdout is empty")
-            logger.debug(f"  stderr: {stderr[:500]}")
-            return None
-
-        actions = self._extract_json_from_text(raw_output)
-        if actions is not None:
-            return actions
-
-        logger.error(f"  Could not extract JSON from Claude response")
-        logger.debug(f"  stdout ({len(raw_output)} chars): {raw_output[:500]}")
-        return None
-
-    # ------------------------------------------------------------------
-    # JSON extraction (shared by both backends)
+    # JSON extraction
     # ------------------------------------------------------------------
 
     def _extract_json_from_text(self, text):

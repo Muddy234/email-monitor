@@ -16,8 +16,8 @@ from collections import defaultdict
 from pipeline.filter import EmailFilter
 from pipeline.analyzer import ClaudeAnalyzer
 from pipeline.drafts import DraftGenerator
-from pipeline.prompts import get_analysis_prompt, get_draft_prompt_template
-from pipeline.scorer import UserScoringArtifacts, ModelArtifacts, score_email, check_triage_gate
+from pipeline.prompts import get_draft_prompt_template
+from pipeline.scorer import UserScoringArtifacts, score_email, check_triage_gate
 from pipeline.enrichment import assemble_enrichment
 
 logger = logging.getLogger("worker")
@@ -54,7 +54,7 @@ def build_config_from_profile(profile):
     EmailFilter, ClaudeAnalyzer, and DraftGenerator expect.
 
     The existing pipeline classes read config keys like
-    'filter_blacklist_senders', 'claude_backend', etc.
+    'filter_blacklist_senders', etc.
     Profile rows store per-user settings; env vars fill in API keys.
 
     Args:
@@ -63,8 +63,6 @@ def build_config_from_profile(profile):
     Returns:
         dict: Config dict compatible with existing pipeline classes.
     """
-    import os
-
     config = {
         # Provider settings (not used by worker, but kept for compatibility)
         "email_provider": "supabase",
@@ -76,12 +74,10 @@ def build_config_from_profile(profile):
 
         # Claude settings — from env vars (not stored in user profile)
         "anthropic_api_key": os.environ.get("ANTHROPIC_API_KEY", ""),
-        "claude_backend": "api",
         "classification_model": os.environ.get("CLASSIFICATION_MODEL", "haiku"),
         "draft_model": os.environ.get("DRAFT_MODEL", "sonnet"),
         "claude_cli_timeout_seconds": int(os.environ.get("CLAUDE_TIMEOUT", "120")),
         "max_body_chars": int(os.environ.get("MAX_BODY_CHARS", "8000")),
-        "enable_response_signals": True,
 
         # Draft settings
         "draft_user_name": os.environ.get("DRAFT_USER_NAME", ""),
@@ -281,54 +277,6 @@ def process_classification_results(db_client, action_items, filtered_emails,
             pass
 
     return emails_processed, draft_candidates
-
-
-def process_email_batch(db_client, emails, user_id, config):
-    """Process a batch of claimed emails through the pipeline (sync path).
-
-    This is the original synchronous flow — filter → classify → draft.
-    The batch-based main loop uses filter_emails / process_classification_results
-    directly for async batching.
-    """
-    analyzer = ClaudeAnalyzer(config, system_prompt=get_analysis_prompt())
-    draft_generator = DraftGenerator(
-        config,
-        system_prompt_template=get_draft_prompt_template(),
-    )
-
-    # Step 1: Filter
-    filtered_emails = filter_emails(db_client, emails, user_id, config)
-    if not filtered_emails:
-        logger.info("  No emails passed filter")
-        return {"emails_processed": 0, "drafts_generated": 0}
-
-    # Step 2: Claude analysis
-    logger.info(f"  Analyzing {len(filtered_emails)} emails with Claude...")
-    action_items = analyzer.analyze_batch(filtered_emails)
-
-    if not action_items:
-        logger.warning("  Claude analysis returned no results")
-        for ed in filtered_emails:
-            db_client.update_email_status(ed["_db_id"], "completed")
-        return {"emails_processed": len(filtered_emails), "drafts_generated": 0}
-
-    # Step 3: Classify + collect draft candidates
-    emails_processed, draft_candidates = process_classification_results(
-        db_client, action_items, filtered_emails, user_id, config, draft_generator
-    )
-
-    # Step 4: Generate drafts (sync, one at a time)
-    drafts_generated = 0
-    for candidate in draft_candidates:
-        draft_body = draft_generator.generate_draft(
-            candidate["email_data"], candidate["action_context"]
-        )
-        if draft_body:
-            db_client.insert_draft(candidate["db_id"], user_id, draft_body)
-            drafts_generated += 1
-            logger.info(f"  Draft generated for: {candidate['email_data'].get('subject', '?')[:60]}")
-
-    return {"emails_processed": emails_processed, "drafts_generated": drafts_generated}
 
 
 def build_signals(email_data, user_aliases):

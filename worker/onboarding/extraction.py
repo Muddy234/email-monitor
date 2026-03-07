@@ -22,7 +22,7 @@ BATCH_SIZE = 20
 MAX_WORKERS = 5
 
 
-def extract_email_features(received, contact_freq, on_progress=None):
+def extract_email_features(received, contact_freq):
     """Phase 3: Extract topic keywords and metadata via Haiku.
 
     Selects the most important emails, batches them, and runs concurrent
@@ -31,7 +31,6 @@ def extract_email_features(received, contact_freq, on_progress=None):
     Args:
         received: List of received email dicts.
         contact_freq: Contact frequency dict from Phase 2A.
-        on_progress: Optional callback(completed, total).
 
     Returns:
         dict with 'extractions' (list) and 'keyword_frequencies' (Counter).
@@ -66,8 +65,6 @@ def extract_email_features(received, contact_freq, on_progress=None):
                 failed_batches += 1
 
             completed_batches += 1
-            if on_progress:
-                on_progress(completed_batches, total_batches)
 
     # Halt if too many failures
     if total_batches > 0 and failed_batches / total_batches > 0.5:
