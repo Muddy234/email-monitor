@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "Email Monitor — Outlook Bridge",
-  "short_name": "Email Mon",
+  "name": "Clarion AI",
+  "short_name": "Clarion",
   "version": "1.0.0",
   "description": "Syncs your Outlook emails for AI-powered analysis and draft generation.",
 

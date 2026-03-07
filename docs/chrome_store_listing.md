@@ -1,18 +1,18 @@
-# Chrome Web Store Listing — Email Monitor
+# Chrome Web Store Listing — Clarion AI
 
 ## Extension Name
-Email Monitor — AI Email Assistant
+Clarion AI — AI Email Assistant
 
 ## Short Description (132 char max)
 AI-powered email assistant that reads, prioritizes, and drafts replies for your Outlook inbox. Save hours every morning.
 
 ## Detailed Description
-Email Monitor bridges your Outlook inbox with AI-powered analysis and draft generation.
+Clarion AI bridges your Outlook inbox with AI-powered analysis and draft generation.
 
 **How it works:**
-1. Install the extension and sign in with your Email Monitor account.
+1. Install the extension and sign in with your Clarion AI account.
 2. Open Outlook Web (outlook.live.com, outlook.office365.com, or outlook.cloud.microsoft).
-3. The extension syncs your inbox every 5 minutes to the Email Monitor backend.
+3. The extension syncs your inbox every 5 minutes to the Clarion AI backend.
 4. AI analyzes your emails for priority, intent, and required actions.
 5. Draft replies appear in your Outlook Drafts folder — ready for your review.
 
@@ -40,7 +40,7 @@ English
 ## Permission Justifications (required by Chrome Web Store)
 
 ### alarms
-"Used to schedule periodic email sync every 5 minutes between Outlook and the Email Monitor backend."
+"Used to schedule periodic email sync every 5 minutes between Outlook and the Clarion AI backend."
 
 ### storage
 "Used to persist user authentication session, Outlook token state, and last sync timestamp across browser restarts."
@@ -58,12 +58,12 @@ English
 "Required to access Outlook Web to capture the user's existing session token from localStorage."
 
 ### Host permission: https://*.supabase.co/*
-"Required to communicate with the Email Monitor backend (Supabase) for authentication, email storage, and real-time draft delivery."
+"Required to communicate with the Clarion AI backend (Supabase) for authentication, email storage, and real-time draft delivery."
 
 ---
 
 ## Privacy Policy URL
-https://email-monitor-gray.vercel.app/privacy.html
+https://clarion-ai.app/privacy.html
 
 ## Single Purpose Description
-"This extension syncs emails from Outlook Web to the Email Monitor service for AI-powered analysis and draft reply generation."
+"This extension syncs emails from Outlook Web to the Clarion AI service for AI-powered analysis and draft reply generation."

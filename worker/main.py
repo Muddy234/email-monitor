@@ -30,12 +30,17 @@ from run_pipeline import (
     build_config_from_profile,
     filter_emails,
     process_classification_results,
+    process_user_batch_enriched,
 )
 from pipeline.analyzer import ClaudeAnalyzer
 from pipeline.drafts import DraftGenerator
 from pipeline.prompts import get_analysis_prompt, get_draft_prompt_template
 from pipeline.api_client import submit_and_wait
-from onboarding import run_onboarding, run_calibration
+from onboarding import run_onboarding
+from onboarding.model_trainer import check_retrain_needed, train_user_model
+
+# Feature flag: use enriched scorer pipeline (set to "false" to revert)
+USE_ENRICHED_PIPELINE = os.environ.get("USE_ENRICHED_PIPELINE", "true").lower() == "true"
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -338,16 +343,16 @@ def main():
         except Exception as e:
             logger.error(f"Onboarding check error: {e}")
 
-        # -- Async calibration check -----------------------------------
+        # -- Model re-training check -----------------------------------
         try:
-            cal_pending = db.get_users_needing_calibration()
-            for uid in cal_pending:
+            for uid in db.get_active_user_ids():
                 if _shutdown:
                     break
-                logger.info(f"Running Opus calibration for user {uid[:8]}...")
-                run_calibration(db, uid)
+                if check_retrain_needed(db, uid):
+                    logger.info(f"Re-training model for user {uid[:8]}...")
+                    train_user_model(db, uid)
         except Exception as e:
-            logger.error(f"Calibration check error: {e}")
+            logger.error(f"Model re-training check error: {e}")
 
         logger.info(f"--- Accumulation window: {current_window}s ---")
 
@@ -386,7 +391,14 @@ def main():
                 continue
 
             logger.info(f"Processing user {user_id[:8]}...: {len(data['emails'])} emails")
-            processed, drafts = process_user_batch(db, user_id, data["profile"], data["emails"])
+            if USE_ENRICHED_PIPELINE:
+                processed, drafts = process_user_batch_enriched(
+                    db, user_id, data["profile"], data["emails"]
+                )
+            else:
+                processed, drafts = process_user_batch(
+                    db, user_id, data["profile"], data["emails"]
+                )
             total_processed += processed
             total_drafts += drafts
 

@@ -5,7 +5,7 @@ import subprocess
 
 from .prompts import DEFAULT_DRAFT_PROMPT_TEMPLATE
 
-logger = logging.getLogger("email_monitor")
+logger = logging.getLogger("clarion")
 
 
 def _strip_quoted_content(body):
@@ -45,40 +45,64 @@ class DraftGenerator:
         self.api_key = config.get("anthropic_api_key")  # None → env var
 
     def _build_draft_prompt(self, email_data, action_context):
-        """Build the user prompt for draft generation."""
+        """Build the user prompt for draft generation.
+
+        Uses enrichment data (reason, archetype, sender/thread briefings)
+        when available, falling back to basic action/context.
+        """
         subject = email_data.get("subject", "(no subject)")
         sender_name = email_data.get("sender_name", "Unknown")
         sender = email_data.get("sender", "")
         body = _strip_quoted_content(email_data.get("body", "") or "")
         if len(body) > 4000:
             body = body[:4000] + "\n[... truncated]"
-        action = action_context.get("action", "")
-        context = action_context.get("context", "")
 
-        # Build signal context for tone/style guidance
-        signal_lines = []
-        signals = email_data.get("signals", {})
-        if signals:
-            pos = signals.get("user_position")
-            if pos:
-                signal_lines.append(f"User Position: {pos}")
-            intent = signals.get("intent_category")
-            if intent and intent != "unclassified":
-                signal_lines.append(f"Intent: {intent}")
+        # Check for enrichment data
+        enrichment = action_context.get("enrichment")
+        reason = action_context.get("reason", "")
+        archetype = action_context.get("archetype", "")
 
+        # Build context block — prefer enriched data when available
+        context_lines = []
+
+        if reason:
+            context_lines.append(f"Why a response is needed: {reason}")
+        else:
+            action = action_context.get("action", "")
+            context_text = action_context.get("context", "")
+            if action:
+                context_lines.append(f"ACTION NEEDED: {action}")
+            if context_text:
+                context_lines.append(f"CONTEXT: {context_text}")
+
+        if archetype and archetype != "none":
+            context_lines.append(f"Expected response type: {archetype}")
+
+        if enrichment:
+            sb = enrichment.get("sender_briefing", {})
+            tb = enrichment.get("thread_briefing", {})
+            if sb.get("summary"):
+                context_lines.append(f"Sender context: {sb['summary']}")
+            if tb.get("summary"):
+                context_lines.append(f"Thread context: {tb['summary']}")
+
+        # Tone guidance from contact type
+        tone_lines = []
         sender_contact = email_data.get("sender_contact", {})
         if sender_contact:
             ctype = sender_contact.get("contact_type", "")
             org = sender_contact.get("organization", "")
             if ctype:
-                signal_lines.append(f"Sender Type: {ctype}")
+                tone_lines.append(f"Sender Type: {ctype}")
             if org:
-                signal_lines.append(f"Sender Org: {org}")
+                tone_lines.append(f"Sender Org: {org}")
 
-        signal_block = ""
-        if signal_lines:
-            signal_block = "\n\nSIGNAL CONTEXT (use for tone):\n" + "\n".join(signal_lines)
-            signal_block += "\n\nNote: Use a more formal tone for external_legal and external_lender contacts. Use a conversational but professional tone for internal colleagues."
+        tone_block = ""
+        if tone_lines:
+            tone_block = "\n\nTONE GUIDANCE:\n" + "\n".join(tone_lines)
+            tone_block += "\nNote: Use a more formal tone for external_legal and external_lender contacts. Use a conversational but professional tone for internal colleagues."
+
+        context_block = "\n".join(context_lines)
 
         prompt = f"""Draft a reply to the following email:
 
@@ -88,8 +112,7 @@ SUBJECT: {subject}
 EMAIL BODY:
 {body}
 
-ACTION NEEDED: {action}
-CONTEXT: {context}{signal_block}
+{context_block}{tone_block}
 
 Generate the reply body text only (no subject, no headers)."""
 

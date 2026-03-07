@@ -272,7 +272,7 @@ document.getElementById("syncNowBtn").addEventListener("click", () => {
 });
 
 document.getElementById("visitWebBtn").addEventListener("click", () => {
-  chrome.tabs.create({ url: "https://email-monitor-gray.vercel.app/app/dashboard.html" });
+  chrome.tabs.create({ url: "https://clarion-ai.app/app/dashboard.html" });
 });
 
 // Allow Enter key to submit

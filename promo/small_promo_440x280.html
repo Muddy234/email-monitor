@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Small Promo Tile — 440x280</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    background: #f0f0f0;
+    font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  }
+
+  .tile {
+    width: 440px;
+    height: 280px;
+    background: linear-gradient(135deg, #1E3A5F 0%, #2563EB 60%, #3B82F6 100%);
+    border-radius: 0;
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+  }
+
+  /* Subtle radial glow */
+  .tile::before {
+    content: '';
+    position: absolute;
+    top: -40%;
+    right: -20%;
+    width: 300px;
+    height: 300px;
+    background: radial-gradient(circle, rgba(255,255,255,0.08) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  /* Decorative dots pattern */
+  .tile::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 60px;
+    background: linear-gradient(to top, rgba(0,0,0,0.15), transparent);
+    pointer-events: none;
+  }
+
+  .icon-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 16px;
+    z-index: 1;
+  }
+
+  .envelope-icon {
+    width: 52px;
+    height: 52px;
+  }
+
+  .app-name {
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    z-index: 1;
+  }
+
+  .tagline {
+    font-size: 15px;
+    font-weight: 400;
+    opacity: 0.85;
+    margin-top: 8px;
+    z-index: 1;
+    letter-spacing: 0.2px;
+  }
+
+  .badge {
+    margin-top: 18px;
+    padding: 6px 16px;
+    background: rgba(255,255,255,0.15);
+    border: 1px solid rgba(255,255,255,0.25);
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    z-index: 1;
+  }
+</style>
+</head>
+<body>
+  <div class="tile">
+    <div class="icon-row">
+      <svg class="envelope-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="2" y="6" width="28" height="20" rx="3" stroke="#fff" stroke-width="2.2"/>
+        <path d="M2 9l13.1 8.3a1.94 1.94 0 0 0 1.8 0L30 9" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="26" cy="8" r="4" fill="#10B981"/>
+        <circle cx="26" cy="8" r="6" fill="none" stroke="#10B981" stroke-width="1.2" opacity="0.5"/>
+      </svg>
+      <span class="app-name">Clarion AI</span>
+    </div>
+    <div class="tagline">AI-Powered Outlook Email Management</div>
+    <div class="badge">Save 2+ Hours Daily</div>
+  </div>
+</body>
+</html>

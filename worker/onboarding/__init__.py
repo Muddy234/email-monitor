@@ -1,10 +1,9 @@
 """User onboarding intelligence build.
 
-One-time process that analyzes 30 days of email to build contact profiles,
-topic domains, writing style guide, and calibration data.
+One-time process that analyzes email history to build contact profiles,
+topic domains, writing style guide, and per-user scoring model.
 """
 
 from onboarding.runner import run_onboarding
-from onboarding.calibration import run_calibration
 
-__all__ = ["run_onboarding", "run_calibration"]
+__all__ = ["run_onboarding"]

@@ -1,4 +1,4 @@
-# Email Monitor: Web UI + Dynamic Config + Scheduler Implementation Plan
+# Clarion AI: Web UI + Dynamic Config + Scheduler Implementation Plan
 
 ## Overview
 

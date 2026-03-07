@@ -42,8 +42,8 @@ export async function renderNav() {
 
     sidebar.innerHTML = `
         <div class="em-sidebar-brand">
-            <div class="em-sidebar-brand-icon">EM</div>
-            <span>Email Monitor</span>
+            <div class="em-sidebar-brand-icon">CA</div>
+            <span>Clarion AI</span>
         </div>
         <div class="em-sidebar-nav">${links}</div>
         <div class="em-sidebar-footer">

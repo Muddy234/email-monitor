@@ -10,7 +10,7 @@ import time
 
 import anthropic
 
-logger = logging.getLogger("email_monitor")
+logger = logging.getLogger("clarion")
 
 # Short names used in config → full Anthropic model identifiers.
 MODEL_MAP = {

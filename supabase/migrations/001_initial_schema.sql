@@ -1,4 +1,4 @@
--- Email Monitor: Initial Supabase schema
+-- Clarion AI: Initial Supabase schema
 -- Tables, RLS policies, and RPC functions for the extension + worker architecture.
 
 -- ============================================================

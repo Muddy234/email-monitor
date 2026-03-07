@@ -1,5 +1,5 @@
 /**
- * Service worker (background) — Email Monitor Outlook Bridge.
+ * Service worker (background) — Clarion AI.
  *
  * Responsibilities:
  *  1. Receive + cache MSAL Exchange token from content script.
@@ -23,8 +23,8 @@ importScripts(
 
 const EMAIL_SYNC_ALARM = "email-sync";
 const EMAIL_SYNC_PERIOD_MIN = 5;   // 5 min
-const MAX_CATCHUP_EMAILS = 500;    // cap for first-time or stale syncs
-const MAX_CATCHUP_DAYS = 30;       // how far back to look on first sync
+const MAX_CATCHUP_EMAILS = 6000;   // cap for first-time or stale syncs
+const MAX_CATCHUP_DAYS = 120;      // how far back to look on first sync
 
 // OWA endpoint templates
 const OWA_ENDPOINTS = {
@@ -686,61 +686,60 @@ async function syncEmailsToSupabase() {
     await pushEmails(rows);
     if (DEBUG) console.log(`Synced ${rows.length} inbox emails to Supabase`);
 
-    // On first sync, also fetch sent items for onboarding analysis
+    // Sync sent items every cycle (incremental for subsequent syncs)
     let sentCount = 0;
-    if (!lastSyncTime) {
-      try {
-        const sentResult = await handleGetSentItems({
-          max_scan: MAX_CATCHUP_EMAILS,
-          flagged_only: false,
-        });
+    const maxSentEmails = lastSyncTime ? 50 : MAX_CATCHUP_EMAILS;
+    try {
+      const sentResult = await handleGetSentItems({
+        max_scan: maxSentEmails,
+        flagged_only: false,
+      });
 
-        if (sentResult.emails && sentResult.emails.length > 0) {
-          // Enrich sent emails with body/recipients
-          const sentEnriched = [];
-          for (const email of sentResult.emails) {
-            try {
-              const detail = await handleGetItem({
-                message_id: email.email_ref,
-                change_key: email._change_key,
-              });
-              sentEnriched.push(detail);
-            } catch (err) {
-              sentEnriched.push(email);
-            }
+      if (sentResult.emails && sentResult.emails.length > 0) {
+        // Enrich sent emails with body/recipients
+        const sentEnriched = [];
+        for (const email of sentResult.emails) {
+          try {
+            const detail = await handleGetItem({
+              message_id: email.email_ref,
+              change_key: email._change_key,
+            });
+            sentEnriched.push(detail);
+          } catch (err) {
+            sentEnriched.push(email);
           }
-
-          // Transform sent items — status is "completed" (not queued for classification)
-          const sentRows = sentEnriched.map((e) => ({
-            user_id: userId,
-            email_ref: e.email_ref,
-            subject: e.subject || "",
-            sender: e.sender || "",
-            sender_name: e.sender_name || "",
-            sender_email: e.sender_email || "",
-            received_time: e.received_time || null,
-            body: (e.body || "").slice(0, 50000),
-            has_attachments: e.has_attachments || false,
-            attachment_names: e.attachment_names || [],
-            folder: "Sent Items",
-            flag_status: e.flag_status || "NotFlagged",
-            conversation_id: e.conversation_id || null,
-            conversation_topic: e.conversation_topic || null,
-            to_field: e.to_field || "",
-            cc_field: e.cc_field || "",
-            importance: ["Low", "Normal", "High"][e.importance] || "Normal",
-            recipients: e.recipients || [],
-            status: "completed",
-          }));
-
-          await pushEmails(sentRows);
-          sentCount = sentRows.length;
-          if (DEBUG) console.log(`Synced ${sentCount} sent emails to Supabase`);
         }
-      } catch (err) {
-        // Sent item sync failure is non-blocking — inbox sync already succeeded
-        if (DEBUG) console.error("Sent items sync error:", err.message);
+
+        // Transform sent items — status is "completed" (not queued for classification)
+        const sentRows = sentEnriched.map((e) => ({
+          user_id: userId,
+          email_ref: e.email_ref,
+          subject: e.subject || "",
+          sender: e.sender || "",
+          sender_name: e.sender_name || "",
+          sender_email: e.sender_email || "",
+          received_time: e.received_time || null,
+          body: (e.body || "").slice(0, 50000),
+          has_attachments: e.has_attachments || false,
+          attachment_names: e.attachment_names || [],
+          folder: "Sent Items",
+          flag_status: e.flag_status || "NotFlagged",
+          conversation_id: e.conversation_id || null,
+          conversation_topic: e.conversation_topic || null,
+          to_field: e.to_field || "",
+          cc_field: e.cc_field || "",
+          importance: ["Low", "Normal", "High"][e.importance] || "Normal",
+          recipients: e.recipients || [],
+          status: "completed",
+        }));
+
+        await pushEmails(sentRows);
+        sentCount = sentRows.length;
+        if (DEBUG) console.log(`Synced ${sentCount} sent emails to Supabase`);
       }
+    } catch (err) {
+      // Sent item sync failure is non-blocking — inbox sync already succeeded
+      if (DEBUG) console.error("Sent items sync error:", err.message);
     }
 
     lastSyncTime = new Date().toISOString();

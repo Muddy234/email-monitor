@@ -1,15 +1,14 @@
-"""Onboarding orchestrator: runs Phases 1-6 in dependency order.
+"""Onboarding orchestrator: runs Phases 1-7 in dependency order.
 
 Execution graph:
   Phase 1 (collect)           → status="collecting"
-  Phase 2 (stats)             → status="statistics"
+  Phase 2 (stats extraction)  → status="statistics"
   Phase 3 + 4C-1 (parallel)  → status="extracting"
   Phase 4A (contacts)         → status="synthesizing"
   Phase 4B + 4C-2 (parallel) → status="style_guide"
   Phase 6 (write to DB)       → status="finalizing"
+  Phase 7 (model training)    → status="training"
   Set completed_at            → status="complete"
-
-Opus calibration (Phase 5) runs separately via run_calibration().
 """
 
 import logging
@@ -18,7 +17,8 @@ from datetime import datetime
 
 from onboarding.collectors import collect_onboarding_emails
 from onboarding.extraction import extract_email_features, extract_writing_styles
-from onboarding.statistics import compute_all_statistics
+from onboarding.stats_extraction import extract_all
+from onboarding.model_trainer import train_user_model
 from onboarding.synthesis import synthesize_contacts, synthesize_topics, synthesize_style_guide
 
 logger = logging.getLogger("worker.onboarding")
@@ -55,10 +55,27 @@ def run_onboarding(db, user_id, profile):
             db.update_onboarding_status(user_id, "failed")
             return False
 
-        # ── Phase 2: Statistics ──────────────────────────────────
+        # ── Phase 2: Full statistical extraction ──────────────────
         db.update_onboarding_status(user_id, "statistics")
-        stats = compute_all_statistics(received, sent, aliases)
-        logger.info("Phase 2 complete: statistics computed")
+        all_emails = received + sent
+        extraction = extract_all(all_emails, aliases)
+        stats = {
+            "contact_frequencies": {
+                s: {"count": c["total_received"]}
+                for s, c in extraction["contacts"].items()
+            },
+            "response_rates": {
+                s: {
+                    "response_rate": c["reply_rate"],
+                    "avg_response_time_hours": c["avg_response_time_hours"],
+                }
+                for s, c in extraction["contacts"].items()
+            },
+            "aggregate": extraction["user_profile"],
+            "subject_tokens": {},  # Not computed in new extraction
+        }
+        logger.info(f"Phase 2 complete: {len(extraction['response_events'])} events, "
+                    f"{len(extraction['contacts'])} contacts")
 
         # ── Phase 3 + 4C-1: Parallel Haiku extraction ───────────
         db.update_onboarding_status(user_id, "extracting")
@@ -132,9 +149,14 @@ def run_onboarding(db, user_id, profile):
         # ── Phase 6: Write to DB ─────────────────────────────────
         db.update_onboarding_status(user_id, "finalizing")
 
-        # Merge stats into contact profiles for DB write
-        contacts_for_db = _merge_stats_into_contacts(
-            contact_profiles, stats, email_data
+        # Write new extraction tables
+        db.upsert_response_events(user_id, extraction["response_events"])
+        db.upsert_threads(user_id, list(extraction["threads"].values()))
+        db.upsert_domains(user_id, list(extraction["domains"].values()))
+
+        # Merge extraction + synthesis into contact profiles for DB write
+        contacts_for_db = _merge_extraction_into_contacts(
+            contact_profiles, extraction["contacts"]
         )
         db.upsert_contacts(user_id, contacts_for_db)
 
@@ -143,13 +165,24 @@ def run_onboarding(db, user_id, profile):
             "domains": topic_result.get("domains", []),
             "high_signal_keywords": topic_result.get("high_signal_keywords", []),
             "token_frequencies": stats.get("subject_tokens"),
-            "baseline_statistics": stats.get("aggregate", {}),
+            "baseline_statistics": extraction["user_profile"],
         })
 
         # Writing style guide
         if style_guide:
             sample_count = style_result.get("sample_count", 0) if style_result else 0
             db.update_writing_style(user_id, style_guide, sample_count)
+
+        logger.info("Phase 6 complete: DB writes done")
+
+        # ── Phase 7: Model training ───────────────────────────────
+        db.update_onboarding_status(user_id, "training")
+        try:
+            params = train_user_model(db, user_id)
+            logger.info(f"Phase 7 complete: model trained "
+                        f"(global_rate={params.get('meta', {}).get('global_rate', '?')})")
+        except Exception:
+            logger.exception("Phase 7: model training failed (non-fatal)")
 
         # Mark complete
         db.update_onboarding_status(
@@ -211,38 +244,26 @@ def _infer_significance(email_count, response_rate):
     return "low"
 
 
-def _merge_stats_into_contacts(contact_profiles, stats, email_data):
-    """Merge Python-computed stats into contact profile dicts for DB write."""
-    freq = stats.get("contact_frequencies", {})
-    rates = stats.get("response_rates", {})
-
-    total_days = stats.get("aggregate", {}).get("date_range_days", 30)
-
+def _merge_extraction_into_contacts(contact_profiles, extraction_contacts):
+    """Merge extraction stats into Sonnet-synthesized contact profiles for DB write."""
     merged = []
     for profile in contact_profiles:
         email = (profile.get("email") or "").lower()
-        f = freq.get(email, {})
-        r = rates.get(email, {})
+        ext = extraction_contacts.get(email, {})
 
         contact = dict(profile)
-        contact["emails_per_month"] = round(
-            f.get("count", 0) * 30 / max(total_days, 1)
-        )
-        contact["response_rate"] = r.get("response_rate")
-        contact["avg_response_time_hours"] = r.get("avg_response_time_hours")
-        contact["last_interaction_at"] = f.get("last_seen")
-        contact["common_co_recipients"] = f.get("top_co_recipients", [])
-
-        # Compute user_initiates_pct from sent emails
-        sent_to_contact = sum(
-            1 for s in email_data.get("sent", [])
-            if email in (s.get("to_field") or "").lower()
-        )
-        total_with_contact = f.get("count", 0) + sent_to_contact
-        if total_with_contact > 0:
-            contact["user_initiates_pct"] = round(
-                sent_to_contact / total_with_contact, 4
-            )
+        contact["emails_per_month"] = ext.get("emails_per_month")
+        contact["response_rate"] = ext.get("reply_rate")
+        contact["avg_response_time_hours"] = ext.get("avg_response_time_hours")
+        contact["last_interaction_at"] = ext.get("last_seen")
+        contact["common_co_recipients"] = ext.get("co_recipients_top5", [])
+        contact["user_initiates_pct"] = ext.get("user_initiates_pct")
+        contact["reply_rate_30d"] = ext.get("reply_rate_30d")
+        contact["reply_rate_90d"] = ext.get("reply_rate_90d")
+        contact["smoothed_rate"] = ext.get("smoothed_rate")
+        contact["median_response_time_hours"] = ext.get("median_response_time_hours")
+        contact["forward_rate"] = ext.get("forward_rate")
+        contact["typical_subjects"] = ext.get("typical_subjects", [])
 
         merged.append(contact)
 

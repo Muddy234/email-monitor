@@ -120,7 +120,7 @@ class SupabaseWorkerClient:
             email_id: UUID string.
             user_id: UUID string.
             classification: dict with keys: needs_response, action, context,
-                project, priority.
+                project, priority. Optional: reason, archetype, classification_confidence.
         """
         row = {
             "email_id": email_id,
@@ -132,6 +132,17 @@ class SupabaseWorkerClient:
             "priority": classification.get("priority", 0),
         }
         self.client.table("classifications").insert(row).execute()
+
+        # Write enriched fields to emails table if present
+        email_update = {}
+        if "reason" in classification:
+            email_update["reason"] = classification["reason"]
+        if "archetype" in classification:
+            email_update["archetype"] = classification["archetype"]
+        if "classification_confidence" in classification:
+            email_update["classification_confidence"] = classification["classification_confidence"]
+        if email_update:
+            self.client.table("emails").update(email_update).eq("id", email_id).execute()
 
     # ------------------------------------------------------------------
     # Drafts
@@ -423,3 +434,229 @@ class SupabaseWorkerClient:
             .execute()
         )
         return [row["id"] for row in (completed.data or [])]
+
+    # ------------------------------------------------------------------
+    # Batch context fetchers (for enrichment pipeline)
+    # ------------------------------------------------------------------
+
+    def fetch_contacts_by_emails(self, user_id, email_list):
+        """Batch-fetch contact profiles for a list of sender emails.
+
+        Args:
+            user_id: UUID string.
+            email_list: list[str] of sender email addresses.
+
+        Returns:
+            dict: {email: contact_row} for found contacts.
+        """
+        if not email_list:
+            return {}
+        unique = list(set(email_list))
+        result = (
+            self.client.table("contacts")
+            .select("*")
+            .eq("user_id", user_id)
+            .in_("email", unique)
+            .execute()
+        )
+        return {row["email"]: row for row in (result.data or [])}
+
+    def fetch_thread_messages(self, user_id, conversation_ids):
+        """Batch-fetch conversation rows for multiple conversation IDs.
+
+        Args:
+            user_id: UUID string.
+            conversation_ids: list[str] of conversation IDs.
+
+        Returns:
+            dict: {conversation_id: conversation_row} with messages jsonb.
+        """
+        if not conversation_ids:
+            return {}
+        unique = list(set(conversation_ids))
+        result = (
+            self.client.table("conversations")
+            .select("conversation_id, messages, created_at, updated_at")
+            .eq("user_id", user_id)
+            .in_("conversation_id", unique)
+            .execute()
+        )
+        return {row["conversation_id"]: row for row in (result.data or [])}
+
+    def fetch_user_topic_profile(self, user_id):
+        """Fetch the user's topic profile (domains, keywords, stats).
+
+        Args:
+            user_id: UUID string.
+
+        Returns:
+            dict: Topic profile row, or empty dict if not found.
+        """
+        result = (
+            self.client.table("user_topic_profile")
+            .select("*")
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
+        if result.data:
+            return result.data[0]
+        return {}
+
+    # ------------------------------------------------------------------
+    # Scoring parameters
+    # ------------------------------------------------------------------
+
+    def upsert_scoring_parameters(self, user_id, parameters_json, emails_used=None):
+        """Store per-user scoring model artifacts."""
+        now = datetime.utcnow().isoformat()
+        row = {
+            "user_id": user_id,
+            "parameters": parameters_json,
+            "generated_at": now,
+        }
+        if emails_used is not None:
+            row["emails_used"] = emails_used
+        self.client.table("scoring_parameters").upsert(
+            row, on_conflict="user_id"
+        ).execute()
+
+    def fetch_scoring_parameters(self, user_id):
+        """Load per-user scoring model artifacts.
+
+        Returns:
+            dict: The parameters JSON, or None if not found.
+        """
+        result = (
+            self.client.table("scoring_parameters")
+            .select("parameters,generated_at,emails_used")
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
+        if result.data:
+            return result.data[0].get("parameters")
+        return None
+
+    # ------------------------------------------------------------------
+    # Active users
+    # ------------------------------------------------------------------
+
+    def get_active_user_ids(self):
+        """Return user IDs where worker_active is true."""
+        result = (
+            self.client.table("profiles")
+            .select("id")
+            .eq("worker_active", True)
+            .execute()
+        )
+        return [row["id"] for row in (result.data or [])]
+
+    # ------------------------------------------------------------------
+    # Response events
+    # ------------------------------------------------------------------
+
+    def fetch_response_events(self, user_id):
+        """Load all response events for a user (for model training)."""
+        result = (
+            self.client.table("response_events")
+            .select("*")
+            .eq("user_id", user_id)
+            .order("received_time")
+            .execute()
+        )
+        return result.data or []
+
+    def count_response_events_since(self, user_id, since_timestamp):
+        """Count response events created after a given timestamp."""
+        result = (
+            self.client.table("response_events")
+            .select("id", count="exact")
+            .eq("user_id", user_id)
+            .gt("created_at", since_timestamp)
+            .execute()
+        )
+        return result.count or 0
+
+    def upsert_response_events(self, user_id, events):
+        """Bulk upsert response events for a user."""
+        rows = []
+        for event in events:
+            row = {
+                "user_id": user_id,
+                "email_id": event["email_id"],
+                "sender_email": event.get("sender_email", ""),
+                "received_time": event.get("received_time"),
+                "responded": event.get("responded", False),
+                "response_latency_hours": event.get("response_latency_hours"),
+                "response_type": event.get("response_type"),
+                "conversation_id": event.get("conversation_id"),
+                "subject": event.get("subject"),
+                "user_position": event.get("user_position"),
+                "total_recipients": event.get("total_recipients"),
+                "has_question": event.get("has_question", False),
+                "has_action_language": event.get("has_action_language", False),
+                "subject_type": event.get("subject_type"),
+                "is_recurring": event.get("is_recurring", False),
+            }
+            rows.append(row)
+
+        if rows:
+            # Batch in chunks of 500 to avoid payload limits
+            for i in range(0, len(rows), 500):
+                self.client.table("response_events").upsert(
+                    rows[i:i + 500], on_conflict="user_id,email_id"
+                ).execute()
+
+    # ------------------------------------------------------------------
+    # Threads
+    # ------------------------------------------------------------------
+
+    def upsert_threads(self, user_id, threads):
+        """Bulk upsert thread statistics for a user."""
+        now = datetime.utcnow().isoformat()
+        rows = []
+        for thread in threads:
+            row = {
+                "user_id": user_id,
+                "conversation_id": thread["conversation_id"],
+                "total_messages": thread.get("total_messages", 0),
+                "user_messages": thread.get("user_messages", 0),
+                "participation_rate": thread.get("participation_rate"),
+                "user_initiated": thread.get("user_initiated", False),
+                "user_avg_body_length": thread.get("user_avg_body_length"),
+                "other_responders": thread.get("other_responders", []),
+                "duration_days": thread.get("duration_days", 0),
+                "updated_at": now,
+            }
+            rows.append(row)
+
+        if rows:
+            for i in range(0, len(rows), 500):
+                self.client.table("threads").upsert(
+                    rows[i:i + 500], on_conflict="user_id,conversation_id"
+                ).execute()
+
+    # ------------------------------------------------------------------
+    # Domains
+    # ------------------------------------------------------------------
+
+    def upsert_domains(self, user_id, domains):
+        """Bulk upsert domain statistics for a user."""
+        now = datetime.utcnow().isoformat()
+        rows = []
+        for domain in domains:
+            row = {
+                "user_id": user_id,
+                "domain": domain["domain"],
+                "avg_reply_rate": domain.get("avg_reply_rate"),
+                "contact_count": domain.get("contact_count", 0),
+                "domain_category": domain.get("domain_category", "external"),
+                "updated_at": now,
+            }
+            rows.append(row)
+
+        if rows:
+            self.client.table("domains").upsert(
+                rows, on_conflict="user_id,domain"
+            ).execute()

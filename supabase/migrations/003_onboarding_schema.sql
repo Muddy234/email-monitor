@@ -1,4 +1,4 @@
--- Email Monitor: Onboarding schema
+-- Clarion AI: Onboarding schema
 -- Tables and columns for the one-time onboarding intelligence build.
 -- Run after 002_dashboard_policies.sql.
 

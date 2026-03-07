@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Marquee Promo Tile — 1400x560</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    background: #f0f0f0;
+    font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  }
+
+  .tile {
+    width: 1400px;
+    height: 560px;
+    background: linear-gradient(135deg, #0F172A 0%, #1E3A5F 40%, #2563EB 100%);
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    align-items: center;
+    color: #fff;
+  }
+
+  /* Large radial glow on the right */
+  .tile::before {
+    content: '';
+    position: absolute;
+    top: -30%;
+    right: -5%;
+    width: 600px;
+    height: 600px;
+    background: radial-gradient(circle, rgba(59,130,246,0.25) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  /* Bottom gradient bar */
+  .tile::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 4px;
+    background: linear-gradient(90deg, #10B981, #2563EB, #3B82F6);
+  }
+
+  .left {
+    flex: 1;
+    padding: 0 80px;
+    z-index: 1;
+  }
+
+  .right {
+    flex: 0 0 520px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1;
+    padding-right: 60px;
+  }
+
+  .icon-row {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    margin-bottom: 24px;
+  }
+
+  .envelope-icon {
+    width: 56px;
+    height: 56px;
+  }
+
+  .app-name {
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+    opacity: 0.95;
+  }
+
+  .headline {
+    font-size: 44px;
+    font-weight: 800;
+    line-height: 1.15;
+    letter-spacing: -1px;
+    margin-bottom: 16px;
+  }
+
+  .headline .highlight {
+    color: #10B981;
+  }
+
+  .subtitle {
+    font-size: 18px;
+    font-weight: 400;
+    line-height: 1.5;
+    opacity: 0.8;
+    max-width: 500px;
+    margin-bottom: 28px;
+  }
+
+  .badges {
+    display: flex;
+    gap: 12px;
+  }
+
+  .badge {
+    padding: 8px 20px;
+    background: rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 24px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+  }
+
+  .badge.accent {
+    background: rgba(16,185,129,0.15);
+    border-color: rgba(16,185,129,0.35);
+    color: #6EE7B7;
+  }
+
+  /* Mockup card stack on the right */
+  .mockup {
+    position: relative;
+    width: 380px;
+    height: 340px;
+  }
+
+  .card {
+    position: absolute;
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 14px;
+    backdrop-filter: blur(8px);
+    padding: 20px 24px;
+  }
+
+  .card-1 {
+    top: 0; left: 20px;
+    width: 340px;
+    opacity: 0.5;
+    transform: scale(0.95);
+  }
+
+  .card-2 {
+    top: 50px; left: 10px;
+    width: 360px;
+    opacity: 0.7;
+    transform: scale(0.97);
+  }
+
+  .card-3 {
+    top: 110px; left: 0;
+    width: 380px;
+    opacity: 1;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  }
+
+  .card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+
+  .card-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+  }
+
+  .card-dot.green { background: #10B981; }
+  .card-dot.amber { background: #F59E0B; }
+  .card-dot.red { background: #EF4444; }
+
+  .card-sender {
+    font-size: 14px;
+    font-weight: 600;
+    opacity: 0.9;
+  }
+
+  .card-subject {
+    font-size: 12px;
+    opacity: 0.6;
+    margin-bottom: 10px;
+  }
+
+  .card-bar {
+    height: 6px;
+    border-radius: 3px;
+    background: rgba(255,255,255,0.12);
+    margin-bottom: 6px;
+  }
+  .card-bar.short { width: 60%; }
+  .card-bar.med { width: 80%; }
+  .card-bar.long { width: 100%; }
+
+  .card-ai-tag {
+    display: inline-block;
+    margin-top: 8px;
+    padding: 3px 10px;
+    background: rgba(16,185,129,0.2);
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #6EE7B7;
+  }
+
+  /* Decorative floating elements */
+  .float-circle {
+    position: absolute;
+    border-radius: 50%;
+    border: 1px solid rgba(255,255,255,0.06);
+  }
+
+  .fc-1 { width: 200px; height: 200px; top: -60px; left: 50%; }
+  .fc-2 { width: 120px; height: 120px; bottom: 40px; left: 30%; }
+  .fc-3 { width: 80px; height: 80px; top: 60px; right: 15%; }
+</style>
+</head>
+<body>
+  <div class="tile">
+    <!-- Decorative circles -->
+    <div class="float-circle fc-1"></div>
+    <div class="float-circle fc-2"></div>
+    <div class="float-circle fc-3"></div>
+
+    <div class="left">
+      <div class="icon-row">
+        <svg class="envelope-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="2" y="6" width="28" height="20" rx="3" stroke="#fff" stroke-width="2.2"/>
+          <path d="M2 9l13.1 8.3a1.94 1.94 0 0 0 1.8 0L30 9" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="26" cy="8" r="4" fill="#10B981"/>
+          <circle cx="26" cy="8" r="6" fill="none" stroke="#10B981" stroke-width="1.2" opacity="0.5"/>
+        </svg>
+        <span class="app-name">Clarion AI</span>
+      </div>
+
+      <h1 class="headline">
+        Your Inbox,<br>
+        <span class="highlight">Intelligently</span> Managed
+      </h1>
+
+      <p class="subtitle">
+        AI-powered email prioritization and draft generation for Outlook. Focus on what matters.
+      </p>
+
+      <div class="badges">
+        <span class="badge accent">Free to Use</span>
+        <span class="badge">Outlook Integration</span>
+        <span class="badge">AI-Powered</span>
+      </div>
+    </div>
+
+    <div class="right">
+      <div class="mockup">
+        <!-- Background cards -->
+        <div class="card card-1">
+          <div class="card-bar long"></div>
+          <div class="card-bar short"></div>
+        </div>
+        <div class="card card-2">
+          <div class="card-header">
+            <div class="card-dot amber"></div>
+            <span class="card-sender">Marketing Team</span>
+          </div>
+          <div class="card-bar med"></div>
+          <div class="card-bar short"></div>
+        </div>
+        <!-- Front card with detail -->
+        <div class="card card-3">
+          <div class="card-header">
+            <div class="card-dot green"></div>
+            <span class="card-sender">Client — Project Update</span>
+          </div>
+          <div class="card-subject">Re: Q4 deliverables timeline</div>
+          <div class="card-bar long"></div>
+          <div class="card-bar med"></div>
+          <div class="card-bar short"></div>
+          <span class="card-ai-tag">AI Draft Ready</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
