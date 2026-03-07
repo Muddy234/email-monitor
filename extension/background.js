@@ -38,7 +38,6 @@ const OWA_ENDPOINTS = {
 // ---------------------------------------------------------------------------
 
 let token = null;        // { token, expiresOn, cachedAt, clientId, origin }
-let lastCommand = null;  // { action, timestamp }
 let isSyncing = false;   // lock to prevent concurrent Supabase syncs
 let lastSyncTime = null; // ISO string of last successful sync
 
@@ -357,50 +356,6 @@ async function handleGetItem(params) {
   return parseGetItemMessage(msg);
 }
 
-// --- UpdateItem — unflag email ---------------------------------------------
-
-async function handleUnflagEmail(params) {
-  const messageId = params.message_id;
-  const changeKey = params.change_key || undefined;
-  const flagStatus = params.flag_status || "NotFlagged";
-
-  const itemId = { __type: "ItemId:#Exchange", Id: messageId };
-  if (changeKey) itemId.ChangeKey = changeKey;
-
-  const body = {
-    __type: "UpdateItemRequest:#Exchange",
-    ItemChanges: [
-      {
-        __type: "ItemChange:#Exchange",
-        ItemId: itemId,
-        Updates: [
-          {
-            __type: "SetItemField:#Exchange",
-            Item: {
-              __type: "Message:#Exchange",
-              Flag: { __type: "FlagType:#Exchange", FlagStatus: flagStatus },
-            },
-            Path: { __type: "PropertyUri:#Exchange", FieldURI: "Flag" },
-          },
-        ],
-      },
-    ],
-    ConflictResolution: "AlwaysOverwrite",
-    MessageDisposition: "SaveOnly",
-  };
-
-  const data = await owaFetch("UpdateItem", body);
-  const ri = data.Body?.ResponseMessages?.Items?.[0];
-  if (!ri || ri.ResponseCode !== "NoError") {
-    throw new Error(`UpdateItem failed: ${ri?.ResponseCode || data.Body?.ErrorCode || "unknown"}`);
-  }
-
-  return {
-    success: true,
-    new_change_key: ri.Items?.[0]?.ItemId?.ChangeKey || null,
-  };
-}
-
 // --- CreateItem — save draft -----------------------------------------------
 
 async function handleSaveDraft(params) {
@@ -451,105 +406,6 @@ async function handleGetSentItems(params) {
   });
   return result;
 }
-
-// --- GetConversationItems --------------------------------------------------
-
-async function handleGetConversationMessages(params) {
-  const conversationId = params.conversation_id;
-  const maxItems = params.max_items || 20;
-
-  const body = {
-    __type: "GetConversationItemsRequest:#Exchange",
-    Conversations: [
-      {
-        __type: "ConversationRequestType:#Exchange",
-        ConversationId: { __type: "ItemId:#Exchange", Id: conversationId },
-      },
-    ],
-    ItemShape: {
-      __type: "ItemResponseShape:#Exchange",
-      BaseShape: "IdOnly",
-      AdditionalProperties: [
-        { __type: "PropertyUri:#Exchange", FieldURI: "Subject" },
-        { __type: "PropertyUri:#Exchange", FieldURI: "Body" },
-        { __type: "PropertyUri:#Exchange", FieldURI: "From" },
-        { __type: "PropertyUri:#Exchange", FieldURI: "ToRecipients" },
-        { __type: "PropertyUri:#Exchange", FieldURI: "CcRecipients" },
-        { __type: "PropertyUri:#Exchange", FieldURI: "DateTimeReceived" },
-        { __type: "PropertyUri:#Exchange", FieldURI: "Importance" },
-        { __type: "PropertyUri:#Exchange", FieldURI: "HasAttachments" },
-        { __type: "PropertyUri:#Exchange", FieldURI: "Flag" },
-        { __type: "PropertyUri:#Exchange", FieldURI: "ConversationId" },
-        { __type: "PropertyUri:#Exchange", FieldURI: "ConversationTopic" },
-      ],
-      BodyType: "Text",
-    },
-    MaxItemsToReturn: maxItems,
-  };
-
-  const data = await owaFetch("GetConversationItems", body);
-  const ri = data.Body?.ResponseMessages?.Items?.[0];
-  if (!ri || ri.ResponseCode !== "NoError") {
-    throw new Error(`GetConversationItems failed: ${ri?.ResponseCode || data.Body?.ErrorCode || "unknown"}`);
-  }
-
-  // Conversation response has a different shape — Items within Conversation nodes
-  const conversation = ri.Conversation;
-  const nodes = conversation?.ConversationNodes || [];
-  const messages = [];
-  for (const node of nodes) {
-    for (const item of node.Items || []) {
-      messages.push(parseGetItemMessage(item));
-    }
-  }
-  return { messages };
-}
-
-// --- Ping (health check) ---------------------------------------------------
-
-async function handlePing() {
-  return {
-    ok: true,
-    has_token: !!(token && token.token),
-    token_expired: isTokenExpired(),
-  };
-}
-
-// --- Command dispatcher ----------------------------------------------------
-
-const HANDLERS = {
-  get_emails: handleGetEmails,
-  get_item: handleGetItem,
-  unflag_email: handleUnflagEmail,
-  save_draft: handleSaveDraft,
-  get_sent_items: handleGetSentItems,
-  get_conversation_messages: handleGetConversationMessages,
-  ping: handlePing,
-};
-
-async function dispatchCommand(command) {
-  const { action, request_id, ...params } = command;
-
-  if (action === "release") {
-    chrome.alarms.clear(EMAIL_SYNC_ALARM);
-    return { request_id, action, success: true };
-  }
-
-  const handler = HANDLERS[action];
-  if (!handler) {
-    return { request_id, action, error: `Unknown action: ${action}` };
-  }
-
-  lastCommand = { action, timestamp: Date.now() };
-
-  try {
-    const result = await handler(params);
-    return { request_id, action, ...result };
-  } catch (err) {
-    return { request_id, action, error: err.message };
-  }
-}
-
 
 // ---------------------------------------------------------------------------
 // Supabase email sync
@@ -817,7 +673,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       token_expires: token?.expiresOn
         ? new Date(token.expiresOn * 1000).toISOString()
         : null,
-      last_command: lastCommand,
       // Supabase state
       last_sync: lastSyncTime,
       realtime_connected: isRealtimeConnected(),

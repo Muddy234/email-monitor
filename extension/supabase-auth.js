@@ -49,24 +49,6 @@ async function _saveSession(session) {
 // Public API
 // ---------------------------------------------------------------------------
 
-async function supabaseSignIn(email, password) {
-  const data = await _authRequest("/token?grant_type=password", { email, password });
-  const session = _sessionFromResponse(data);
-  await _saveSession(session);
-  return session;
-}
-
-async function supabaseSignUp(email, password) {
-  const data = await _authRequest("/signup", { email, password });
-  // Supabase may return a session immediately or require email confirmation
-  if (data.access_token) {
-    const session = _sessionFromResponse(data);
-    await _saveSession(session);
-    return session;
-  }
-  return { confirm_email: true, user: data.user || data };
-}
-
 async function supabaseRefreshToken(refreshToken) {
   const data = await _authRequest("/token?grant_type=refresh_token", {
     refresh_token: refreshToken,
@@ -74,10 +56,6 @@ async function supabaseRefreshToken(refreshToken) {
   const session = _sessionFromResponse(data);
   await _saveSession(session);
   return session;
-}
-
-async function supabaseLogout() {
-  await chrome.storage.local.remove("supabaseSession");
 }
 
 /**

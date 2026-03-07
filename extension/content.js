@@ -58,11 +58,3 @@ captureAndSend();
 
 // --- Poll every 60 s for refreshed tokens ---
 setInterval(captureAndSend, TOKEN_POLL_INTERVAL_MS);
-
-// --- Respond to on-demand token requests from service worker ---
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  if (msg.type === "getToken") {
-    const tokenData = findExchangeToken();
-    sendResponse(tokenData);
-  }
-});
