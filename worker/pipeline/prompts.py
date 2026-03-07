@@ -149,31 +149,9 @@ Feature checks are questions about the email. Verify each against the actual mes
 - The reason field should explain the decision concisely, referencing specific signals or content"""
 
 
-SUMMARY_LENGTH_INSTRUCTIONS = {
-    "short": "\n\nIMPORTANT: Keep context notes to a single brief sentence (under 20 words).",
-    "detailed": "\n\nIMPORTANT: Provide a thorough 3-5 sentence summary for each email's context field, covering key details, background, stakeholders involved, deadlines, and any dependencies.",
-}
-
-
-def get_analysis_prompt(db=None, summary_length=None):
-    """Load analysis prompt from DB, fall back to default. Optionally append summary_length instructions."""
-    if db is not None:
-        try:
-            from models import get_system_prompt
-            content = get_system_prompt(db, "analysis_system_prompt")
-            if content:
-                prompt = content
-            else:
-                prompt = DEFAULT_ANALYSIS_PROMPT
-        except Exception:
-            prompt = DEFAULT_ANALYSIS_PROMPT
-    else:
-        prompt = DEFAULT_ANALYSIS_PROMPT
-
-    if summary_length and summary_length in SUMMARY_LENGTH_INSTRUCTIONS:
-        prompt += SUMMARY_LENGTH_INSTRUCTIONS[summary_length]
-
-    return prompt
+def get_analysis_prompt():
+    """Return the default analysis prompt."""
+    return DEFAULT_ANALYSIS_PROMPT
 
 
 def get_enriched_analysis_prompt():
@@ -181,14 +159,6 @@ def get_enriched_analysis_prompt():
     return ENRICHED_ANALYSIS_PROMPT
 
 
-def get_draft_prompt_template(db=None):
-    """Load draft prompt template from DB, fall back to default."""
-    if db is not None:
-        try:
-            from models import get_system_prompt
-            content = get_system_prompt(db, "draft_system_prompt")
-            if content:
-                return content
-        except Exception:
-            pass
+def get_draft_prompt_template():
+    """Return the default draft prompt template."""
     return DEFAULT_DRAFT_PROMPT_TEMPLATE
