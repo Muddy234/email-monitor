@@ -22,6 +22,24 @@ BATCH_SIZE = 20
 MAX_WORKERS = 5
 
 
+def _parse_json_response(text):
+    """Parse JSON from an LLM response, stripping markdown fences if present."""
+    if not text:
+        return None
+    stripped = text.strip()
+    # Remove ```json ... ``` or ``` ... ``` wrappers
+    if stripped.startswith("```"):
+        # Find end of first line (skip ```json or ```)
+        first_newline = stripped.index("\n")
+        last_fence = stripped.rfind("```")
+        if last_fence > first_newline:
+            stripped = stripped[first_newline + 1:last_fence].strip()
+    try:
+        return json.loads(stripped)
+    except json.JSONDecodeError:
+        return None
+
+
 def extract_email_features(received, contact_freq):
     """Phase 3: Extract topic keywords and metadata via Haiku.
 
@@ -242,12 +260,11 @@ def _run_extraction_batch(batch_text, batch_idx):
         logger.warning(f"Extraction batch {batch_idx}: no response")
         return None
 
-    try:
-        data = json.loads(response)
-        return data.get("extractions", [])
-    except json.JSONDecodeError:
-        logger.warning(f"Extraction batch {batch_idx}: invalid JSON")
+    data = _parse_json_response(response)
+    if data is None:
+        logger.warning(f"Extraction batch {batch_idx}: invalid JSON — {response[:200]}")
         return None
+    return data.get("extractions", [])
 
 
 def _run_style_batch(batch_text, batch_idx):
@@ -264,9 +281,8 @@ def _run_style_batch(batch_text, batch_idx):
         logger.warning(f"Style batch {batch_idx}: no response")
         return None
 
-    try:
-        data = json.loads(response)
-        return data.get("extractions", [])
-    except json.JSONDecodeError:
-        logger.warning(f"Style batch {batch_idx}: invalid JSON")
+    data = _parse_json_response(response)
+    if data is None:
+        logger.warning(f"Style batch {batch_idx}: invalid JSON — {response[:200]}")
         return None
+    return data.get("extractions", [])
