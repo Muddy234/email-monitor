@@ -444,7 +444,7 @@ class SupabaseWorkerClient:
         unique = list(set(conversation_ids))
         result = (
             self.client.table("conversations")
-            .select("conversation_id, messages, created_at, updated_at")
+            .select("conversation_id, messages, updated_at")
             .eq("user_id", user_id)
             .in_("conversation_id", unique)
             .execute()
