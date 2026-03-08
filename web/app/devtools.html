@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://esm.sh; connect-src https://*.supabase.co wss://*.supabase.co https://esm.sh; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:;">
+    <title>Dev Tools — Clarion AI</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/app.css">
+</head>
+<body class="em-app">
+    <nav id="em-sidebar" class="em-sidebar"></nav>
+    <main class="em-main em-fade-in">
+        <div class="em-page-header">
+            <div>
+                <h1 class="em-page-title">Dev Tools</h1>
+                <p class="em-page-subtitle">Inspect onboarding artifacts, test drafts, and trace the pipeline.</p>
+            </div>
+        </div>
+
+        <div class="em-devtools-tabs" id="devtoolsTabs">
+            <button class="em-devtools-tab active" data-panel="onboarding">Onboarding</button>
+            <button class="em-devtools-tab" data-panel="draft-tester">Draft Tester</button>
+            <button class="em-devtools-tab" data-panel="scorer">Scorer</button>
+            <button class="em-devtools-tab" data-panel="trace">Pipeline Trace</button>
+        </div>
+
+        <div class="em-devtools-panel active" id="panel-onboarding">
+            <div class="em-skeleton em-skeleton-card"></div>
+        </div>
+        <div class="em-devtools-panel" id="panel-draft-tester"></div>
+        <div class="em-devtools-panel" id="panel-scorer"></div>
+        <div class="em-devtools-panel" id="panel-trace"></div>
+    </main>
+
+    <script type="module" src="/js/pages/devtools.js"></script>
+</body>
+</html>
