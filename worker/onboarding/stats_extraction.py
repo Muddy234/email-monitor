@@ -165,7 +165,7 @@ def _build_response_events(received, sent, user_aliases):
         total_recipients = _count_recipients(email)
 
         event = {
-            "email_id": email.get("email_ref") or email.get("id") or "",
+            "email_id": email.get("id") or email.get("email_ref") or "",
             "sender_email": sender,
             "received_time": email.get("received_time"),
             "responded": responded,
