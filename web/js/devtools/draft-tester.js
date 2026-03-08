@@ -169,11 +169,23 @@ async function renderDraftDetail(email, userId) {
         resultEl.innerHTML = `<div class="em-card" style="padding:24px;text-align:center;color:var(--em-slate-400)"><div class="em-skeleton" style="height:80px;border-radius:var(--em-radius-sm)"></div></div>`;
 
         try {
-            const { data, error } = await supabase.functions.invoke("generate-draft", {
-                body: { systemPrompt, userPrompt },
+            const { data: { session } } = await supabase.auth.getSession();
+            const resp = await fetch("https://frbvdoszenrrlswegsxq.supabase.co/functions/v1/generate-draft", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${session?.access_token || ""}`,
+                    "apikey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZyYnZkb3N6ZW5ycmxzd2Vnc3hxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI2NjA0OTUsImV4cCI6MjA4ODIzNjQ5NX0.OCYTv_B823u_9o_Q9S-qPpUea9DQt_xpsWuNnolJT7M",
+                },
+                body: JSON.stringify({ systemPrompt, userPrompt }),
             });
 
-            if (error) throw error;
+            if (!resp.ok) {
+                const errText = await resp.text();
+                throw new Error(`HTTP ${resp.status}: ${errText}`);
+            }
+
+            const data = await resp.json();
             if (data?.error) throw new Error(data.error);
 
             const draftText = data?.draft || "";
