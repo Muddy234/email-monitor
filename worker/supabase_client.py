@@ -343,21 +343,30 @@ class SupabaseWorkerClient:
         rows = []
         now = datetime.utcnow().isoformat()
         for contact in contacts_list:
+            # Coerce types to match DB schema
+            epm = contact.get("emails_per_month", 0)
+            expertise = contact.get("expertise_areas", [])
+            if not isinstance(expertise, list):
+                expertise = [expertise] if expertise else []
+            co_recip = contact.get("common_co_recipients", [])
+            if not isinstance(co_recip, list):
+                co_recip = [co_recip] if co_recip else []
+
             row = {
                 "user_id": user_id,
                 "email": contact["email"],
                 "name": contact.get("name"),
                 "organization": contact.get("organization") or contact.get("inferred_organization"),
                 "role": contact.get("role") or contact.get("inferred_role"),
-                "expertise_areas": contact.get("expertise_areas", []),
+                "expertise_areas": expertise,
                 "contact_type": contact.get("contact_type", "unknown"),
                 "relationship_significance": contact.get("relationship_significance", "medium"),
                 "relationship_summary": contact.get("relationship_summary"),
-                "emails_per_month": contact.get("emails_per_month", 0),
+                "emails_per_month": int(epm) if epm is not None else 0,
                 "response_rate": contact.get("response_rate"),
                 "avg_response_time_hours": contact.get("avg_response_time_hours"),
                 "user_initiates_pct": contact.get("user_initiates_pct"),
-                "common_co_recipients": contact.get("common_co_recipients", []),
+                "common_co_recipients": co_recip,
                 "last_interaction_at": contact.get("last_interaction_at"),
                 "last_profiled_at": now,
                 "updated_at": now,
@@ -365,9 +374,16 @@ class SupabaseWorkerClient:
             rows.append(row)
 
         if rows:
-            self.client.table("contacts").upsert(
-                rows, on_conflict="user_id,email"
-            ).execute()
+            try:
+                self.client.table("contacts").upsert(
+                    rows, on_conflict="user_id,email"
+                ).execute()
+            except Exception as e:
+                logger.error(f"upsert_contacts failed: {e}")
+                if rows:
+                    logger.error(f"Sample row keys: {list(rows[0].keys())}")
+                    logger.error(f"Sample row: {rows[0]}")
+                raise
 
     def upsert_topic_profile(self, user_id, data):
         """Upsert a user's topic profile (domains, keywords, stats).
