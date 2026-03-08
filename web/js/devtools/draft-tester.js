@@ -1,6 +1,6 @@
 /**
  * Panel 2: Draft Tester
- * Select an email → see classification, existing draft, and constructed prompt.
+ * Select an email → see classification, existing draft, constructed prompt, and generate a test draft.
  */
 import { supabase } from "../supabase-client.js";
 import { escapeHtml, showToast } from "../ui.js";
@@ -120,9 +120,15 @@ async function renderDraftDetail(email, userId) {
             </div>
         ` : ""}
 
+        <div style="margin-top:24px;margin-bottom:24px">
+            <button class="em-btn em-btn-primary" id="dt-generate-btn">Generate Draft</button>
+            <span id="dt-generate-status" style="margin-left:12px;font-size:13px;color:var(--em-slate-500)"></span>
+        </div>
+        <div id="dt-generated-draft"></div>
+
         <h3 class="em-section-title" style="margin-top:24px">Constructed Prompt</h3>
         <p style="font-size:13px;color:var(--em-slate-500);margin-bottom:12px">
-            Copy these prompts into <a href="https://claude.ai" target="_blank" style="color:var(--em-blue-600)">claude.ai</a> to test draft generation with your style guide.
+            The prompts sent to Claude when generating a draft.
         </p>
 
         <div style="margin-bottom:16px">
@@ -150,5 +156,48 @@ async function renderDraftDetail(email, userId) {
                 showToast("Copied to clipboard", "success");
             });
         });
+    });
+
+    // Generate Draft button
+    const generateBtn = document.getElementById("dt-generate-btn");
+    const statusEl = document.getElementById("dt-generate-status");
+    const resultEl = document.getElementById("dt-generated-draft");
+
+    generateBtn.addEventListener("click", async () => {
+        generateBtn.disabled = true;
+        statusEl.textContent = "Generating...";
+        resultEl.innerHTML = `<div class="em-card" style="padding:24px;text-align:center;color:var(--em-slate-400)"><div class="em-skeleton" style="height:80px;border-radius:var(--em-radius-sm)"></div></div>`;
+
+        try {
+            const { data, error } = await supabase.functions.invoke("generate-draft", {
+                body: { systemPrompt, userPrompt },
+            });
+
+            if (error) throw error;
+            if (data?.error) throw new Error(data.error);
+
+            const draftText = data?.draft || "";
+            if (!draftText) throw new Error("Empty response from API");
+
+            statusEl.textContent = "";
+            resultEl.innerHTML = `
+                <h3 class="em-section-title">Generated Draft</h3>
+                <div class="em-card" style="border-left:3px solid var(--em-blue-600)">
+                    <div style="white-space:pre-wrap;font-size:14px;line-height:1.7;color:var(--em-slate-700)">${escapeHtml(draftText)}</div>
+                </div>
+            `;
+            showToast("Draft generated", "success");
+        } catch (err) {
+            statusEl.textContent = "";
+            resultEl.innerHTML = `
+                <div class="em-card" style="border-left:3px solid var(--em-red-500);padding:16px">
+                    <div style="font-weight:600;color:var(--em-red-600);margin-bottom:4px">Generation failed</div>
+                    <div style="font-size:13px;color:var(--em-slate-600)">${escapeHtml(err.message || "Unknown error")}</div>
+                </div>
+            `;
+            showToast("Draft generation failed", "error");
+        } finally {
+            generateBtn.disabled = false;
+        }
     });
 }
