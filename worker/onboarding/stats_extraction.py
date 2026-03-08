@@ -588,7 +588,7 @@ def _detect_user_position(email, user_aliases):
     if isinstance(recipients, list):
         for r in recipients:
             addr = (r.get("email") or r.get("address") or "").lower()
-            rtype = (r.get("type") or "").upper()
+            rtype = str(r.get("type") or "").upper()
             if addr in user_aliases:
                 if rtype in ("CC", "BCC"):
                     return "CC"
