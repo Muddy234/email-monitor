@@ -531,49 +531,25 @@ async function handleGetSentItems(params) {
 // ---------------------------------------------------------------------------
 
 /**
- * Detect the user's Outlook email from synced emails and update profile
- * aliases if they're empty. Scans to_field/cc_field across emails to find
- * addresses that appear as recipients (the user's own mailbox).
+ * Detect the user's email aliases from sent items and auth email.
+ * Uses the From field of sent emails as the definitive source —
+ * only addresses the user actually sent from are true aliases.
  */
-async function detectAndUpdateAliases(userId, emails) {
+async function detectAndUpdateAliases(userId, authEmail, sentEmails) {
   try {
     const profiles = await getProfile(userId);
     const existing = (profiles?.[0]?.user_email_aliases || []).map(a => a.toLowerCase());
 
-    // Collect all recipient addresses from to_field, cc_field, and recipients array
-    const candidates = new Map(); // address → count
-    const emailRegex = /[\w.+-]+@[\w.-]+\.\w+/g;
-    for (const e of emails) {
-      const found = new Set();
-      // Parse from structured recipients
-      for (const r of (e.recipients || [])) {
-        if (r.address) found.add(r.address.toLowerCase());
-      }
-      // Parse from to_field / cc_field strings as fallback
-      for (const field of [e.to_field, e.cc_field]) {
-        if (!field) continue;
-        for (const match of field.matchAll(emailRegex)) {
-          found.add(match[0].toLowerCase());
-        }
-      }
-      // Exclude the sender — we want recipient-only addresses
-      const sender = (e.sender_email || e.sender || "").toLowerCase();
-      found.delete(sender);
-      for (const addr of found) {
-        candidates.set(addr, (candidates.get(addr) || 0) + 1);
-      }
+    // Collect unique sender addresses from sent items — these are definitively the user's
+    const detected = new Set();
+    if (authEmail) detected.add(authEmail.toLowerCase());
+    for (const e of sentEmails) {
+      const addr = (e.sender_email || "").toLowerCase();
+      if (addr) detected.add(addr);
     }
 
-    // The user's own address is the most frequent non-sender recipient.
-    // Pick addresses appearing in at least 3 emails or 20% of the batch.
-    const threshold = Math.max(3, Math.floor(emails.length * 0.2));
-    const detected = [];
-    for (const [addr, count] of candidates) {
-      if (count >= threshold) detected.push(addr);
-    }
-
-    if (DEBUG) console.log(`Alias detection: ${emails.length} emails, ${candidates.size} unique recipients, ${detected.length} above threshold (${threshold})`);
-    if (detected.length === 0) return;
+    if (DEBUG) console.log(`Alias detection: ${sentEmails.length} sent emails, ${detected.size} aliases found:`, [...detected]);
+    if (detected.size === 0) return;
 
     // Merge with existing aliases (no duplicates)
     const merged = [...new Set([...existing, ...detected])];
@@ -651,6 +627,7 @@ async function syncEmailsToSupabase() {
 
     // Sync sent items every cycle (incremental for subsequent syncs)
     let sentCount = 0;
+    let sentEnriched = [];
     const maxSentEmails = lastSyncTime ? 50 : MAX_CATCHUP_EMAILS;
     try {
       const sentResult = await handleGetSentItems({
@@ -660,7 +637,7 @@ async function syncEmailsToSupabase() {
 
       if (sentResult.emails && sentResult.emails.length > 0) {
         // Enrich sent emails with body/recipients via batched GetItem
-        const sentEnriched = await enrichEmailsBatched(sentResult.emails);
+        sentEnriched = await enrichEmailsBatched(sentResult.emails);
 
         // Transform sent items — status is "completed" (not queued for classification)
         const sentRows = sentEnriched.map((e) => ({
@@ -697,8 +674,9 @@ async function syncEmailsToSupabase() {
     lastSyncTime = new Date().toISOString();
     persistSyncTime();
 
-    // Auto-detect user's Outlook email and update profile aliases if needed
-    await detectAndUpdateAliases(userId, enriched);
+    // Auto-detect user's Outlook email aliases from sent items + auth email
+    const authEmail = session.user?.email || "";
+    await detectAndUpdateAliases(userId, authEmail, sentEnriched);
 
     // Update heartbeat so the worker knows we're active
     updateHeartbeat(userId).catch(() => {});
