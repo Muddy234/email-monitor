@@ -103,7 +103,7 @@ function connectRealtime(userId, accessToken) {
   realtimeUserId = userId;
 
   const projectRef = new URL(SUPABASE_URL).hostname.split(".")[0];
-  const wsUrl = `wss://${projectRef}.supabase.co/realtime/v1/websocket?apikey=${accessToken}&vsn=1.0.0`;
+  const wsUrl = `wss://${projectRef}.supabase.co/realtime/v1/websocket?apikey=${SUPABASE_ANON_KEY}&vsn=1.0.0`;
 
   try {
     realtimeWs = new WebSocket(wsUrl);

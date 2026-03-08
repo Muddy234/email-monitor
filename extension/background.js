@@ -356,6 +356,125 @@ async function handleGetItem(params) {
   return parseGetItemMessage(msg);
 }
 
+// --- GetItem batch — fetch multiple emails in one request -------------------
+
+const GETITEM_BATCH_SIZE = 50; // OWA handles up to ~50-100 items per request
+
+async function handleGetItemBatch(emails) {
+  const properties = [
+    { __type: "PropertyUri:#Exchange", FieldURI: "Subject" },
+    { __type: "PropertyUri:#Exchange", FieldURI: "Body" },
+    { __type: "PropertyUri:#Exchange", FieldURI: "From" },
+    { __type: "PropertyUri:#Exchange", FieldURI: "ToRecipients" },
+    { __type: "PropertyUri:#Exchange", FieldURI: "CcRecipients" },
+    { __type: "PropertyUri:#Exchange", FieldURI: "DateTimeReceived" },
+    { __type: "PropertyUri:#Exchange", FieldURI: "Importance" },
+    { __type: "PropertyUri:#Exchange", FieldURI: "HasAttachments" },
+    { __type: "PropertyUri:#Exchange", FieldURI: "Attachments" },
+    { __type: "PropertyUri:#Exchange", FieldURI: "Flag" },
+    { __type: "PropertyUri:#Exchange", FieldURI: "ConversationId" },
+    { __type: "PropertyUri:#Exchange", FieldURI: "ConversationTopic" },
+  ];
+
+  const itemIds = emails.map((e) => {
+    const id = { __type: "ItemId:#Exchange", Id: e.email_ref };
+    if (e._change_key) id.ChangeKey = e._change_key;
+    return id;
+  });
+
+  const body = {
+    __type: "GetItemRequest:#Exchange",
+    ItemShape: {
+      __type: "ItemResponseShape:#Exchange",
+      BaseShape: "IdOnly",
+      AdditionalProperties: properties,
+      BodyType: "Text",
+    },
+    ItemIds: itemIds,
+  };
+
+  const data = await owaFetch("GetItem", body);
+  const items = data.Body?.ResponseMessages?.Items || [];
+
+  const results = [];
+  for (let i = 0; i < items.length; i++) {
+    const ri = items[i];
+    if (ri?.ResponseCode === "NoError" && ri.Items?.[0]) {
+      results.push(parseGetItemMessage(ri.Items[0]));
+    } else {
+      // Fall back to basic FindItem data for failed items
+      results.push(emails[i]);
+    }
+  }
+  return results;
+}
+
+/**
+ * Enrich a list of emails by fetching full details in batches.
+ * Falls back to basic FindItem data for any items that fail.
+ */
+async function enrichEmailsBatched(emails) {
+  const enriched = [];
+  for (let i = 0; i < emails.length; i += GETITEM_BATCH_SIZE) {
+    const chunk = emails.slice(i, i + GETITEM_BATCH_SIZE);
+    try {
+      const batchResults = await handleGetItemBatch(chunk);
+      enriched.push(...batchResults);
+    } catch (err) {
+      if (DEBUG) console.warn(`GetItem batch failed at offset ${i}, falling back to basic data:`, err.message);
+      enriched.push(...chunk);
+    }
+    if (DEBUG && emails.length > GETITEM_BATCH_SIZE) {
+      console.log(`Enriched ${Math.min(i + GETITEM_BATCH_SIZE, emails.length)}/${emails.length} emails`);
+    }
+  }
+  return enriched;
+}
+
+// --- UpdateItem — unflag email ---------------------------------------------
+
+async function handleUnflagEmail(params) {
+  const messageId = params.message_id;
+  const changeKey = params.change_key || undefined;
+  const flagStatus = params.flag_status || "NotFlagged";
+
+  const itemId = { __type: "ItemId:#Exchange", Id: messageId };
+  if (changeKey) itemId.ChangeKey = changeKey;
+
+  const body = {
+    __type: "UpdateItemRequest:#Exchange",
+    ItemChanges: [
+      {
+        __type: "ItemChange:#Exchange",
+        ItemId: itemId,
+        Updates: [
+          {
+            __type: "SetItemField:#Exchange",
+            Item: {
+              __type: "Message:#Exchange",
+              Flag: { __type: "FlagType:#Exchange", FlagStatus: flagStatus },
+            },
+            Path: { __type: "PropertyUri:#Exchange", FieldURI: "Flag" },
+          },
+        ],
+      },
+    ],
+    ConflictResolution: "AlwaysOverwrite",
+    MessageDisposition: "SaveOnly",
+  };
+
+  const data = await owaFetch("UpdateItem", body);
+  const ri = data.Body?.ResponseMessages?.Items?.[0];
+  if (!ri || ri.ResponseCode !== "NoError") {
+    throw new Error(`UpdateItem failed: ${ri?.ResponseCode || data.Body?.ErrorCode || "unknown"}`);
+  }
+
+  return {
+    success: true,
+    new_change_key: ri.Items?.[0]?.ItemId?.ChangeKey || null,
+  };
+}
+
 // --- CreateItem — save draft -----------------------------------------------
 
 async function handleSaveDraft(params) {
@@ -500,20 +619,8 @@ async function syncEmailsToSupabase() {
       return { synced: 0 };
     }
 
-    // Enrich each email with body/recipients via GetItem
-    const enriched = [];
-    for (const email of result.emails) {
-      try {
-        const detail = await handleGetItem({
-          message_id: email.email_ref,
-          change_key: email._change_key,
-        });
-        enriched.push(detail);
-      } catch (err) {
-        // If GetItem fails for one email, still push the basic info
-        enriched.push(email);
-      }
-    }
+    // Enrich emails with body/recipients via batched GetItem
+    const enriched = await enrichEmailsBatched(result.emails);
 
     // Transform to Supabase row format
     const rows = enriched.map((e) => ({
@@ -552,19 +659,8 @@ async function syncEmailsToSupabase() {
       });
 
       if (sentResult.emails && sentResult.emails.length > 0) {
-        // Enrich sent emails with body/recipients
-        const sentEnriched = [];
-        for (const email of sentResult.emails) {
-          try {
-            const detail = await handleGetItem({
-              message_id: email.email_ref,
-              change_key: email._change_key,
-            });
-            sentEnriched.push(detail);
-          } catch (err) {
-            sentEnriched.push(email);
-          }
-        }
+        // Enrich sent emails with body/recipients via batched GetItem
+        const sentEnriched = await enrichEmailsBatched(sentResult.emails);
 
         // Transform sent items — status is "completed" (not queued for classification)
         const sentRows = sentEnriched.map((e) => ({

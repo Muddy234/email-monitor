@@ -152,6 +152,9 @@ def filter_emails(db_client, emails, user_id, config):
     user_aliases = [a.lower() for a in config.get("user_email_aliases", []) if a]
 
     filtered = []
+    skip_ids = []
+    skip_classifications = []
+
     for email in emails:
         email_data = supabase_row_to_email_data(email)
         email_data["signals"] = build_signals(email_data, user_aliases)
@@ -159,30 +162,42 @@ def filter_emails(db_client, emails, user_id, config):
 
         if classification == "skip":
             logger.info(f"  Skipped (filter): {email_data.get('subject', '?')[:60]}")
-            db_client.update_email_status(email["id"], "completed")
-            db_client.insert_classification(
-                email["id"], user_id,
-                {"needs_response": False, "action": "skip", "context": "Filtered out by rules"},
-            )
+            skip_ids.append(email["id"])
+            skip_classifications.append({
+                "email_id": email["id"],
+                "user_id": user_id,
+                "needs_response": False,
+                "action": "skip",
+                "context": "Filtered out by rules",
+                "project": "",
+                "priority": 0,
+            })
             continue
 
         skip_reason = _should_auto_skip(email_data, email_data["signals"])
         if skip_reason:
             logger.info(f"  Auto-skipped ({skip_reason}): {email_data.get('subject', '?')[:60]}")
-            db_client.update_email_status(email["id"], "completed")
-            db_client.insert_classification(
-                email["id"], user_id,
-                {
-                    "needs_response": False,
-                    "action": "Auto-skipped by signal rules",
-                    "context": f"Skipped: {skip_reason}",
-                },
-            )
+            skip_ids.append(email["id"])
+            skip_classifications.append({
+                "email_id": email["id"],
+                "user_id": user_id,
+                "needs_response": False,
+                "action": "Auto-skipped by signal rules",
+                "context": f"Skipped: {skip_reason}",
+                "project": "",
+                "priority": 0,
+            })
             continue
 
         email_data["_filter_result"] = classification
         email_data["_db_id"] = email["id"]
         filtered.append(email_data)
+
+    # Batch-write all skipped emails in bulk
+    if skip_ids:
+        db_client.bulk_update_email_status(skip_ids, "completed")
+        db_client.bulk_insert_classifications(skip_classifications)
+        logger.info(f"  Batch-wrote {len(skip_ids)} skipped emails")
 
     return filtered
 

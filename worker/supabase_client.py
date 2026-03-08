@@ -104,6 +104,14 @@ class SupabaseWorkerClient:
             {"status": status}
         ).eq("id", email_id).execute()
 
+    def bulk_update_email_status(self, email_ids, status):
+        """Update status for multiple emails in a single query."""
+        if not email_ids:
+            return
+        self.client.table("emails").update(
+            {"status": status}
+        ).in_("id", email_ids).execute()
+
     # ------------------------------------------------------------------
     # Classifications
     # ------------------------------------------------------------------
@@ -138,6 +146,12 @@ class SupabaseWorkerClient:
             email_update["classification_confidence"] = classification["classification_confidence"]
         if email_update:
             self.client.table("emails").update(email_update).eq("id", email_id).execute()
+
+    def bulk_insert_classifications(self, rows):
+        """Insert multiple classification rows in a single request."""
+        if not rows:
+            return
+        self.client.table("classifications").insert(rows).execute()
 
     # ------------------------------------------------------------------
     # Drafts
