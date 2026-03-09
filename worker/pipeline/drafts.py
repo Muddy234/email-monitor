@@ -85,6 +85,11 @@ class DraftGenerator:
 
         context_block = "\n".join(context_lines)
 
+        style_guide = action_context.get("style_guide", "")
+        style_block = ""
+        if style_guide:
+            style_block = f"\n\nWRITING STYLE GUIDE:\n{style_guide}\n"
+
         prompt = f"""Draft a reply to the following email:
 
 FROM: {sender_name} <{sender}>
@@ -93,7 +98,7 @@ SUBJECT: {subject}
 EMAIL BODY:
 {body}
 
-{context_block}{tone_block}
+{context_block}{tone_block}{style_block}
 
 Generate the reply body text only (no subject, no headers)."""
 

@@ -22,7 +22,7 @@ const PANELS = {
     onboarding: { init: initOnboarding, loaded: false },
     "draft-tester": { init: initDraftTester, loaded: false },
     scorer: { init: initScorerInspector, loaded: false },
-    trace: { init: initPipelineTrace, loaded: false },
+    trace: { init: initPipelineTrace, loaded: false, alwaysRefresh: true },
 };
 
 const tabs = document.querySelectorAll("#devtoolsTabs .em-devtools-tab");
@@ -34,7 +34,7 @@ function activateTab(panelId) {
     setParam("tab", panelId === "onboarding" ? "" : panelId);
 
     const entry = PANELS[panelId];
-    if (entry && !entry.loaded) {
+    if (entry && (!entry.loaded || entry.alwaysRefresh)) {
         entry.loaded = true;
         entry.init();
     }
