@@ -49,7 +49,7 @@ def _get_user_artifacts(db, user_id):
     return artifacts
 
 
-def build_config_from_profile(profile, user_metadata=None):
+def build_config_from_profile(profile):
     """Convert a Supabase profiles row into the config dict that
     EmailFilter, ClaudeAnalyzer, and DraftGenerator expect.
 
@@ -59,13 +59,10 @@ def build_config_from_profile(profile, user_metadata=None):
 
     Args:
         profile: dict from profiles table.
-        user_metadata: dict from auth.users user_metadata (optional).
 
     Returns:
         dict: Config dict compatible with existing pipeline classes.
     """
-    user_metadata = user_metadata or {}
-
     config = {
         # Provider settings (not used by worker, but kept for compatibility)
         "email_provider": "supabase",
@@ -82,9 +79,9 @@ def build_config_from_profile(profile, user_metadata=None):
         "claude_cli_timeout_seconds": int(os.environ.get("CLAUDE_TIMEOUT", "120")),
         "max_body_chars": int(os.environ.get("MAX_BODY_CHARS", "8000")),
 
-        # Draft settings — prefer auth metadata, fall back to env vars
-        "draft_user_name": user_metadata.get("full_name") or os.environ.get("DRAFT_USER_NAME", ""),
-        "draft_user_title": user_metadata.get("title") or os.environ.get("DRAFT_USER_TITLE", ""),
+        # Draft settings — display_name from profile, fall back to env vars
+        "draft_user_name": profile.get("display_name") or os.environ.get("DRAFT_USER_NAME", ""),
+        "draft_user_title": os.environ.get("DRAFT_USER_TITLE", ""),
 
         # Pipeline feature flags
         "enable_email_filtering": True,
@@ -206,7 +203,8 @@ def filter_emails(db_client, emails, user_id, config):
 
 
 def process_classification_results(db_client, action_items, filtered_emails,
-                                   user_id, config, draft_generator):
+                                   user_id, config, draft_generator,
+                                   style_guide=""):
     """Write classification results to DB and collect draft candidates.
 
     Returns:
@@ -271,6 +269,9 @@ def process_classification_results(db_client, action_items, filtered_emails,
             # Pass enrichment data if available on the email
             if email_data.get("_enrichment"):
                 action_context["enrichment"] = email_data["_enrichment"]
+
+            if style_guide:
+                action_context["style_guide"] = style_guide
 
             conv_id = email_data.get("conversation_id")
             if conv_id:
@@ -805,8 +806,7 @@ def process_user_batch_enriched(db, user_id, profile, emails):
     from pipeline.api_client import submit_and_wait
     from pipeline.prompts import get_enriched_analysis_prompt
 
-    user_metadata = db.fetch_user_metadata(user_id)
-    config = build_config_from_profile(profile, user_metadata=user_metadata)
+    config = build_config_from_profile(profile)
     user_aliases = [a.lower() for a in config.get("user_email_aliases", []) if a]
     run_id = db.create_pipeline_run(user_id, trigger_type="scheduled")
     batch_poll_interval = int(os.environ.get("BATCH_POLL_INTERVAL", "10"))
@@ -955,8 +955,10 @@ def process_user_batch_enriched(db, user_id, profile, emails):
         draft_generator = DraftGenerator(
             config, system_prompt_template=get_draft_prompt_template()
         )
+        style_guide = profile.get("writing_style_guide") or ""
         emails_processed, draft_candidates = process_classification_results(
-            db, all_action_items, passing, user_id, config, draft_generator
+            db, all_action_items, passing, user_id, config, draft_generator,
+            style_guide=style_guide,
         )
 
         # Step 9: Draft generation via Batches API (unchanged from main.py)

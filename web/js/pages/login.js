@@ -10,6 +10,8 @@ if (session) {
     window.location.replace("/app/dashboard.html");
 }
 
+const nameInput = document.getElementById("authName");
+const nameGroup = document.getElementById("nameGroup");
 const emailInput = document.getElementById("authEmail");
 const passwordInput = document.getElementById("authPassword");
 const loginBtn = document.getElementById("loginBtn");
@@ -42,7 +44,14 @@ loginBtn.addEventListener("click", async () => {
 
     try {
         if (isSignUp) {
-            const result = await signUp(email, password);
+            const displayName = nameInput.value.trim();
+            if (!displayName) {
+                showErr("Please enter the name you'd like used in email sign-offs");
+                loginBtn.disabled = false;
+                loginBtn.textContent = "Sign Up";
+                return;
+            }
+            const result = await signUp(email, password, displayName);
             if (result.session) {
                 window.location.replace("/app/dashboard.html");
             } else {
@@ -67,6 +76,7 @@ toggleBtn.addEventListener("click", () => {
     toggleBtn.textContent = isSignUp
         ? "Already have an account? Log in"
         : "Don't have an account? Sign up";
+    nameGroup.style.display = isSignUp ? "" : "none";
     hideErr();
 });
 

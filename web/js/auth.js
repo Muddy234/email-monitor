@@ -44,12 +44,22 @@ export async function signIn(email, password) {
 }
 
 /**
- * Sign up with email/password.
+ * Sign up with email/password. Stores display name in the profiles table
+ * (used for draft sign-offs).
  * @returns {Promise<object>} The signup response.
  */
-export async function signUp(email, password) {
+export async function signUp(email, password, displayName) {
     const { data, error } = await supabase.auth.signUp({ email, password });
     if (error) throw error;
+
+    // Write display_name to the profile row created by the DB trigger
+    if (data.user && displayName) {
+        await supabase
+            .from("profiles")
+            .update({ display_name: displayName })
+            .eq("id", data.user.id);
+    }
+
     return data;
 }
 
