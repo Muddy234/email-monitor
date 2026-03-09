@@ -1045,6 +1045,16 @@ def process_user_batch_enriched(db, user_id, profile, emails):
         # Step 9: Draft generation via Batches API (unchanged from main.py)
         drafts_generated = 0
         if draft_candidates:
+            # Deduplicate by db_id — the LLM can return multiple action items
+            # for the same email, causing duplicate custom_id in the batch request.
+            seen_ids = set()
+            unique_candidates = []
+            for candidate in draft_candidates:
+                if candidate["db_id"] not in seen_ids:
+                    seen_ids.add(candidate["db_id"])
+                    unique_candidates.append(candidate)
+            draft_candidates = unique_candidates
+
             draft_requests = []
             for candidate in draft_candidates:
                 req = draft_generator.build_batch_params(

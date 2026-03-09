@@ -223,6 +223,14 @@ def main():
         except Exception as e:
             logger.error(f"Model re-training check error: {e}")
 
+        # -- Recover stuck emails --------------------------------------
+        try:
+            reset_count = db.reset_stuck_processing()
+            if reset_count:
+                logger.warning(f"Recovered {reset_count} stuck processing email(s)")
+        except Exception as e:
+            logger.error(f"Stuck-email recovery error: {e}")
+
         logger.info(f"--- Accumulation window: {current_window}s ---")
 
         try:
