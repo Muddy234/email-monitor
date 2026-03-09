@@ -19,7 +19,7 @@ export async function getEmails() {
 
     const { data, error } = await supabase
         .from("emails")
-        .select("id, subject, sender_email, sender_name, received_time, body, status, classifications(*), drafts(*)")
+        .select("id, subject, sender_email, sender_name, received_time, body, status, reason, archetype, classification_confidence, classifications(*), drafts(*)")
         .eq("user_id", user.id)
         .order("received_time", { ascending: false })
         .limit(500);

@@ -42,7 +42,7 @@ async function renderTrace(email, userId) {
     const [evtRes, contactRes, clsRes, draftRes] = await Promise.all([
         supabase.from("response_events").select("*").eq("user_id", userId).eq("email_id", email.id).limit(1),
         email.sender_email
-            ? supabase.from("contacts").select("contact_type, organization, role, relationship_significance, total_received, total_sent, avg_response_time_hours").eq("user_id", userId).eq("email", email.sender_email.toLowerCase()).single()
+            ? supabase.from("contacts").select("contact_type, organization, role, relationship_significance, total_received, avg_response_time_hours").eq("user_id", userId).eq("email", email.sender_email.toLowerCase()).single()
             : Promise.resolve({ data: null }),
         supabase.from("classifications").select("*").eq("email_id", email.id).limit(1),
         supabase.from("drafts").select("*").eq("email_id", email.id).limit(1),
@@ -72,7 +72,7 @@ async function renderTrace(email, userId) {
             ${renderStage2(email, cls, wasFiltered)}
             ${renderStage3(evt, wasFiltered, wasGated)}
             ${renderStage4(contact, evt, wasFiltered, wasGated)}
-            ${renderStage5(cls, wasFiltered, wasGated)}
+            ${renderStage5(cls, email, wasFiltered, wasGated)}
             ${renderStage6(draft, cls, wasFiltered, wasGated)}
             ${renderStage7(draft)}
         </div>
@@ -207,8 +207,6 @@ function renderStage4(contact, evt, wasFiltered, wasGated) {
                 <div class="em-kv-value">${escapeHtml(contact.relationship_significance || "—")}</div>
                 <div class="em-kv-label">Emails Received</div>
                 <div class="em-kv-value">${contact.total_received ?? "—"}</div>
-                <div class="em-kv-label">Emails Sent</div>
-                <div class="em-kv-value">${contact.total_sent ?? "—"}</div>
                 <div class="em-kv-label">Avg Response Time</div>
                 <div class="em-kv-value">${contact.avg_response_time_hours != null ? contact.avg_response_time_hours.toFixed(1) + "h" : "—"}</div>
             ` : `
@@ -224,7 +222,7 @@ function renderStage4(contact, evt, wasFiltered, wasGated) {
 }
 
 // ─── Stage 5: Classify ───────────────────────────────────────
-function renderStage5(cls, wasFiltered, wasGated) {
+function renderStage5(cls, email, wasFiltered, wasGated) {
     if (wasFiltered || wasGated) {
         const reason = wasFiltered ? "filtered in Stage 2" : "gated in Stage 3";
         return traceStage("Stage 5: Classify", "skipped", `
@@ -245,6 +243,12 @@ function renderStage5(cls, wasFiltered, wasGated) {
         `);
     }
 
+    // Enriched fields (reason, archetype, confidence) are stored on the emails
+    // table, not on classifications. Pull from the email row as primary source.
+    const confidence = email.classification_confidence ?? cls.confidence;
+    const archetype = email.archetype || cls.archetype || "";
+    const reason = email.reason || cls.reason || cls.context || "";
+
     const needsBadge = cls.needs_response
         ? '<span class="em-badge em-badge-amber">Yes</span>'
         : '<span class="em-badge em-badge-slate">No</span>';
@@ -257,11 +261,11 @@ function renderStage5(cls, wasFiltered, wasGated) {
             <div class="em-kv-label">Needs Response</div>
             <div class="em-kv-value">${needsBadge}</div>
             <div class="em-kv-label">Confidence</div>
-            <div class="em-kv-value">${cls.confidence != null ? (cls.confidence * 100).toFixed(0) + "%" : "—"}</div>
+            <div class="em-kv-value">${confidence != null ? (confidence * 100).toFixed(0) + "%" : "—"}</div>
             <div class="em-kv-label">Archetype</div>
-            <div class="em-kv-value">${escapeHtml(cls.archetype || "—")}</div>
+            <div class="em-kv-value">${escapeHtml(archetype || "—")}</div>
             <div class="em-kv-label">Reason</div>
-            <div class="em-kv-value">${escapeHtml(cls.reason || cls.context || "—")}</div>
+            <div class="em-kv-value">${escapeHtml(reason || "—")}</div>
             <div class="em-kv-label">Action</div>
             <div class="em-kv-value">${escapeHtml(cls.action || "—")}</div>
             <div class="em-kv-label">Project</div>
