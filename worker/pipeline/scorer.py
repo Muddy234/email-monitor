@@ -206,7 +206,7 @@ def score_email(email_data, signals, contact, thread_info, artifacts):
     elif contact.get("response_rate") is not None:
         # Apply Bayesian smoothing using contact's response_rate + email count
         raw_rate = contact["response_rate"]
-        n_emails = contact.get("emails_per_month", 0) or 0
+        n_emails = contact.get("total_received", 0) or 0
         if n_emails > 0:
             sender_smoothed = (
                 (raw_rate * n_emails + artifacts.prior_weight * artifacts.global_rate)
@@ -320,7 +320,7 @@ def score_email(email_data, signals, contact, thread_info, artifacts):
         factors.append(f"penalty_floor={floor:.3f}")
 
     # -- Cap and floor -------------------------------------------------------
-    raw_score = round(max(0.01, min(0.95, score)), 4)
+    raw_score = round(max(artifacts.score_floor, min(artifacts.score_cap, score)), 4)
 
     # -- Isotonic calibration ------------------------------------------------
     calibrated = round(_isotonic_transform(raw_score, artifacts.iso_breakpoints), 4)

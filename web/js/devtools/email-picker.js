@@ -7,6 +7,10 @@ import { escapeHtml, formatDate } from "../ui.js";
 
 let cachedEmails = null;
 
+export function clearEmailCache() {
+    cachedEmails = null;
+}
+
 export async function getEmails() {
     if (cachedEmails) return cachedEmails;
 

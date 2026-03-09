@@ -578,7 +578,7 @@ def _build_thread_info(email_data, thread_row, contact, user_aliases):
     }
 
     if contact:
-        info["sender_events_count"] = contact.get("emails_per_month")
+        info["sender_events_count"] = contact.get("total_received")
 
     if not thread_row:
         return info
@@ -644,6 +644,7 @@ def _score_and_gate(db, filtered_emails, contacts_map, threads_map,
     artifacts = _get_user_artifacts(db, user_id)
     passing = []
     gated_count = 0
+    response_events = []
 
     for ed in filtered_emails:
         sender = (ed.get("sender_email") or ed.get("sender") or "").lower()
@@ -660,6 +661,26 @@ def _score_and_gate(db, filtered_emails, contacts_map, threads_map,
         should_gate, gate_reason = check_triage_gate(
             calibrated, thread_info, artifacts
         )
+
+        # Collect scoring features + score output for response_events persistence
+        response_events.append({
+            "email_id": ed["_db_id"],
+            "sender_email": sender,
+            "received_time": ed.get("received_time"),
+            "conversation_id": conv_id,
+            "subject": ed.get("subject", ""),
+            "user_position": signals.get("user_position"),
+            "total_recipients": signals.get("total_recipients"),
+            "has_question": bool(signals.get("user_mentioned_by_name") or
+                                 re.search(r'\?', (ed.get("body") or "")[:2000])),
+            "has_action_language": signals.get("intent_category") == "direct_request",
+            "subject_type": signals.get("subject_type"),
+            "is_recurring": bool(contact and (contact.get("total_received") or 0) > 5),
+            "raw_score": float(raw_score) if raw_score is not None else None,
+            "calibrated_prob": float(calibrated) if calibrated is not None else None,
+            "confidence_tier": tier,
+            "gate_reason": gate_reason if should_gate else None,
+        })
 
         if should_gate:
             db_id = ed["_db_id"]
@@ -683,6 +704,13 @@ def _score_and_gate(db, filtered_emails, contacts_map, threads_map,
         ed["_factors"] = factors
         ed["_thread_info"] = thread_info
         passing.append(ed)
+
+    # Persist scoring features to response_events for dev tools trace
+    if response_events:
+        try:
+            db.upsert_response_events(user_id, response_events)
+        except Exception as e:
+            logger.warning(f"  Failed to persist response_events: {e}")
 
     return passing, gated_count
 

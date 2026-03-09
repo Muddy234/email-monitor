@@ -45,6 +45,81 @@ function stopHeartbeat() {
 }
 
 // ---------------------------------------------------------------------------
+// Draft helpers
+// ---------------------------------------------------------------------------
+
+function escapeHtml(str) {
+  if (!str) return "";
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function formatEmailDate(isoString) {
+  if (!isoString) return "";
+  try {
+    const d = new Date(isoString);
+    return d.toLocaleString("en-US", {
+      weekday: "long", year: "numeric", month: "long", day: "numeric",
+      hour: "numeric", minute: "2-digit", hour12: true,
+    });
+  } catch (_) {
+    return isoString;
+  }
+}
+
+function buildReplyAllRecipients(parentEmail, userAliases) {
+  const seen = new Set();
+  const recipients = parentEmail.recipients || [];
+
+  const toList = [];
+  const ccList = [];
+
+  // Add original sender to To
+  const senderAddr = (parentEmail.sender_email || "").toLowerCase();
+  if (senderAddr && !userAliases.has(senderAddr)) {
+    seen.add(senderAddr);
+    toList.push({ name: parentEmail.sender_name || "", address: parentEmail.sender_email });
+  }
+
+  // Add original To recipients (type 1), excluding user aliases and dupes
+  for (const r of recipients) {
+    const addr = (r.address || "").toLowerCase();
+    if (r.type === 1 && addr && !userAliases.has(addr) && !seen.has(addr)) {
+      seen.add(addr);
+      toList.push({ name: r.name || "", address: r.address });
+    }
+  }
+
+  // Add original CC recipients (type 2), excluding user aliases and dupes
+  for (const r of recipients) {
+    const addr = (r.address || "").toLowerCase();
+    if (r.type === 2 && addr && !userAliases.has(addr) && !seen.has(addr)) {
+      seen.add(addr);
+      ccList.push({ name: r.name || "", address: r.address });
+    }
+  }
+
+  return { toRecipients: toList, ccRecipients: ccList };
+}
+
+function buildThreadedBody(draftBody, parentEmail) {
+  const escapedDraft = escapeHtml(draftBody).replace(/\n/g, "<br>");
+  const escapedBody = escapeHtml(parentEmail.body || "").replace(/\n/g, "<br>");
+  const date = formatEmailDate(parentEmail.received_time);
+
+  let header = `<b>From:</b> ${escapeHtml(parentEmail.sender_name || "")} &lt;${escapeHtml(parentEmail.sender_email || "")}&gt;<br>`;
+  header += `<b>Sent:</b> ${escapeHtml(date)}<br>`;
+  if (parentEmail.to_field) header += `<b>To:</b> ${escapeHtml(parentEmail.to_field)}<br>`;
+  if (parentEmail.cc_field) header += `<b>Cc:</b> ${escapeHtml(parentEmail.cc_field)}<br>`;
+  header += `<b>Subject:</b> ${escapeHtml(parentEmail.subject || "")}`;
+
+  return `<div>${escapedDraft}</div><br><div style="border-top:1px solid #ccc;padding-top:10px;margin-top:10px;color:#666;">${header}<br><br>${escapedBody}</div>`;
+}
+
+// ---------------------------------------------------------------------------
 // Draft handler — called when a new pending draft arrives
 // ---------------------------------------------------------------------------
 
@@ -56,34 +131,43 @@ async function handleNewDraft(record) {
 
     if (!draftBody || record.status !== "pending") return;
 
-    // Fetch the parent email to get sender info for the reply
-    const emails = await supabaseRequest(`/emails?id=eq.${emailId}&select=email_ref,sender_email,sender_name,subject`);
+    // Fetch user aliases to exclude from reply-all
+    let userAliases = new Set();
+    try {
+      const profiles = await getProfile(realtimeUserId);
+      const aliases = profiles?.[0]?.user_email_aliases || [];
+      userAliases = new Set(aliases.map(a => a.toLowerCase()));
+    } catch (_) {
+      if (DEBUG) console.warn("Realtime: could not fetch user aliases, proceeding without");
+    }
+
+    // Fetch the parent email with full recipient and body data
+    const emails = await supabaseRequest(
+      `/emails?id=eq.${emailId}&select=email_ref,sender_email,sender_name,subject,recipients,to_field,cc_field,body,received_time`
+    );
     const parentEmail = emails?.[0];
     if (!parentEmail) {
       if (DEBUG) console.warn("Realtime: parent email not found for draft", draftId);
       return;
     }
 
-    // Build reply recipients
-    const toRecipients = [{
-      name: parentEmail.sender_name || "",
-      address: parentEmail.sender_email || "",
-    }];
+    // Build reply-all recipients and threaded HTML body
+    const { toRecipients, ccRecipients } = buildReplyAllRecipients(parentEmail, userAliases);
+    const htmlBody = buildThreadedBody(draftBody, parentEmail);
 
-    // Create draft in Outlook via OWA
     const subject = parentEmail.subject?.startsWith("Re: ")
       ? parentEmail.subject
       : `Re: ${parentEmail.subject || ""}`;
 
     const result = await handleSaveDraft({
       subject,
-      body: draftBody,
+      body: htmlBody,
       to_recipients: toRecipients,
-      body_type: "Text",
+      cc_recipients: ccRecipients,
+      body_type: "HTML",
     });
 
     if (result.success) {
-      // Update draft status in Supabase
       await updateDraftStatus(draftId, "written", result.draft_ref);
       if (DEBUG) console.log("Realtime: draft written to Outlook:", subject);
     } else {

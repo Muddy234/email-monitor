@@ -252,16 +252,17 @@ def _merge_extraction_into_contacts(contact_profiles, extraction_contacts):
         ext = extraction_contacts.get(email, {})
 
         contact = dict(profile)
+        contact["total_received"] = ext.get("total_received")
         contact["emails_per_month"] = ext.get("emails_per_month")
         contact["response_rate"] = ext.get("reply_rate")
         contact["avg_response_time_hours"] = ext.get("avg_response_time_hours")
+        contact["median_response_time_hours"] = ext.get("median_response_time_hours")
         contact["last_interaction_at"] = ext.get("last_seen")
         contact["common_co_recipients"] = ext.get("co_recipients_top5", [])
         contact["user_initiates_pct"] = ext.get("user_initiates_pct")
         contact["reply_rate_30d"] = ext.get("reply_rate_30d")
         contact["reply_rate_90d"] = ext.get("reply_rate_90d")
         contact["smoothed_rate"] = ext.get("smoothed_rate")
-        contact["median_response_time_hours"] = ext.get("median_response_time_hours")
         contact["forward_rate"] = ext.get("forward_rate")
         contact["typical_subjects"] = ext.get("typical_subjects", [])
 

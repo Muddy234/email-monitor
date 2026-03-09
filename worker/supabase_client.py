@@ -352,6 +352,10 @@ class SupabaseWorkerClient:
             if not isinstance(co_recip, list):
                 co_recip = [co_recip] if co_recip else []
 
+            typ_subj = contact.get("typical_subjects", [])
+            if not isinstance(typ_subj, list):
+                typ_subj = [typ_subj] if typ_subj else []
+
             row = {
                 "user_id": user_id,
                 "email": contact["email"],
@@ -362,10 +366,17 @@ class SupabaseWorkerClient:
                 "contact_type": contact.get("contact_type", "unknown"),
                 "relationship_significance": contact.get("relationship_significance", "medium"),
                 "relationship_summary": contact.get("relationship_summary"),
-                "emails_per_month": int(epm) if epm is not None else 0,
+                "total_received": contact.get("total_received", 0),
+                "emails_per_month": round(float(epm), 1) if epm is not None else 0,
                 "response_rate": contact.get("response_rate"),
+                "reply_rate_30d": contact.get("reply_rate_30d"),
+                "reply_rate_90d": contact.get("reply_rate_90d"),
+                "smoothed_rate": contact.get("smoothed_rate"),
                 "avg_response_time_hours": contact.get("avg_response_time_hours"),
+                "median_response_time_hours": contact.get("median_response_time_hours"),
                 "user_initiates_pct": contact.get("user_initiates_pct"),
+                "forward_rate": contact.get("forward_rate"),
+                "typical_subjects": typ_subj,
                 "common_co_recipients": co_recip,
                 "last_interaction_at": contact.get("last_interaction_at"),
                 "last_profiled_at": now,
@@ -582,6 +593,10 @@ class SupabaseWorkerClient:
                 "has_action_language": event.get("has_action_language", False),
                 "subject_type": event.get("subject_type"),
                 "is_recurring": event.get("is_recurring", False),
+                "raw_score": event.get("raw_score"),
+                "calibrated_prob": event.get("calibrated_prob"),
+                "confidence_tier": event.get("confidence_tier"),
+                "gate_reason": event.get("gate_reason"),
             }
             rows.append(row)
 

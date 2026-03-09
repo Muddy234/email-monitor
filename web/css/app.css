@@ -1287,7 +1287,7 @@
     width: 2px;
     background: var(--em-slate-200);
 }
-.em-trace-stage:last-child::before { display: none; }
+.em-trace-stage.last::before { display: none; }
 
 .em-trace-dot {
     position: absolute;
@@ -1301,6 +1301,8 @@
     box-shadow: 0 0 0 2px var(--em-slate-200);
 }
 .em-trace-dot.em-trace-dot-empty { background: var(--em-slate-300); }
+.em-trace-dot.em-trace-dot-stop { background: var(--em-red-600); }
+.em-trace-dot.em-trace-dot-pending { background: var(--em-amber-600); }
 
 .em-trace-label {
     font-size: 11px;
@@ -1309,6 +1311,52 @@
     text-transform: uppercase;
     letter-spacing: 0.05em;
     margin-bottom: 8px;
+}
+
+/* Verdict inline badges */
+.em-trace-verdict {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 9999px;
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 10px;
+}
+.em-trace-verdict-pass { background: var(--em-emerald-100); color: var(--em-emerald-600); }
+.em-trace-verdict-stop { background: var(--em-red-100); color: var(--em-red-600); }
+.em-trace-verdict-neutral { background: var(--em-slate-100); color: var(--em-slate-500); }
+.em-trace-verdict-pending { background: var(--em-amber-100); color: var(--em-amber-600); }
+
+/* Score probability bar */
+.em-trace-score-bar {
+    position: relative;
+    height: 22px;
+    background: var(--em-slate-100);
+    border-radius: var(--em-radius-xs);
+    margin-bottom: 12px;
+    overflow: hidden;
+}
+.em-trace-score-fill {
+    height: 100%;
+    background: var(--em-blue-500);
+    border-radius: var(--em-radius-xs);
+    transition: width 0.3s ease;
+}
+.em-trace-score-label {
+    position: absolute;
+    right: 8px;
+    top: 2px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--em-slate-700);
+}
+
+/* Informational note */
+.em-trace-note {
+    font-size: 12px;
+    color: var(--em-slate-400);
+    font-style: italic;
+    margin-top: 6px;
 }
 
 .em-keyword-badge {
