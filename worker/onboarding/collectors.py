@@ -55,7 +55,7 @@ _DISCLAIMER_RE = re.compile(
 )
 
 
-def collect_onboarding_emails(db, user_id, user_aliases, days=120):
+def collect_onboarding_emails(db, user_id, user_aliases, days=120, max_emails=None):
     """Fetch and split emails into received vs sent.
 
     Args:
@@ -63,11 +63,12 @@ def collect_onboarding_emails(db, user_id, user_aliases, days=120):
         user_id: UUID string.
         user_aliases: List of user's email addresses.
         days: Lookback window.
+        max_emails: Optional cap on total emails fetched.
 
     Returns:
         dict with keys: received, sent, filtered_count, total_count.
     """
-    all_emails = db.fetch_emails_for_onboarding(user_id, days=days)
+    all_emails = db.fetch_emails_for_onboarding(user_id, days=days, max_emails=max_emails)
     total = len(all_emails)
     logger.info(f"Fetched {total} emails for user {user_id} ({days}-day window)")
 

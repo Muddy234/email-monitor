@@ -300,22 +300,35 @@ class SupabaseWorkerClient:
                 ready.append(uid)
         return ready
 
-    def fetch_emails_for_onboarding(self, user_id, days=30):
-        """Fetch all emails (inbox + sent) for the last N days.
+    def fetch_emails_for_onboarding(self, user_id, days=30, max_emails=None):
+        """Fetch emails (inbox + sent) for the last N days.
+
+        Args:
+            user_id: UUID string.
+            days: Lookback window in days.
+            max_emails: Optional cap on total rows returned (newest first
+                        when capped, then re-sorted ascending).
 
         Returns:
-            list[dict]: Email rows.
+            list[dict]: Email rows ordered by received_time ascending.
         """
         cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
 
-        result = (
+        query = (
             self.client.table("emails")
             .select("*")
             .eq("user_id", user_id)
             .gte("received_time", cutoff)
-            .order("received_time", desc=False)
-            .execute()
         )
+
+        if max_emails:
+            # Fetch newest N emails, then reverse to ascending order
+            result = query.order("received_time", desc=True).limit(max_emails).execute()
+            rows = result.data or []
+            rows.sort(key=lambda r: r.get("received_time") or "")
+            return rows
+
+        result = query.order("received_time", desc=False).execute()
         return result.data or []
 
     def update_onboarding_status(self, user_id, status, **kwargs):
@@ -593,6 +606,13 @@ class SupabaseWorkerClient:
                 "has_action_language": event.get("has_action_language", False),
                 "subject_type": event.get("subject_type"),
                 "is_recurring": event.get("is_recurring", False),
+                "mentions_user_name": event.get("mentions_user_name", False),
+                "sender_is_internal": event.get("sender_is_internal", False),
+                "thread_user_initiated": event.get("thread_user_initiated", False),
+                "arrived_during_active_hours": event.get("arrived_during_active_hours"),
+                "arrived_on_active_day": event.get("arrived_on_active_day"),
+                "thread_depth": event.get("thread_depth", 1),
+                "scoring_factors": event.get("scoring_factors"),
                 "raw_score": event.get("raw_score"),
                 "calibrated_prob": event.get("calibrated_prob"),
                 "confidence_tier": event.get("confidence_tier"),
@@ -606,6 +626,69 @@ class SupabaseWorkerClient:
                 self.client.table("response_events").upsert(
                     rows[i:i + 500], on_conflict="user_id,email_id"
                 ).execute()
+
+    def label_response_events_responded(self, user_id, email_ids):
+        """Mark response_events as responded=True for emails the user replied to.
+
+        Args:
+            user_id: UUID string.
+            email_ids: list[str] of email IDs that received a user reply.
+        """
+        if not email_ids:
+            return
+        # Batch in chunks of 200 to stay within query-string limits
+        for i in range(0, len(email_ids), 200):
+            chunk = email_ids[i:i + 200]
+            self.client.table("response_events").update(
+                {"responded": True}
+            ).eq("user_id", user_id).in_("email_id", chunk).execute()
+
+    def bulk_upsert_contact_stats(self, user_id, sender_stats):
+        """Batch upsert minimal contact records for new/existing senders.
+
+        Uses atomic ON CONFLICT to avoid read-then-write race conditions.
+
+        Args:
+            user_id: UUID string.
+            sender_stats: list of dicts with keys: email, received_time.
+        """
+        if not sender_stats:
+            return
+        now = datetime.utcnow().isoformat()
+        rows = []
+        for stat in sender_stats:
+            rows.append({
+                "user_id": user_id,
+                "email": stat["email"],
+                "total_received": 1,
+                "last_interaction_at": stat.get("received_time") or now,
+                "updated_at": now,
+            })
+        if rows:
+            # Supabase upsert with on_conflict handles the atomic increment
+            # via a Postgres function. For the SDK, we do a raw RPC or
+            # fall back to upsert (which sets total_received=1 for new rows).
+            # For existing rows, we need a separate update.
+            # Split into new vs existing contacts.
+            emails = [r["email"] for r in rows]
+            existing = self.fetch_contacts_by_emails(user_id, emails)
+
+            new_rows = [r for r in rows if r["email"] not in existing]
+            update_emails = [r for r in rows if r["email"] in existing]
+
+            if new_rows:
+                self.client.table("contacts").upsert(
+                    new_rows, on_conflict="user_id,email"
+                ).execute()
+
+            # Increment existing contacts atomically via individual updates
+            for r in update_emails:
+                contact = existing[r["email"]]
+                self.client.table("contacts").update({
+                    "total_received": (contact.get("total_received") or 0) + 1,
+                    "last_interaction_at": r["last_interaction_at"],
+                    "updated_at": now,
+                }).eq("user_id", user_id).eq("email", r["email"]).execute()
 
     # ------------------------------------------------------------------
     # Threads

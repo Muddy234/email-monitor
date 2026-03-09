@@ -167,7 +167,8 @@ def _isotonic_transform(score, breakpoints):
 # Core scorer
 # ---------------------------------------------------------------------------
 
-def score_email(email_data, signals, contact, thread_info, artifacts):
+def score_email(email_data, signals, contact, thread_info, artifacts,
+                user_profile=None):
     """Score a single email using model artifacts and runtime context.
 
     Args:
@@ -182,6 +183,7 @@ def score_email(email_data, signals, contact, thread_info, artifacts):
             - hours_since_user_reply (float or None)
             - sender_events_count (int) — total emails from this sender
         artifacts: UserScoringArtifacts instance.
+        user_profile: dict with baseline_statistics (active_hours, active_days).
 
     Returns:
         tuple: (raw_score, calibrated_prob, confidence_tier, factors)
@@ -238,14 +240,19 @@ def score_email(email_data, signals, contact, thread_info, artifacts):
 
     # -- Step 3: Boolean lifts -----------------------------------------------
     # Map signals to scorer features
+    active_hours, active_days = _derive_active_window(user_profile)
+    arrived_active_hours, arrived_active_day = _check_arrival_time(
+        email_data.get("received_time"), active_hours, active_days
+    )
+
     feature_map = {
         "mentions_user_name": signals.get("user_mentioned_by_name", False),
         "has_question": "?" in (email_data.get("body") or "")[:2000],
         "has_action_language": signals.get("intent_category") == "direct_request",
         "sender_is_internal": contact.get("contact_type") == "internal" or _is_internal_domain(sender_email),
         "thread_user_initiated": thread_info.get("user_initiated", False),
-        "arrived_during_active_hours": True,  # runtime always within active window
-        "arrived_on_active_day": True,
+        "arrived_during_active_hours": arrived_active_hours,
+        "arrived_on_active_day": arrived_active_day,
     }
 
     # Skip features handled elsewhere
@@ -377,6 +384,49 @@ def check_triage_gate(calibrated_prob, thread_info, artifacts):
 def _is_internal_domain(email_addr):
     """Check if email is from the internal domain."""
     return email_addr.endswith("@arete-collective.com")
+
+
+def _derive_active_window(user_profile):
+    """Derive active hours set and active days set from user profile.
+
+    Returns:
+        tuple: (active_hours: set[int], active_days: set[str])
+    """
+    profile = user_profile or {}
+    stats = profile.get("baseline_statistics") or {}
+
+    raw_hours = stats.get("active_hours", [])
+    raw_days = stats.get("active_days", [])
+
+    if raw_hours:
+        active_hours = set()
+        for h in raw_hours:
+            active_hours.update(range(max(0, h - 1), min(24, h + 2)))
+    else:
+        active_hours = set(range(8, 18))
+
+    active_days = set(raw_days) if raw_days else {
+        "Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
+    }
+    return active_hours, active_days
+
+
+def _check_arrival_time(received_time, active_hours, active_days):
+    """Check if an email arrived during active hours and on an active day.
+
+    Returns:
+        tuple: (arrived_during_active_hours: bool, arrived_on_active_day: bool)
+    """
+    if not received_time:
+        return True, True  # default to True when unknown
+    try:
+        from datetime import datetime, timezone
+        dt = datetime.fromisoformat(str(received_time).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.hour in active_hours, dt.strftime("%A") in active_days
+    except (ValueError, TypeError):
+        return True, True
 
 
 def _subject_to_msg_type(subject):

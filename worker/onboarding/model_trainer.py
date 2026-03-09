@@ -173,15 +173,26 @@ def _analyze_features(events, global_rate):
     bool_features = [
         "user_in_to", "user_sole_to", "mentions_user_name",
         "has_question", "has_action_language", "sender_is_internal",
-        "is_recurring",
+        "is_recurring", "thread_user_initiated",
+        "arrived_during_active_hours", "arrived_on_active_day",
     ]
 
     # Derive boolean features from event data
     for ev in events:
         ev["user_in_to"] = ev.get("user_position") == "TO"
         ev["user_sole_to"] = ev.get("user_position") == "TO" and ev.get("total_recipients", 1) == 1
-        ev["mentions_user_name"] = False  # Not available in events
-        ev["sender_is_internal"] = False  # Will be set if we have contact data
+        # Use stored values from response_events; fall back to False for
+        # pre-migration rows that don't have these columns yet.
+        if ev.get("mentions_user_name") is None:
+            ev["mentions_user_name"] = False
+        if ev.get("sender_is_internal") is None:
+            ev["sender_is_internal"] = False
+        if ev.get("thread_user_initiated") is None:
+            ev["thread_user_initiated"] = False
+        if ev.get("arrived_during_active_hours") is None:
+            ev["arrived_during_active_hours"] = False
+        if ev.get("arrived_on_active_day") is None:
+            ev["arrived_on_active_day"] = False
 
     for feat in bool_features:
         true_rows = [e for e in events if e.get(feat) is True]
@@ -226,6 +237,24 @@ def _analyze_features(events, global_rate):
         lift = rate / global_rate if global_rate > 0 else 0
         recip_results[f"[{lo}, {hi})"] = {"rate": round(rate, 4), "lift": round(lift, 3), "n": len(bin_rows)}
     results["recipient_bins"] = recip_results
+
+    # Thread depth bins
+    depth_bins_spec = [(1, 2), (2, 4), (4, 8), (8, 20), (20, 999)]
+    depth_results = {}
+    depth_dist = Counter()
+    for lo, hi in depth_bins_spec:
+        bin_rows = [e for e in events
+                    if lo <= e.get("thread_depth", 1) < hi]
+        depth_dist[f"[{lo}, {hi})"] = len(bin_rows)
+        if not bin_rows:
+            continue
+        rate = sum(1 for r in bin_rows if r["responded"]) / len(bin_rows)
+        lift = rate / global_rate if global_rate > 0 else 0
+        depth_results[f"[{lo}, {hi})"] = {
+            "rate": round(rate, 4), "lift": round(lift, 3), "n": len(bin_rows),
+        }
+    results["depth_bins"] = depth_results
+    logger.info(f"Thread depth distribution: {dict(depth_dist)}")
 
     # Rate × TO interaction
     rate_bins = [(0, 0.05, "0-5%"), (0.05, 0.15, "5-15%"),
@@ -302,11 +331,18 @@ def _derive_lift_factors(feature_results, global_rate):
         if isinstance(info, dict) and info.get("lift"):
             recipient_bins[bin_label] = info["lift"]
 
-    # Depth bin multipliers (from thread data — approximate from events)
-    # We don't have thread depth in events, so use default identity
-    depth_bins = {
-        "[1, 2)": 1.0, "[2, 4)": 1.0, "[4, 8)": 1.0, "[8, 999)": 1.0,
-    }
+    # Depth bin multipliers — computed from thread_depth on events
+    depth_bins = {}
+    depth_data = feature_results.get("depth_bins", {})
+    for bin_label, info in depth_data.items():
+        if isinstance(info, dict) and info.get("lift"):
+            depth_bins[bin_label] = info["lift"]
+    # Fallback to identity if no depth data (pre-migration events)
+    if not depth_bins:
+        depth_bins = {
+            "[1, 2)": 1.0, "[2, 4)": 1.0, "[4, 8)": 1.0,
+            "[8, 20)": 1.0, "[20, 999)": 1.0,
+        }
 
     # Rate × TO interaction
     rate_x_to = {}

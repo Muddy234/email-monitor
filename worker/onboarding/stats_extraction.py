@@ -73,11 +73,17 @@ def extract_all(emails, user_aliases):
     # Step 3b: Enrich contacts with user_initiates_pct from threads
     _enrich_user_initiates_pct(contacts, threads, response_events)
 
+    # Step 3c: Enrich response events with thread-level features
+    _enrich_thread_features(response_events, threads)
+
     # Step 4: Build domains
     domains = _build_domains(contacts)
 
     # Step 5: Build user profile
     user_profile = _build_user_profile(received, sent, global_rate)
+
+    # Step 5b: Enrich response events with active-time features
+    _enrich_active_time_features(response_events, user_profile)
 
     return {
         "response_events": response_events,
@@ -108,6 +114,17 @@ def _split_emails(emails, user_aliases):
 
 def _build_response_events(received, sent, user_aliases):
     """Build response event records with three-tier matching + fan-out fix."""
+    # Derive user name tokens and domains from aliases for feature extraction
+    user_name_tokens = set()
+    user_domains = set()
+    for alias in user_aliases:
+        if "@" in alias:
+            local, domain = alias.split("@", 1)
+            user_domains.add(domain.lower())
+            for part in re.split(r'[._\-]', local):
+                if len(part) >= 3:
+                    user_name_tokens.add(part.lower())
+
     # Index sent emails
     sent_by_conv = defaultdict(list)
     sent_by_recipient = defaultdict(list)
@@ -167,6 +184,24 @@ def _build_response_events(received, sent, user_aliases):
         user_position = _detect_user_position(email, user_aliases)
         total_recipients = _count_recipients(email)
 
+        # Detect user name mentions in body (before quoted text)
+        mentions_user_name = False
+        if user_name_tokens:
+            check_body = body
+            for marker in ("From:", "-----Original Message", "________________________________"):
+                idx = check_body.find(marker)
+                if idx > 0:
+                    check_body = check_body[:idx]
+                    break
+            for token in user_name_tokens:
+                if re.search(rf'\b{re.escape(token)}\b', check_body[:2000], re.IGNORECASE):
+                    mentions_user_name = True
+                    break
+
+        # Check if sender is from the same domain as user
+        sender_domain = sender.split("@")[1] if "@" in sender else ""
+        sender_is_internal = sender_domain in user_domains
+
         event = {
             "email_id": email.get("id") or email.get("email_ref") or "",
             "sender_email": sender,
@@ -182,6 +217,8 @@ def _build_response_events(received, sent, user_aliases):
             "has_action_language": _has_action_language(body),
             "subject_type": _classify_subject_type(subject),
             "is_recurring": False,  # Set in _detect_recurring below
+            "mentions_user_name": mentions_user_name,
+            "sender_is_internal": sender_is_internal,
             "_response_msg_id": response_msg_id,
         }
         events.append(event)
@@ -491,6 +528,47 @@ def _enrich_user_initiates_pct(contacts, threads, response_events):
             if cid in threads and threads[cid].get("user_initiated")
         )
         contact["user_initiates_pct"] = round(initiated / len(conv_ids), 4)
+
+
+def _enrich_thread_features(response_events, threads):
+    """Add thread_user_initiated and thread_depth to response events."""
+    for ev in response_events:
+        conv_id = ev.get("conversation_id")
+        if conv_id and conv_id in threads:
+            thread = threads[conv_id]
+            ev["thread_user_initiated"] = thread.get("user_initiated", False)
+            ev["thread_depth"] = thread.get("total_messages", 1)
+        else:
+            ev["thread_user_initiated"] = False
+            ev["thread_depth"] = 1
+
+
+def _enrich_active_time_features(response_events, user_profile):
+    """Add arrived_during_active_hours and arrived_on_active_day."""
+    raw_hours = user_profile.get("active_hours", [])
+    raw_days = user_profile.get("active_days", [])
+
+    # Build full active-hour set: expand top-3 peak hours to +/-1 range,
+    # fall back to 8-18 business hours if no profile data.
+    if raw_hours:
+        active_hours = set()
+        for h in raw_hours:
+            active_hours.update(range(max(0, h - 1), min(24, h + 2)))
+    else:
+        active_hours = set(range(8, 18))
+
+    active_days = set(raw_days) if raw_days else {
+        "Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
+    }
+
+    for ev in response_events:
+        t = _parse_time(ev.get("received_time"))
+        if t:
+            ev["arrived_during_active_hours"] = t.hour in active_hours
+            ev["arrived_on_active_day"] = t.strftime("%A") in active_days
+        else:
+            ev["arrived_during_active_hours"] = None
+            ev["arrived_on_active_day"] = None
 
 
 # ---------------------------------------------------------------------------

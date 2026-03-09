@@ -637,18 +637,74 @@ def _build_thread_info(email_data, thread_row, contact, user_aliases):
     return info
 
 
+def _update_response_labels(db, user_id, threads_map, user_aliases):
+    """Retroactively label response_events as responded=True.
+
+    Scans thread messages for user-sent replies. Any inbound message
+    preceding a user reply in the same thread gets labeled responded=True.
+    This is retrospective — only affects future retraining, not live scores.
+    """
+    responded_ids = []
+    for conv_id, thread_row in threads_map.items():
+        messages = thread_row.get("messages") or []
+        if len(messages) < 2:
+            continue
+
+        sorted_msgs = sorted(messages, key=lambda m: m.get("received_time") or "")
+        for i, msg in enumerate(sorted_msgs):
+            sender = (msg.get("sender_email") or "").lower()
+            if sender in user_aliases:
+                # All preceding inbound messages in this thread were "responded to"
+                for prev in sorted_msgs[:i]:
+                    prev_sender = (prev.get("sender_email") or "").lower()
+                    if prev_sender not in user_aliases and prev.get("id"):
+                        responded_ids.append(prev["id"])
+
+    if responded_ids:
+        unique_ids = list(set(responded_ids))
+        try:
+            db.label_response_events_responded(user_id, unique_ids)
+            logger.info(f"  Labeled {len(unique_ids)} response_events as responded")
+        except Exception as e:
+            logger.warning(f"  Failed to label response_events: {e}")
+
+
+def _update_contact_stats(db, user_id, filtered_emails, contacts_map):
+    """Create/update contact records for senders not yet in contacts table."""
+    new_senders = []
+    for ed in filtered_emails:
+        sender = (ed.get("sender_email") or ed.get("sender") or "").lower()
+        if sender and sender not in contacts_map:
+            new_senders.append({
+                "email": sender,
+                "received_time": ed.get("received_time"),
+            })
+
+    if new_senders:
+        try:
+            db.bulk_upsert_contact_stats(user_id, new_senders)
+            logger.info(f"  Upserted {len(new_senders)} new contact stats")
+        except Exception as e:
+            logger.warning(f"  Failed to upsert contact stats: {e}")
+
+
 def _score_and_gate(db, filtered_emails, contacts_map, threads_map,
-                    user_aliases, user_id):
+                    user_aliases, user_id, topic_profile=None):
     """Score each email and apply triage gates.
 
     Returns:
         tuple: (passing_emails, gated_count)
         Gated emails get auto-classified in the DB.
     """
+    from pipeline.scorer import _derive_active_window, _check_arrival_time
+
     artifacts = _get_user_artifacts(db, user_id)
     passing = []
     gated_count = 0
     response_events = []
+
+    # Pre-compute active window once per batch
+    active_hours, active_days = _derive_active_window(topic_profile)
 
     for ed in filtered_emails:
         sender = (ed.get("sender_email") or ed.get("sender") or "").lower()
@@ -659,11 +715,22 @@ def _score_and_gate(db, filtered_emails, contacts_map, threads_map,
 
         signals = ed.get("signals", {})
         raw_score, calibrated, tier, factors = score_email(
-            ed, signals, contact, thread_info, artifacts
+            ed, signals, contact, thread_info, artifacts,
+            user_profile=topic_profile,
         )
 
         should_gate, gate_reason = check_triage_gate(
             calibrated, thread_info, artifacts
+        )
+
+        # Derive feature columns for persistence
+        sender_is_internal = (
+            (contact or {}).get("contact_type") == "internal"
+            or sender.endswith("@arete-collective.com")
+        )
+        thread_depth = thread_info.get("total_messages", 1)
+        arrived_active_hours, arrived_active_day = _check_arrival_time(
+            ed.get("received_time"), active_hours, active_days
         )
 
         # Collect scoring features + score output for response_events persistence
@@ -675,11 +742,17 @@ def _score_and_gate(db, filtered_emails, contacts_map, threads_map,
             "subject": ed.get("subject", ""),
             "user_position": signals.get("user_position"),
             "total_recipients": signals.get("total_recipients"),
-            "has_question": bool(signals.get("user_mentioned_by_name") or
-                                 re.search(r'\?', (ed.get("body") or "")[:2000])),
+            "has_question": bool(re.search(r'\?', (ed.get("body") or "")[:2000])),
             "has_action_language": signals.get("intent_category") == "direct_request",
             "subject_type": signals.get("subject_type"),
             "is_recurring": bool(contact and (contact.get("total_received") or 0) > 5),
+            "mentions_user_name": bool(signals.get("user_mentioned_by_name")),
+            "sender_is_internal": sender_is_internal,
+            "thread_user_initiated": thread_info.get("user_initiated", False),
+            "arrived_during_active_hours": arrived_active_hours,
+            "arrived_on_active_day": arrived_active_day,
+            "thread_depth": thread_depth,
+            "scoring_factors": factors,
             "raw_score": float(raw_score) if raw_score is not None else None,
             "calibrated_prob": float(calibrated) if calibrated is not None else None,
             "confidence_tier": tier,
@@ -835,10 +908,18 @@ def process_user_batch_enriched(db, user_id, profile, emails):
 
         # Step 3: Score + gate
         passing, gated_count = _score_and_gate(
-            db, filtered, contacts_map, threads_map, user_aliases, user_id
+            db, filtered, contacts_map, threads_map, user_aliases, user_id,
+            topic_profile=topic_profile,
         )
         if gated_count:
             logger.info(f"  Gated {gated_count} emails by scorer")
+
+        # Step 3b: Retroactive response labeling (for retraining)
+        _update_response_labels(db, user_id, threads_map, user_aliases)
+
+        # Step 3c: Upsert contact stats for unknown senders
+        _update_contact_stats(db, user_id, filtered, contacts_map)
+
         if not passing:
             logger.info(f"  User {user_id[:8]}...: all emails gated")
             db.update_pipeline_run(

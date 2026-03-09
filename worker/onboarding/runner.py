@@ -46,7 +46,7 @@ def run_onboarding(db, user_id, profile):
 
         # ── Phase 1: Collect ─────────────────────────────────────
         db.update_onboarding_status(user_id, "collecting")
-        email_data = collect_onboarding_emails(db, user_id, aliases, days=120)
+        email_data = collect_onboarding_emails(db, user_id, aliases, days=120, max_emails=2000)
         received = email_data["received"]
         sent = email_data["sent"]
 
@@ -159,6 +159,40 @@ def run_onboarding(db, user_id, profile):
             contact_profiles, extraction["contacts"]
         )
         db.upsert_contacts(user_id, contacts_for_db)
+
+        # Write stats-only contacts for ALL remaining senders
+        # (Sonnet profiling is capped at top 50, but raw stats are cheap)
+        profiled_emails = {c.get("email", "").lower() for c in contacts_for_db}
+        stats_only_contacts = []
+        for sender, ext_data in extraction["contacts"].items():
+            if sender.lower() not in profiled_emails:
+                stats_only_contacts.append({
+                    "email": sender,
+                    "total_received": ext_data.get("total_received", 0),
+                    "emails_per_month": ext_data.get("emails_per_month", 0),
+                    "response_rate": ext_data.get("reply_rate"),
+                    "reply_rate_30d": ext_data.get("reply_rate_30d"),
+                    "reply_rate_90d": ext_data.get("reply_rate_90d"),
+                    "smoothed_rate": ext_data.get("smoothed_rate"),
+                    "avg_response_time_hours": ext_data.get("avg_response_time_hours"),
+                    "median_response_time_hours": ext_data.get("median_response_time_hours"),
+                    "user_initiates_pct": ext_data.get("user_initiates_pct"),
+                    "forward_rate": ext_data.get("forward_rate"),
+                    "typical_subjects": ext_data.get("typical_subjects", []),
+                    "last_interaction_at": ext_data.get("last_seen"),
+                    "contact_type": ext_data.get("contact_type", "external"),
+                    "relationship_significance": _infer_significance(
+                        ext_data.get("total_received", 0),
+                        ext_data.get("reply_rate", 0),
+                    ),
+                    "inferred_organization": _org_from_domain(sender),
+                })
+        if stats_only_contacts:
+            db.upsert_contacts(user_id, stats_only_contacts)
+            logger.info(
+                f"Wrote {len(stats_only_contacts)} stats-only contacts "
+                f"(total: {len(contacts_for_db) + len(stats_only_contacts)})"
+            )
 
         # Topic profile
         db.upsert_topic_profile(user_id, {
