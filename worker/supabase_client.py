@@ -89,6 +89,22 @@ class SupabaseWorkerClient:
         )
         return result.data or {}
 
+    def fetch_user_metadata(self, user_id):
+        """Fetch a user's auth metadata (full_name, title, etc.).
+
+        Uses the service-role admin API to read from auth.users.
+
+        Returns:
+            dict: user_metadata dict, or empty dict if not found.
+        """
+        try:
+            res = self.client.auth.admin.get_user_by_id(user_id)
+            if res and res.user and res.user.user_metadata:
+                return res.user.user_metadata
+        except Exception as e:
+            logger.warning(f"Failed to fetch auth metadata for {user_id[:8]}...: {e}")
+        return {}
+
     # ------------------------------------------------------------------
     # Email status
     # ------------------------------------------------------------------

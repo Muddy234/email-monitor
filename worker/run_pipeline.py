@@ -49,7 +49,7 @@ def _get_user_artifacts(db, user_id):
     return artifacts
 
 
-def build_config_from_profile(profile):
+def build_config_from_profile(profile, user_metadata=None):
     """Convert a Supabase profiles row into the config dict that
     EmailFilter, ClaudeAnalyzer, and DraftGenerator expect.
 
@@ -59,10 +59,13 @@ def build_config_from_profile(profile):
 
     Args:
         profile: dict from profiles table.
+        user_metadata: dict from auth.users user_metadata (optional).
 
     Returns:
         dict: Config dict compatible with existing pipeline classes.
     """
+    user_metadata = user_metadata or {}
+
     config = {
         # Provider settings (not used by worker, but kept for compatibility)
         "email_provider": "supabase",
@@ -79,9 +82,9 @@ def build_config_from_profile(profile):
         "claude_cli_timeout_seconds": int(os.environ.get("CLAUDE_TIMEOUT", "120")),
         "max_body_chars": int(os.environ.get("MAX_BODY_CHARS", "8000")),
 
-        # Draft settings
-        "draft_user_name": os.environ.get("DRAFT_USER_NAME", ""),
-        "draft_user_title": os.environ.get("DRAFT_USER_TITLE", ""),
+        # Draft settings — prefer auth metadata, fall back to env vars
+        "draft_user_name": user_metadata.get("full_name") or os.environ.get("DRAFT_USER_NAME", ""),
+        "draft_user_title": user_metadata.get("title") or os.environ.get("DRAFT_USER_TITLE", ""),
 
         # Pipeline feature flags
         "enable_email_filtering": True,
@@ -802,7 +805,8 @@ def process_user_batch_enriched(db, user_id, profile, emails):
     from pipeline.api_client import submit_and_wait
     from pipeline.prompts import get_enriched_analysis_prompt
 
-    config = build_config_from_profile(profile)
+    user_metadata = db.fetch_user_metadata(user_id)
+    config = build_config_from_profile(profile, user_metadata=user_metadata)
     user_aliases = [a.lower() for a in config.get("user_email_aliases", []) if a]
     run_id = db.create_pipeline_run(user_id, trigger_type="scheduled")
     batch_poll_interval = int(os.environ.get("BATCH_POLL_INTERVAL", "10"))
