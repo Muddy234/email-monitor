@@ -481,24 +481,29 @@ async function handleSaveDraft(params) {
   const subject = params.subject || "";
   const htmlBody = params.body || "";
   const toRecipients = params.to_recipients || [];
+  const ccRecipients = params.cc_recipients || [];
   const bodyType = params.body_type || "HTML";
 
-  const items = [
-    {
-      __type: "Message:#Exchange",
-      Subject: subject,
-      Body: { BodyType: bodyType, Value: htmlBody },
-      ToRecipients: toRecipients.map((r) => ({
-        Name: r.name || r.address || "",
-        EmailAddress: r.address || r.email || "",
-        RoutingType: "SMTP",
-      })),
-    },
-  ];
+  const mapRecipient = (r) => ({
+    Name: r.name || r.address || "",
+    EmailAddress: r.address || r.email || "",
+    RoutingType: "SMTP",
+  });
+
+  const message = {
+    __type: "Message:#Exchange",
+    Subject: subject,
+    Body: { BodyType: bodyType, Value: htmlBody },
+    ToRecipients: toRecipients.map(mapRecipient),
+  };
+
+  if (ccRecipients.length > 0) {
+    message.CcRecipients = ccRecipients.map(mapRecipient);
+  }
 
   const body = {
     __type: "CreateItemRequest:#Exchange",
-    Items: items,
+    Items: [message],
     MessageDisposition: "SaveOnly",
   };
 
@@ -618,7 +623,9 @@ async function syncEmailsToSupabase() {
       cc_field: e.cc_field || "",
       importance: ["Low", "Normal", "High"][e.importance] || "Normal",
       recipients: e.recipients || [],
-      status: "unprocessed",
+      // NOTE: status is intentionally omitted here. The DB column defaults to
+      // "unprocessed" on INSERT, and merge-duplicates upsert must NOT overwrite
+      // status on existing rows (which may already be processing/completed).
     }));
 
     // Upsert to Supabase

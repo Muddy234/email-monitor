@@ -596,6 +596,10 @@ def _compute_triage(predictions, iso_breakpoints):
         else:
             break
 
+    # Cap soft_gate to prevent over-aggressive gating when the user's
+    # overall response rate is low (which pushes the threshold too high).
+    soft_gate = min(soft_gate, 0.10)
+
     return {
         "hard_gate_threshold": 0.01,
         "soft_gate_threshold": round(soft_gate, 4),
