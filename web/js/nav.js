@@ -21,6 +21,11 @@ const NAV_ITEMS = [
         href: "/app/history.html",
         icon: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>`,
     },
+    {
+        label: "Dev Tools",
+        href: "/app/devtools.html",
+        icon: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M11.42 15.17l-5.01-5.01m0 0l5.01-5.01m-5.01 5.01H21.75M3.75 3v18" /></svg>`,
+    },
 ];
 
 /**
@@ -42,7 +47,7 @@ export async function renderNav() {
 
     sidebar.innerHTML = `
         <div class="em-sidebar-brand">
-            <div class="em-sidebar-brand-icon">CA</div>
+            <div class="em-sidebar-brand-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" width="24" height="24"><rect x="2" y="6" width="28" height="20" rx="3" stroke="currentColor" stroke-width="2.2"/><path d="M2 9l13.1 8.3a1.94 1.94 0 0 0 1.8 0L30 9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="26" cy="8" r="4" fill="#10B981"/><circle cx="26" cy="8" r="6" fill="none" stroke="#10B981" stroke-width="1.2" opacity="0.5"/></svg></div>
             <span>Clarion AI</span>
         </div>
         <div class="em-sidebar-nav">${links}</div>

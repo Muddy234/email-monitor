@@ -44,16 +44,24 @@ async function supabaseRequest(path, options = {}) {
  * Upsert emails to the emails table.
  * Uses merge-duplicates on the (user_id, email_ref) unique constraint.
  */
+const PUSH_BATCH_SIZE = 100;
+
 async function pushEmails(emails) {
   if (!emails.length) return;
 
-  return supabaseRequest("/emails?on_conflict=user_id,email_ref", {
-    method: "POST",
-    headers: {
-      Prefer: "resolution=merge-duplicates",
-    },
-    body: emails,
-  });
+  for (let i = 0; i < emails.length; i += PUSH_BATCH_SIZE) {
+    const chunk = emails.slice(i, i + PUSH_BATCH_SIZE);
+    await supabaseRequest("/emails?on_conflict=user_id,email_ref", {
+      method: "POST",
+      headers: {
+        Prefer: "resolution=merge-duplicates",
+      },
+      body: chunk,
+    });
+    if (DEBUG && emails.length > PUSH_BATCH_SIZE) {
+      console.log(`Pushed ${Math.min(i + PUSH_BATCH_SIZE, emails.length)}/${emails.length} emails to Supabase`);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -79,8 +79,8 @@ def build_config_from_profile(profile):
         "claude_cli_timeout_seconds": int(os.environ.get("CLAUDE_TIMEOUT", "120")),
         "max_body_chars": int(os.environ.get("MAX_BODY_CHARS", "8000")),
 
-        # Draft settings
-        "draft_user_name": os.environ.get("DRAFT_USER_NAME", ""),
+        # Draft settings — display_name from profile, fall back to env vars
+        "draft_user_name": profile.get("display_name") or os.environ.get("DRAFT_USER_NAME", ""),
         "draft_user_title": os.environ.get("DRAFT_USER_TITLE", ""),
 
         # Pipeline feature flags
@@ -152,6 +152,9 @@ def filter_emails(db_client, emails, user_id, config):
     user_aliases = [a.lower() for a in config.get("user_email_aliases", []) if a]
 
     filtered = []
+    skip_ids = []
+    skip_classifications = []
+
     for email in emails:
         email_data = supabase_row_to_email_data(email)
         email_data["signals"] = build_signals(email_data, user_aliases)
@@ -159,36 +162,49 @@ def filter_emails(db_client, emails, user_id, config):
 
         if classification == "skip":
             logger.info(f"  Skipped (filter): {email_data.get('subject', '?')[:60]}")
-            db_client.update_email_status(email["id"], "completed")
-            db_client.insert_classification(
-                email["id"], user_id,
-                {"needs_response": False, "action": "skip", "context": "Filtered out by rules"},
-            )
+            skip_ids.append(email["id"])
+            skip_classifications.append({
+                "email_id": email["id"],
+                "user_id": user_id,
+                "needs_response": False,
+                "action": "skip",
+                "context": "Filtered out by rules",
+                "project": "",
+                "priority": 0,
+            })
             continue
 
         skip_reason = _should_auto_skip(email_data, email_data["signals"])
         if skip_reason:
             logger.info(f"  Auto-skipped ({skip_reason}): {email_data.get('subject', '?')[:60]}")
-            db_client.update_email_status(email["id"], "completed")
-            db_client.insert_classification(
-                email["id"], user_id,
-                {
-                    "needs_response": False,
-                    "action": "Auto-skipped by signal rules",
-                    "context": f"Skipped: {skip_reason}",
-                },
-            )
+            skip_ids.append(email["id"])
+            skip_classifications.append({
+                "email_id": email["id"],
+                "user_id": user_id,
+                "needs_response": False,
+                "action": "Auto-skipped by signal rules",
+                "context": f"Skipped: {skip_reason}",
+                "project": "",
+                "priority": 0,
+            })
             continue
 
         email_data["_filter_result"] = classification
         email_data["_db_id"] = email["id"]
         filtered.append(email_data)
 
+    # Batch-write all skipped emails in bulk
+    if skip_ids:
+        db_client.bulk_update_email_status(skip_ids, "completed")
+        db_client.bulk_insert_classifications(skip_classifications)
+        logger.info(f"  Batch-wrote {len(skip_ids)} skipped emails")
+
     return filtered
 
 
 def process_classification_results(db_client, action_items, filtered_emails,
-                                   user_id, config, draft_generator):
+                                   user_id, config, draft_generator,
+                                   style_guide=""):
     """Write classification results to DB and collect draft candidates.
 
     Returns:
@@ -253,6 +269,9 @@ def process_classification_results(db_client, action_items, filtered_emails,
             # Pass enrichment data if available on the email
             if email_data.get("_enrichment"):
                 action_context["enrichment"] = email_data["_enrichment"]
+
+            if style_guide:
+                action_context["style_guide"] = style_guide
 
             conv_id = email_data.get("conversation_id")
             if conv_id:
@@ -534,7 +553,7 @@ def _fetch_batch_context(db, user_id, filtered_emails):
         for ed in filtered_emails
         if ed.get("conversation_id")
     })
-    threads_map = db.fetch_thread_messages(user_id, conv_ids)
+    threads_map = db.fetch_thread_stats(user_id, conv_ids)
 
     topic_profile = db.fetch_user_topic_profile(user_id)
 
@@ -546,7 +565,7 @@ def _build_thread_info(email_data, thread_row, contact, user_aliases):
 
     Args:
         email_data: dict from supabase_row_to_email_data().
-        thread_row: dict from conversations table (or None).
+        thread_row: dict from threads table (aggregate stats) or None.
         contact: dict from contacts table (or None).
         user_aliases: list[str] of user email addresses.
 
@@ -563,72 +582,90 @@ def _build_thread_info(email_data, thread_row, contact, user_aliases):
     }
 
     if contact:
-        info["sender_events_count"] = contact.get("emails_per_month")
+        info["sender_events_count"] = contact.get("total_received")
 
     if not thread_row:
+        conv_id = email_data.get("conversation_id")
+        if conv_id:
+            logger.debug(f"No thread stats for conversation_id={conv_id}")
         return info
 
-    messages = thread_row.get("messages") or []
-    if not messages:
-        return info
-
-    info["total_messages"] = len(messages)
-
-    user_msgs = [
-        m for m in messages
-        if (m.get("sender_email") or "").lower() in user_aliases
-    ]
-    info["user_messages"] = len(user_msgs)
-    info["participation_rate"] = len(user_msgs) / len(messages) if messages else None
-
-    # User initiated?
-    sorted_msgs = sorted(messages, key=lambda m: m.get("received_time") or "")
-    if sorted_msgs:
-        first_sender = (sorted_msgs[0].get("sender_email") or "").lower()
-        info["user_initiated"] = first_sender in user_aliases
-
-    # Hours since user's last reply
-    if user_msgs:
-        try:
-            received = email_data.get("received_time")
-            if received:
-                inbound_dt = datetime.fromisoformat(
-                    str(received).replace("Z", "+00:00")
-                )
-                if inbound_dt.tzinfo is None:
-                    inbound_dt = inbound_dt.replace(tzinfo=timezone.utc)
-
-                user_times = []
-                for m in user_msgs:
-                    t = m.get("received_time")
-                    if t:
-                        dt = datetime.fromisoformat(str(t).replace("Z", "+00:00"))
-                        if dt.tzinfo is None:
-                            dt = dt.replace(tzinfo=timezone.utc)
-                        user_times.append(dt)
-
-                if user_times:
-                    last_reply = max(user_times)
-                    hours = (inbound_dt - last_reply).total_seconds() / 3600
-                    if hours >= 0:
-                        info["hours_since_user_reply"] = hours
-        except (ValueError, TypeError):
-            pass
+    info["total_messages"] = thread_row.get("total_messages", 1)
+    info["user_messages"] = thread_row.get("user_messages", 0)
+    info["participation_rate"] = thread_row.get("participation_rate")
+    info["user_initiated"] = thread_row.get("user_initiated", False)
 
     return info
 
 
+def _update_response_labels(db, user_id, threads_map, user_aliases):
+    """Retroactively label response_events as responded=True.
+
+    Scans thread messages for user-sent replies. Any inbound message
+    preceding a user reply in the same thread gets labeled responded=True.
+    This is retrospective — only affects future retraining, not live scores.
+    """
+    responded_ids = []
+    for conv_id, thread_row in threads_map.items():
+        messages = thread_row.get("messages") or []
+        if len(messages) < 2:
+            continue
+
+        sorted_msgs = sorted(messages, key=lambda m: m.get("received_time") or "")
+        for i, msg in enumerate(sorted_msgs):
+            sender = (msg.get("sender_email") or "").lower()
+            if sender in user_aliases:
+                # All preceding inbound messages in this thread were "responded to"
+                for prev in sorted_msgs[:i]:
+                    prev_sender = (prev.get("sender_email") or "").lower()
+                    if prev_sender not in user_aliases and prev.get("id"):
+                        responded_ids.append(prev["id"])
+
+    if responded_ids:
+        unique_ids = list(set(responded_ids))
+        try:
+            db.label_response_events_responded(user_id, unique_ids)
+            logger.info(f"  Labeled {len(unique_ids)} response_events as responded")
+        except Exception as e:
+            logger.warning(f"  Failed to label response_events: {e}")
+
+
+def _update_contact_stats(db, user_id, filtered_emails, contacts_map):
+    """Create/update contact records for senders not yet in contacts table."""
+    new_senders = []
+    for ed in filtered_emails:
+        sender = (ed.get("sender_email") or ed.get("sender") or "").lower()
+        if sender and sender not in contacts_map:
+            new_senders.append({
+                "email": sender,
+                "received_time": ed.get("received_time"),
+            })
+
+    if new_senders:
+        try:
+            db.bulk_upsert_contact_stats(user_id, new_senders)
+            logger.info(f"  Upserted {len(new_senders)} new contact stats")
+        except Exception as e:
+            logger.warning(f"  Failed to upsert contact stats: {e}")
+
+
 def _score_and_gate(db, filtered_emails, contacts_map, threads_map,
-                    user_aliases, user_id):
+                    user_aliases, user_id, topic_profile=None):
     """Score each email and apply triage gates.
 
     Returns:
         tuple: (passing_emails, gated_count)
         Gated emails get auto-classified in the DB.
     """
+    from pipeline.scorer import _derive_active_window, _check_arrival_time
+
     artifacts = _get_user_artifacts(db, user_id)
     passing = []
     gated_count = 0
+    response_events = []
+
+    # Pre-compute active window once per batch
+    active_hours, active_days = _derive_active_window(topic_profile)
 
     for ed in filtered_emails:
         sender = (ed.get("sender_email") or ed.get("sender") or "").lower()
@@ -639,12 +676,49 @@ def _score_and_gate(db, filtered_emails, contacts_map, threads_map,
 
         signals = ed.get("signals", {})
         raw_score, calibrated, tier, factors = score_email(
-            ed, signals, contact, thread_info, artifacts
+            ed, signals, contact, thread_info, artifacts,
+            user_profile=topic_profile,
         )
 
         should_gate, gate_reason = check_triage_gate(
             calibrated, thread_info, artifacts
         )
+
+        # Derive feature columns for persistence
+        sender_is_internal = (
+            (contact or {}).get("contact_type") == "internal"
+            or sender.endswith("@arete-collective.com")
+        )
+        thread_depth = thread_info.get("total_messages", 1)
+        arrived_active_hours, arrived_active_day = _check_arrival_time(
+            ed.get("received_time"), active_hours, active_days
+        )
+
+        # Collect scoring features + score output for response_events persistence
+        response_events.append({
+            "email_id": ed["_db_id"],
+            "sender_email": sender,
+            "received_time": ed.get("received_time"),
+            "conversation_id": conv_id,
+            "subject": ed.get("subject", ""),
+            "user_position": signals.get("user_position"),
+            "total_recipients": signals.get("total_recipients"),
+            "has_question": bool(re.search(r'\?', (ed.get("body") or "")[:2000])),
+            "has_action_language": signals.get("intent_category") == "direct_request",
+            "subject_type": signals.get("subject_type"),
+            "is_recurring": bool(contact and (contact.get("total_received") or 0) > 5),
+            "mentions_user_name": bool(signals.get("user_mentioned_by_name")),
+            "sender_is_internal": sender_is_internal,
+            "thread_user_initiated": thread_info.get("user_initiated", False),
+            "arrived_during_active_hours": arrived_active_hours,
+            "arrived_on_active_day": arrived_active_day,
+            "thread_depth": thread_depth,
+            "scoring_factors": factors,
+            "raw_score": float(raw_score) if raw_score is not None else None,
+            "calibrated_prob": float(calibrated) if calibrated is not None else None,
+            "confidence_tier": tier,
+            "gate_reason": gate_reason if should_gate else None,
+        })
 
         if should_gate:
             db_id = ed["_db_id"]
@@ -668,6 +742,13 @@ def _score_and_gate(db, filtered_emails, contacts_map, threads_map,
         ed["_factors"] = factors
         ed["_thread_info"] = thread_info
         passing.append(ed)
+
+    # Persist scoring features to response_events for dev tools trace
+    if response_events:
+        try:
+            db.upsert_response_events(user_id, response_events)
+        except Exception as e:
+            logger.warning(f"  Failed to persist response_events: {e}")
 
     return passing, gated_count
 
@@ -788,10 +869,18 @@ def process_user_batch_enriched(db, user_id, profile, emails):
 
         # Step 3: Score + gate
         passing, gated_count = _score_and_gate(
-            db, filtered, contacts_map, threads_map, user_aliases, user_id
+            db, filtered, contacts_map, threads_map, user_aliases, user_id,
+            topic_profile=topic_profile,
         )
         if gated_count:
             logger.info(f"  Gated {gated_count} emails by scorer")
+
+        # Step 3b: Retroactive response labeling (for retraining)
+        _update_response_labels(db, user_id, threads_map, user_aliases)
+
+        # Step 3c: Upsert contact stats for unknown senders
+        _update_contact_stats(db, user_id, filtered, contacts_map)
+
         if not passing:
             logger.info(f"  User {user_id[:8]}...: all emails gated")
             db.update_pipeline_run(
@@ -908,13 +997,25 @@ def process_user_batch_enriched(db, user_id, profile, emails):
         draft_generator = DraftGenerator(
             config, system_prompt_template=get_draft_prompt_template()
         )
+        style_guide = profile.get("writing_style_guide") or ""
         emails_processed, draft_candidates = process_classification_results(
-            db, all_action_items, passing, user_id, config, draft_generator
+            db, all_action_items, passing, user_id, config, draft_generator,
+            style_guide=style_guide,
         )
 
         # Step 9: Draft generation via Batches API (unchanged from main.py)
         drafts_generated = 0
         if draft_candidates:
+            # Deduplicate by db_id — the LLM can return multiple action items
+            # for the same email, causing duplicate custom_id in the batch request.
+            seen_ids = set()
+            unique_candidates = []
+            for candidate in draft_candidates:
+                if candidate["db_id"] not in seen_ids:
+                    seen_ids.add(candidate["db_id"])
+                    unique_candidates.append(candidate)
+            draft_candidates = unique_candidates
+
             draft_requests = []
             for candidate in draft_candidates:
                 req = draft_generator.build_batch_params(

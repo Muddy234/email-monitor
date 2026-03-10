@@ -147,6 +147,7 @@ def accumulate_emails(db, window_seconds):
     accumulated = {}  # user_id → {"profile": ..., "emails": [...]}
     deadline = time.time() + window_seconds
     poll_count = 0
+    found_any = False
 
     while time.time() < deadline and not _shutdown:
         poll_count += 1
@@ -170,6 +171,17 @@ def accumulate_emails(db, window_seconds):
                     f"  Poll {poll_count}: claimed {len(claimed)} for user {user_id[:8]}... "
                     f"(total: {len(accumulated[user_id]['emails'])})"
                 )
+
+                # Shorten window on first email arrival during long windows
+                if not found_any and window_seconds > INITIAL_WINDOW:
+                    new_deadline = time.time() + INITIAL_WINDOW
+                    if new_deadline < deadline:
+                        deadline = new_deadline
+                        logger.info(
+                            f"  Emails arrived during backoff — "
+                            f"shortening window to {INITIAL_WINDOW}s"
+                        )
+                found_any = True
 
         # Sleep in 1s increments for responsive shutdown
         for _ in range(POLL_INTERVAL):
@@ -223,6 +235,14 @@ def main():
         except Exception as e:
             logger.error(f"Model re-training check error: {e}")
 
+        # -- Recover stuck emails --------------------------------------
+        try:
+            reset_count = db.reset_stuck_processing()
+            if reset_count:
+                logger.warning(f"Recovered {reset_count} stuck processing email(s)")
+        except Exception as e:
+            logger.error(f"Stuck-email recovery error: {e}")
+
         logger.info(f"--- Accumulation window: {current_window}s ---")
 
         try:
@@ -235,12 +255,21 @@ def main():
         total_emails = sum(len(u["emails"]) for u in accumulated.values())
 
         if total_emails == 0:
-            if not accumulated:
-                # All users filtered out by activity check — deep sleep
+            # Check if any active users exist (don't use empty accumulated
+            # as proxy — it just means no unprocessed emails at poll time)
+            try:
+                active_ids = db.get_active_user_ids()
+                has_active = any(
+                    _is_user_active(db.fetch_user_config(uid))
+                    for uid in active_ids
+                )
+            except Exception:
+                has_active = True  # err on the side of staying awake
+
+            if not has_active:
                 current_window = MAX_WINDOW
                 logger.info(f"All users inactive, deep sleep: {current_window}s")
             else:
-                # Active users exist but no new emails — normal backoff
                 current_window = min(current_window * 2, MAX_WINDOW)
                 logger.info(f"No emails found. Next window: {current_window}s")
             continue

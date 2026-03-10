@@ -238,11 +238,11 @@ document.getElementById("toggleAuth").addEventListener("click", () => {
 });
 
 document.getElementById("logoutBtn").addEventListener("click", async () => {
-  // Deactivate worker processing before clearing session
+  // Deactivate worker processing (non-blocking — don't let it stall logout)
   const result = await chrome.storage.local.get("supabaseSession");
   const session = result.supabaseSession;
   if (session?.access_token && session?.user?.id) {
-    await setWorkerActive(session.access_token, session.user.id, false);
+    setWorkerActive(session.access_token, session.user.id, false).catch(() => {});
   }
 
   await chrome.storage.local.remove("supabaseSession");

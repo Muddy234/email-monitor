@@ -8,6 +8,7 @@ Phase 4C-2: Writing style guide generation — audience-aware style guide.
 import json
 import logging
 
+from onboarding.extraction import _parse_json_response
 from onboarding.prompts import (
     SONNET_CONTACT_PROFILE_PROMPT,
     SONNET_TOPIC_CLUSTERING_PROMPT,
@@ -55,14 +56,13 @@ def synthesize_contacts(contact_freq, response_rates, extractions):
         logger.error("Contact synthesis: no response from Sonnet")
         return None
 
-    try:
-        data = json.loads(response)
-        profiles = data.get("contact_profiles", [])
-        logger.info(f"Synthesized {len(profiles)} contact profiles")
-        return profiles
-    except json.JSONDecodeError:
-        logger.error("Contact synthesis: invalid JSON from Sonnet")
+    data = _parse_json_response(response)
+    if data is None:
+        logger.error(f"Contact synthesis: invalid JSON from Sonnet — {response[:200]}")
         return None
+    profiles = data.get("contact_profiles", [])
+    logger.info(f"Synthesized {len(profiles)} contact profiles")
+    return profiles
 
 
 def synthesize_topics(keyword_frequencies):
@@ -96,15 +96,14 @@ def synthesize_topics(keyword_frequencies):
         logger.error("Topic synthesis: no response from Sonnet")
         return None
 
-    try:
-        data = json.loads(response)
-        domains = data.get("domains", [])
-        high_signal = data.get("high_signal_keywords", [])
-        logger.info(f"Clustered into {len(domains)} domains, {len(high_signal)} high-signal keywords")
-        return {"domains": domains, "high_signal_keywords": high_signal}
-    except json.JSONDecodeError:
-        logger.error("Topic synthesis: invalid JSON from Sonnet")
+    data = _parse_json_response(response)
+    if data is None:
+        logger.error(f"Topic synthesis: invalid JSON from Sonnet — {response[:200]}")
         return None
+    domains = data.get("domains", [])
+    high_signal = data.get("high_signal_keywords", [])
+    logger.info(f"Clustered into {len(domains)} domains, {len(high_signal)} high-signal keywords")
+    return {"domains": domains, "high_signal_keywords": high_signal}
 
 
 def synthesize_style_guide(style_features, contact_profiles):

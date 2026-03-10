@@ -70,11 +70,20 @@ def extract_all(emails, user_aliases):
     # Step 3: Build threads
     threads = _build_threads(emails, aliases)
 
+    # Step 3b: Enrich contacts with user_initiates_pct from threads
+    _enrich_user_initiates_pct(contacts, threads, response_events)
+
+    # Step 3c: Enrich response events with thread-level features
+    _enrich_thread_features(response_events, threads)
+
     # Step 4: Build domains
     domains = _build_domains(contacts)
 
     # Step 5: Build user profile
     user_profile = _build_user_profile(received, sent, global_rate)
+
+    # Step 5b: Enrich response events with active-time features
+    _enrich_active_time_features(response_events, user_profile)
 
     return {
         "response_events": response_events,
@@ -105,6 +114,17 @@ def _split_emails(emails, user_aliases):
 
 def _build_response_events(received, sent, user_aliases):
     """Build response event records with three-tier matching + fan-out fix."""
+    # Derive user name tokens and domains from aliases for feature extraction
+    user_name_tokens = set()
+    user_domains = set()
+    for alias in user_aliases:
+        if "@" in alias:
+            local, domain = alias.split("@", 1)
+            user_domains.add(domain.lower())
+            for part in re.split(r'[._\-]', local):
+                if len(part) >= 3:
+                    user_name_tokens.add(part.lower())
+
     # Index sent emails
     sent_by_conv = defaultdict(list)
     sent_by_recipient = defaultdict(list)
@@ -164,8 +184,26 @@ def _build_response_events(received, sent, user_aliases):
         user_position = _detect_user_position(email, user_aliases)
         total_recipients = _count_recipients(email)
 
+        # Detect user name mentions in body (before quoted text)
+        mentions_user_name = False
+        if user_name_tokens:
+            check_body = body
+            for marker in ("From:", "-----Original Message", "________________________________"):
+                idx = check_body.find(marker)
+                if idx > 0:
+                    check_body = check_body[:idx]
+                    break
+            for token in user_name_tokens:
+                if re.search(rf'\b{re.escape(token)}\b', check_body[:2000], re.IGNORECASE):
+                    mentions_user_name = True
+                    break
+
+        # Check if sender is from the same domain as user
+        sender_domain = sender.split("@")[1] if "@" in sender else ""
+        sender_is_internal = sender_domain in user_domains
+
         event = {
-            "email_id": email.get("email_ref") or email.get("id") or "",
+            "email_id": email.get("id") or email.get("email_ref") or "",
             "sender_email": sender,
             "received_time": email.get("received_time"),
             "responded": responded,
@@ -179,6 +217,8 @@ def _build_response_events(received, sent, user_aliases):
             "has_action_language": _has_action_language(body),
             "subject_type": _classify_subject_type(subject),
             "is_recurring": False,  # Set in _detect_recurring below
+            "mentions_user_name": mentions_user_name,
+            "sender_is_internal": sender_is_internal,
             "_response_msg_id": response_msg_id,
         }
         events.append(event)
@@ -319,6 +359,15 @@ def _build_contacts(response_events, global_rate, user_aliases):
     thirty_days_ago = now - timedelta(days=30)
     ninety_days_ago = now - timedelta(days=90)
 
+    # Global observation span — used as denominator for emails_per_month
+    # so bursty senders don't get inflated rates.
+    all_timestamps = [t for t in (_parse_time(e.get("received_time"))
+                                  for e in response_events) if t]
+    if len(all_timestamps) >= 2:
+        obs_span_days = max((max(all_timestamps) - min(all_timestamps)).days, 1)
+    else:
+        obs_span_days = 30
+
     for sender, events in by_sender.items():
         total = len(events)
         responded = [e for e in events if e.get("responded")]
@@ -356,12 +405,8 @@ def _build_contacts(response_events, global_rate, user_aliases):
         first_seen = min(timestamps).isoformat() if timestamps else None
         last_seen = max(timestamps).isoformat() if timestamps else None
 
-        # Emails per month
-        if timestamps and len(timestamps) >= 2:
-            span_days = max((max(timestamps) - min(timestamps)).days, 1)
-            emails_per_month = round(total * 30 / span_days, 1)
-        else:
-            emails_per_month = float(total)
+        # Emails per month (normalized by full observation window)
+        emails_per_month = round(total * 30 / obs_span_days, 1)
 
         # Contact type
         domain = sender.split("@")[1] if "@" in sender else "unknown"
@@ -385,7 +430,7 @@ def _build_contacts(response_events, global_rate, user_aliases):
             "smoothed_rate": round(smoothed_rate, 4),
             "avg_response_time_hours": avg_response_time,
             "median_response_time_hours": median_response_time,
-            "user_initiates_pct": None,  # Set during thread analysis merge
+            "user_initiates_pct": None,  # Enriched by _enrich_user_initiates_pct
             "co_recipients_top5": [],
             "forward_count": forward_count,
             "forward_rate": round(forward_rate, 4),
@@ -458,6 +503,72 @@ def _build_threads(emails, user_aliases):
         }
 
     return threads
+
+
+def _enrich_user_initiates_pct(contacts, threads, response_events):
+    """Set user_initiates_pct on each contact using thread data.
+
+    For each sender, find the conversations they appear in, check how many
+    the user initiated, and store the percentage.
+    """
+    # Map sender → set of conversation_ids they participate in
+    sender_convs = defaultdict(set)
+    for ev in response_events:
+        conv_id = ev.get("conversation_id")
+        if conv_id:
+            sender_convs[ev["sender_email"]].add(conv_id)
+
+    for sender, contact in contacts.items():
+        conv_ids = sender_convs.get(sender, set())
+        if not conv_ids:
+            continue
+
+        initiated = sum(
+            1 for cid in conv_ids
+            if cid in threads and threads[cid].get("user_initiated")
+        )
+        contact["user_initiates_pct"] = round(initiated / len(conv_ids), 4)
+
+
+def _enrich_thread_features(response_events, threads):
+    """Add thread_user_initiated and thread_depth to response events."""
+    for ev in response_events:
+        conv_id = ev.get("conversation_id")
+        if conv_id and conv_id in threads:
+            thread = threads[conv_id]
+            ev["thread_user_initiated"] = thread.get("user_initiated", False)
+            ev["thread_depth"] = thread.get("total_messages", 1)
+        else:
+            ev["thread_user_initiated"] = False
+            ev["thread_depth"] = 1
+
+
+def _enrich_active_time_features(response_events, user_profile):
+    """Add arrived_during_active_hours and arrived_on_active_day."""
+    raw_hours = user_profile.get("active_hours", [])
+    raw_days = user_profile.get("active_days", [])
+
+    # Build full active-hour set: expand top-3 peak hours to +/-1 range,
+    # fall back to 8-18 business hours if no profile data.
+    if raw_hours:
+        active_hours = set()
+        for h in raw_hours:
+            active_hours.update(range(max(0, h - 1), min(24, h + 2)))
+    else:
+        active_hours = set(range(8, 18))
+
+    active_days = set(raw_days) if raw_days else {
+        "Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
+    }
+
+    for ev in response_events:
+        t = _parse_time(ev.get("received_time"))
+        if t:
+            ev["arrived_during_active_hours"] = t.hour in active_hours
+            ev["arrived_on_active_day"] = t.strftime("%A") in active_days
+        else:
+            ev["arrived_during_active_hours"] = None
+            ev["arrived_on_active_day"] = None
 
 
 # ---------------------------------------------------------------------------
@@ -588,9 +699,10 @@ def _detect_user_position(email, user_aliases):
     if isinstance(recipients, list):
         for r in recipients:
             addr = (r.get("email") or r.get("address") or "").lower()
-            rtype = (r.get("type") or "").upper()
+            rtype = r.get("type")
             if addr in user_aliases:
-                if rtype in ("CC", "BCC"):
+                # Handle both int (1=TO,2=CC,3=BCC) and string types
+                if rtype in (2, 3, "CC", "BCC", "Cc", "Bcc"):
                     return "CC"
                 return "TO"
 
