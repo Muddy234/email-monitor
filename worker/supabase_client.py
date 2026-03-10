@@ -498,22 +498,30 @@ class SupabaseWorkerClient:
         )
         return {row["email"]: row for row in (result.data or [])}
 
-    def fetch_thread_messages(self, user_id, conversation_ids):
-        """Batch-fetch conversation rows for multiple conversation IDs.
+    def fetch_thread_stats(self, user_id, conversation_ids):
+        """Batch-fetch thread aggregate stats for multiple conversation IDs.
+
+        Reads from the threads table, which stores per-thread aggregates
+        populated during onboarding (total_messages, participation_rate, etc.).
+
+        Uses select("*") — the threads table is narrow and all columns are
+        relevant to scoring. Safe because all downstream consumers
+        (_build_thread_info, _update_response_labels) use .get() with defaults
+        and never iterate over row keys.
 
         Args:
             user_id: UUID string.
             conversation_ids: list[str] of conversation IDs.
 
         Returns:
-            dict: {conversation_id: conversation_row} with messages jsonb.
+            dict: {conversation_id: thread_row} with aggregate stats.
         """
         if not conversation_ids:
             return {}
         unique = list(set(conversation_ids))
         result = (
-            self.client.table("conversations")
-            .select("conversation_id, messages, updated_at")
+            self.client.table("threads")
+            .select("*")
             .eq("user_id", user_id)
             .in_("conversation_id", unique)
             .execute()

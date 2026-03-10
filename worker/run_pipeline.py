@@ -553,7 +553,7 @@ def _fetch_batch_context(db, user_id, filtered_emails):
         for ed in filtered_emails
         if ed.get("conversation_id")
     })
-    threads_map = db.fetch_thread_messages(user_id, conv_ids)
+    threads_map = db.fetch_thread_stats(user_id, conv_ids)
 
     topic_profile = db.fetch_user_topic_profile(user_id)
 
@@ -565,7 +565,7 @@ def _build_thread_info(email_data, thread_row, contact, user_aliases):
 
     Args:
         email_data: dict from supabase_row_to_email_data().
-        thread_row: dict from conversations table (or None).
+        thread_row: dict from threads table (aggregate stats) or None.
         contact: dict from contacts table (or None).
         user_aliases: list[str] of user email addresses.
 
@@ -585,54 +585,15 @@ def _build_thread_info(email_data, thread_row, contact, user_aliases):
         info["sender_events_count"] = contact.get("total_received")
 
     if not thread_row:
+        conv_id = email_data.get("conversation_id")
+        if conv_id:
+            logger.debug(f"No thread stats for conversation_id={conv_id}")
         return info
 
-    messages = thread_row.get("messages") or []
-    if not messages:
-        return info
-
-    info["total_messages"] = len(messages)
-
-    user_msgs = [
-        m for m in messages
-        if (m.get("sender_email") or "").lower() in user_aliases
-    ]
-    info["user_messages"] = len(user_msgs)
-    info["participation_rate"] = len(user_msgs) / len(messages) if messages else None
-
-    # User initiated?
-    sorted_msgs = sorted(messages, key=lambda m: m.get("received_time") or "")
-    if sorted_msgs:
-        first_sender = (sorted_msgs[0].get("sender_email") or "").lower()
-        info["user_initiated"] = first_sender in user_aliases
-
-    # Hours since user's last reply
-    if user_msgs:
-        try:
-            received = email_data.get("received_time")
-            if received:
-                inbound_dt = datetime.fromisoformat(
-                    str(received).replace("Z", "+00:00")
-                )
-                if inbound_dt.tzinfo is None:
-                    inbound_dt = inbound_dt.replace(tzinfo=timezone.utc)
-
-                user_times = []
-                for m in user_msgs:
-                    t = m.get("received_time")
-                    if t:
-                        dt = datetime.fromisoformat(str(t).replace("Z", "+00:00"))
-                        if dt.tzinfo is None:
-                            dt = dt.replace(tzinfo=timezone.utc)
-                        user_times.append(dt)
-
-                if user_times:
-                    last_reply = max(user_times)
-                    hours = (inbound_dt - last_reply).total_seconds() / 3600
-                    if hours >= 0:
-                        info["hours_since_user_reply"] = hours
-        except (ValueError, TypeError):
-            pass
+    info["total_messages"] = thread_row.get("total_messages", 1)
+    info["user_messages"] = thread_row.get("user_messages", 0)
+    info["participation_rate"] = thread_row.get("participation_rate")
+    info["user_initiated"] = thread_row.get("user_initiated", False)
 
     return info
 
