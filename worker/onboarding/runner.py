@@ -46,7 +46,7 @@ def run_onboarding(db, user_id, profile):
 
         # ── Phase 1: Collect ─────────────────────────────────────
         db.update_onboarding_status(user_id, "collecting")
-        email_data = collect_onboarding_emails(db, user_id, aliases, days=120, max_emails=2000)
+        email_data = collect_onboarding_emails(db, user_id, aliases, days=120, max_emails=100)
         received = email_data["received"]
         sent = email_data["sent"]
 
@@ -149,63 +149,103 @@ def run_onboarding(db, user_id, profile):
         # ── Phase 6: Write to DB ─────────────────────────────────
         db.update_onboarding_status(user_id, "finalizing")
 
-        # Write new extraction tables
-        db.upsert_response_events(user_id, extraction["response_events"])
-        db.upsert_threads(user_id, list(extraction["threads"].values()))
-        db.upsert_domains(user_id, list(extraction["domains"].values()))
+        write_failures = []
 
-        # Merge extraction + synthesis into contact profiles for DB write
-        contacts_for_db = _merge_extraction_into_contacts(
-            contact_profiles, extraction["contacts"]
-        )
-        db.upsert_contacts(user_id, contacts_for_db)
+        # 6a: Response events
+        try:
+            db.upsert_response_events(user_id, extraction["response_events"])
+        except Exception as e:
+            logger.error(f"Phase 6: upsert_response_events failed: {e}")
+            write_failures.append("response_events")
 
-        # Write stats-only contacts for ALL remaining senders
-        # (Sonnet profiling is capped at top 50, but raw stats are cheap)
-        profiled_emails = {c.get("email", "").lower() for c in contacts_for_db}
-        stats_only_contacts = []
-        for sender, ext_data in extraction["contacts"].items():
-            if sender.lower() not in profiled_emails:
-                stats_only_contacts.append({
-                    "email": sender,
-                    "total_received": ext_data.get("total_received", 0),
-                    "emails_per_month": ext_data.get("emails_per_month", 0),
-                    "response_rate": ext_data.get("reply_rate"),
-                    "reply_rate_30d": ext_data.get("reply_rate_30d"),
-                    "reply_rate_90d": ext_data.get("reply_rate_90d"),
-                    "smoothed_rate": ext_data.get("smoothed_rate"),
-                    "avg_response_time_hours": ext_data.get("avg_response_time_hours"),
-                    "median_response_time_hours": ext_data.get("median_response_time_hours"),
-                    "user_initiates_pct": ext_data.get("user_initiates_pct"),
-                    "forward_rate": ext_data.get("forward_rate"),
-                    "typical_subjects": ext_data.get("typical_subjects", []),
-                    "last_interaction_at": ext_data.get("last_seen"),
-                    "contact_type": ext_data.get("contact_type", "external"),
-                    "relationship_significance": _infer_significance(
-                        ext_data.get("total_received", 0),
-                        ext_data.get("reply_rate", 0),
-                    ),
-                    "inferred_organization": _org_from_domain(sender),
-                })
-        if stats_only_contacts:
-            db.upsert_contacts(user_id, stats_only_contacts)
-            logger.info(
-                f"Wrote {len(stats_only_contacts)} stats-only contacts "
-                f"(total: {len(contacts_for_db) + len(stats_only_contacts)})"
+        # 6b: Threads
+        try:
+            db.upsert_threads(user_id, list(extraction["threads"].values()))
+        except Exception as e:
+            logger.error(f"Phase 6: upsert_threads failed: {e}")
+            write_failures.append("threads")
+
+        # 6c: Domains
+        try:
+            db.upsert_domains(user_id, list(extraction["domains"].values()))
+        except Exception as e:
+            logger.error(f"Phase 6: upsert_domains failed: {e}")
+            write_failures.append("domains")
+
+        # 6d: Contacts (profiled)
+        contacts_for_db = []
+        try:
+            contacts_for_db = _merge_extraction_into_contacts(
+                contact_profiles, extraction["contacts"]
             )
+            db.upsert_contacts(user_id, contacts_for_db)
+        except Exception as e:
+            logger.error(f"Phase 6: upsert_contacts (profiled) failed: {e}")
+            write_failures.append("contacts_profiled")
+            contacts_for_db = []
 
-        # Topic profile
-        db.upsert_topic_profile(user_id, {
-            "domains": topic_result.get("domains", []),
-            "high_signal_keywords": topic_result.get("high_signal_keywords", []),
-            "token_frequencies": stats.get("subject_tokens"),
-            "baseline_statistics": extraction["user_profile"],
-        })
+        # 6e: Contacts (stats-only)
+        try:
+            profiled_emails = {c.get("email", "").lower() for c in contacts_for_db}
+            stats_only_contacts = []
+            for sender, ext_data in extraction["contacts"].items():
+                if sender.lower() not in profiled_emails:
+                    stats_only_contacts.append({
+                        "email": sender,
+                        "total_received": ext_data.get("total_received", 0),
+                        "emails_per_month": ext_data.get("emails_per_month", 0),
+                        "response_rate": ext_data.get("reply_rate"),
+                        "reply_rate_30d": ext_data.get("reply_rate_30d"),
+                        "reply_rate_90d": ext_data.get("reply_rate_90d"),
+                        "smoothed_rate": ext_data.get("smoothed_rate"),
+                        "avg_response_time_hours": ext_data.get("avg_response_time_hours"),
+                        "median_response_time_hours": ext_data.get("median_response_time_hours"),
+                        "user_initiates_pct": ext_data.get("user_initiates_pct"),
+                        "forward_rate": ext_data.get("forward_rate"),
+                        "typical_subjects": ext_data.get("typical_subjects", []),
+                        "last_interaction_at": ext_data.get("last_seen"),
+                        "contact_type": ext_data.get("contact_type", "external"),
+                        "relationship_significance": _infer_significance(
+                            ext_data.get("total_received", 0),
+                            ext_data.get("reply_rate", 0),
+                        ),
+                        "inferred_organization": _org_from_domain(sender),
+                    })
+            if stats_only_contacts:
+                db.upsert_contacts(user_id, stats_only_contacts)
+                logger.info(
+                    f"Wrote {len(stats_only_contacts)} stats-only contacts "
+                    f"(total: {len(contacts_for_db) + len(stats_only_contacts)})"
+                )
+        except Exception as e:
+            logger.error(f"Phase 6: upsert_contacts (stats-only) failed: {e}")
+            write_failures.append("contacts_stats")
 
-        # Writing style guide
-        if style_guide:
-            sample_count = style_result.get("sample_count", 0) if style_result else 0
-            db.update_writing_style(user_id, style_guide, sample_count)
+        # 6f: Topic profile
+        try:
+            db.upsert_topic_profile(user_id, {
+                "domains": topic_result.get("domains", []),
+                "high_signal_keywords": topic_result.get("high_signal_keywords", []),
+                "token_frequencies": stats.get("subject_tokens"),
+                "baseline_statistics": extraction["user_profile"],
+            })
+        except Exception as e:
+            logger.error(f"Phase 6: upsert_topic_profile failed: {e}")
+            write_failures.append("topic_profile")
+
+        # 6g: Writing style guide
+        try:
+            if style_guide:
+                sample_count = style_result.get("sample_count", 0) if style_result else 0
+                db.update_writing_style(user_id, style_guide, sample_count)
+        except Exception as e:
+            logger.error(f"Phase 6: update_writing_style failed: {e}")
+            write_failures.append("writing_style")
+
+        if write_failures:
+            logger.error(f"Phase 6: {len(write_failures)} writes failed: {write_failures}")
+            db.update_onboarding_status(user_id, "failed")
+            return False
 
         logger.info("Phase 6 complete: DB writes done")
 
