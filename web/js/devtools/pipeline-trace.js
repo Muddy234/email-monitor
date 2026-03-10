@@ -70,8 +70,8 @@ async function renderTrace(email, userId) {
         <div class="em-card" style="padding:28px 24px">
             ${renderStage1(email, bodyPreview)}
             ${renderStage2(email, cls, wasFiltered)}
-            ${renderStage3(evt, wasFiltered, wasGated)}
-            ${renderStage4(contact, evt, wasFiltered, wasGated)}
+            ${renderStage3(evt, email, wasFiltered, wasGated)}
+            ${renderStage4(contact, evt, email, wasFiltered, wasGated)}
             ${renderStage5(cls, email, wasFiltered, wasGated)}
             ${renderStage6(draft, cls, wasFiltered, wasGated)}
             ${renderStage7(draft)}
@@ -122,7 +122,7 @@ function renderStage2(email, cls, wasFiltered) {
 }
 
 // ─── Stage 3: Score ──────────────────────────────────────────
-function renderStage3(evt, wasFiltered, wasGated) {
+function renderStage3(evt, email, wasFiltered, wasGated) {
     if (wasFiltered) {
         return traceStage("Stage 3: Score", "skipped", `
             <div class="em-trace-note">Skipped — email was filtered in Stage 2.</div>
@@ -130,6 +130,18 @@ function renderStage3(evt, wasFiltered, wasGated) {
     }
 
     if (!evt) {
+        if (email.status === "processing") {
+            return traceStage("Stage 3: Score", "pending", `
+                <div class="em-trace-verdict em-trace-verdict-pending">Processing</div>
+                <div class="em-trace-note">Email is currently in the processing queue. Scoring data will appear once the worker completes this batch.</div>
+            `);
+        }
+        if (email.status === "unprocessed") {
+            return traceStage("Stage 3: Score", "pending", `
+                <div class="em-trace-verdict em-trace-verdict-pending">Queued</div>
+                <div class="em-trace-note">Email is queued but not yet claimed by the worker.</div>
+            `);
+        }
         return traceStage("Stage 3: Score", "empty", `
             <div class="em-trace-note">No scoring data found. Email may have been processed before scoring was added.</div>
         `);
@@ -180,7 +192,7 @@ function renderStage3(evt, wasFiltered, wasGated) {
 }
 
 // ─── Stage 4: Enrich ─────────────────────────────────────────
-function renderStage4(contact, evt, wasFiltered, wasGated) {
+function renderStage4(contact, evt, email, wasFiltered, wasGated) {
     if (wasFiltered || wasGated) {
         const reason = wasFiltered ? "filtered in Stage 2" : "gated in Stage 3";
         return traceStage("Stage 4: Enrich", "skipped", `
@@ -189,6 +201,11 @@ function renderStage4(contact, evt, wasFiltered, wasGated) {
     }
 
     if (!contact && !evt) {
+        if (email.status === "processing" || email.status === "unprocessed") {
+            return traceStage("Stage 4: Enrich", "pending", `
+                <div class="em-trace-note">Waiting for earlier pipeline stages to complete.</div>
+            `);
+        }
         return traceStage("Stage 4: Enrich", "empty", `
             <div class="em-trace-note">No enrichment data available.</div>
         `);
