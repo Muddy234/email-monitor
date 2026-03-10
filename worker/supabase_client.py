@@ -409,7 +409,7 @@ class SupabaseWorkerClient:
                 "relationship_significance": contact.get("relationship_significance", "medium"),
                 "relationship_summary": contact.get("relationship_summary"),
                 "total_received": contact.get("total_received", 0),
-                "emails_per_month": round(float(epm), 1) if epm is not None else 0,
+                "emails_per_month": int(round(float(epm))) if epm is not None else 0,
                 "response_rate": contact.get("response_rate"),
                 "reply_rate_30d": contact.get("reply_rate_30d"),
                 "reply_rate_90d": contact.get("reply_rate_90d"),
