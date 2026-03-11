@@ -122,6 +122,64 @@ function renderStage2(email, cls, wasFiltered) {
 }
 
 // ─── Stage 3: Score ──────────────────────────────────────────
+
+/** Parse "factor_name=value" strings into structured objects and compute running product. */
+function _parseFactors(factorsArr) {
+    if (!factorsArr || !factorsArr.length) return [];
+
+    const steps = [];
+    let running = null;
+
+    for (const raw of factorsArr) {
+        const eqIdx = raw.lastIndexOf("=");
+        if (eqIdx < 0) continue;
+        const name = raw.substring(0, eqIdx);
+        const value = parseFloat(raw.substring(eqIdx + 1));
+        if (isNaN(value)) continue;
+
+        const isBase = name.includes("global_rate") || name.includes("sender_rate") || name.includes("recurring_pattern_rate");
+        if (isBase) {
+            running = value;
+            steps.push({ name, value, running, isBase: true });
+        } else {
+            if (running === null) running = value;
+            else running *= value;
+            steps.push({ name, value, running, isBase: false });
+        }
+    }
+    return steps;
+}
+
+/** Human-readable label for a factor name. */
+function _factorLabel(name) {
+    const labels = {
+        global_rate: "Global response rate",
+        sender_rate: "Sender response rate (smoothed)",
+        recurring_pattern_rate: "Recurring pattern rate",
+        mentions_user_name: "Mentions user by name",
+        has_question: "Contains a question",
+        has_action_language: "Has action language",
+        sender_is_internal: "Internal sender",
+        thread_user_initiated: "User started thread",
+        arrived_during_active_hours: "Arrived during active hours",
+        arrived_on_active_day: "Arrived on active day",
+        recip_mult: "Recipient count adjustment",
+        depth_mult: "Thread depth adjustment",
+        cc_only: "CC-only penalty",
+        cc_only_high_sender: "CC-only (high-freq sender)",
+        low_thread_participation: "Low thread participation",
+        med_thread_participation: "Medium thread participation",
+        thread_recency_24h: "Recent thread activity (<24h)",
+        thread_recency_72h: "Recent thread activity (<72h)",
+        penalty_floor: "Penalty floor applied",
+    };
+    // Handle parameterized names like "rate_x_to[low]", "msg_type[reply]", "cold_start(2)"
+    if (name.startsWith("rate_x_to")) return `Rate × TO position (${name.match(/\[(.+)\]/)?.[1] || ""})`;
+    if (name.startsWith("msg_type")) return `Message type: ${name.match(/\[(.+)\]/)?.[1] || ""}`;
+    if (name.startsWith("cold_start")) return `Cold start (${name.match(/\((\d+)\)/)?.[1] || "<3"} prior emails)`;
+    return labels[name] || name;
+}
+
 function renderStage3(evt, email, wasFiltered, wasGated) {
     if (wasFiltered) {
         return traceStage("Stage 3: Score", "skipped", `
@@ -151,7 +209,7 @@ function renderStage3(evt, email, wasFiltered, wasGated) {
         ? `${(evt.calibrated_prob * 100).toFixed(1)}%`
         : "—";
     const rawDisplay = evt.raw_score != null
-        ? evt.raw_score.toFixed(3)
+        ? evt.raw_score.toFixed(4)
         : "—";
 
     let verdictHtml = "";
@@ -161,6 +219,64 @@ function renderStage3(evt, email, wasFiltered, wasGated) {
         verdictHtml = `<div class="em-trace-verdict em-trace-verdict-pass">Passed scoring gate</div>`;
     }
 
+    // Build the factor waterfall
+    const steps = _parseFactors(evt.scoring_factors);
+    let waterfallHtml = "";
+    if (steps.length) {
+        const rows = steps.map(s => {
+            const direction = s.isBase ? "" : s.value > 1.0 ? " ↑" : s.value < 1.0 ? " ↓" : "";
+            const colorClass = s.isBase ? "em-factor-base" : s.value > 1.0 ? "em-factor-boost" : s.value < 1.0 ? "em-factor-penalty" : "em-factor-neutral";
+            return `<tr class="${colorClass}">
+                <td style="padding:4px 10px 4px 0;font-size:13px">${escapeHtml(_factorLabel(s.name))}</td>
+                <td style="padding:4px 10px;font-family:monospace;font-size:13px;text-align:right">${s.isBase ? s.value.toFixed(4) : "×" + s.value.toFixed(3)}${direction}</td>
+                <td style="padding:4px 0 4px 10px;font-family:monospace;font-size:13px;text-align:right;color:var(--em-slate-500)">${s.running.toFixed(4)}</td>
+            </tr>`;
+        }).join("");
+
+        waterfallHtml = `
+            <div style="margin-top:14px">
+                <div style="font-size:12px;font-weight:600;color:var(--em-slate-500);margin-bottom:6px">Scoring Waterfall</div>
+                <table style="width:100%;border-collapse:collapse">
+                    <thead>
+                        <tr style="border-bottom:1px solid var(--em-slate-200)">
+                            <th style="padding:4px 10px 4px 0;font-size:11px;font-weight:500;color:var(--em-slate-400);text-align:left">Factor</th>
+                            <th style="padding:4px 10px;font-size:11px;font-weight:500;color:var(--em-slate-400);text-align:right">Multiplier</th>
+                            <th style="padding:4px 0 4px 10px;font-size:11px;font-weight:500;color:var(--em-slate-400);text-align:right">Running</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                    <tfoot>
+                        <tr style="border-top:1px solid var(--em-slate-200)">
+                            <td style="padding:6px 10px 4px 0;font-size:13px;font-weight:600">Raw Score</td>
+                            <td></td>
+                            <td style="padding:6px 0 4px 10px;font-family:monospace;font-size:13px;font-weight:600;text-align:right">${rawDisplay}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding:4px 10px 4px 0;font-size:13px;font-weight:600">Calibrated</td>
+                            <td></td>
+                            <td style="padding:4px 0 4px 10px;font-family:monospace;font-size:13px;font-weight:600;text-align:right">${scoreDisplay}</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        `;
+    }
+
+    // Signal flags summary
+    const signals = [
+        { label: "Position", value: evt.user_position || "—" },
+        { label: "Question", value: evt.has_question ? "Yes" : "No" },
+        { label: "Action language", value: evt.has_action_language ? "Yes" : "No" },
+        { label: "Subject type", value: evt.subject_type || "—" },
+        { label: "Recipients", value: evt.total_recipients ?? "—" },
+        { label: "Thread depth", value: evt.thread_depth ?? "—" },
+        { label: "Internal sender", value: evt.sender_is_internal ? "Yes" : "No" },
+        { label: "Recurring", value: evt.is_recurring ? "Yes" : "No" },
+    ];
+    const signalTags = signals.map(s =>
+        `<span style="display:inline-block;padding:2px 8px;margin:2px 4px 2px 0;background:var(--em-slate-100);border-radius:var(--em-radius-sm);font-size:12px;color:var(--em-slate-600)">${escapeHtml(s.label)}: <strong>${escapeHtml(String(s.value))}</strong></span>`
+    ).join("");
+
     return traceStage("Stage 3: Score", wasGated ? "stopped" : "active", `
         ${verdictHtml}
         <div class="em-trace-score-bar">
@@ -168,24 +284,13 @@ function renderStage3(evt, email, wasFiltered, wasGated) {
             <span class="em-trace-score-label">${scoreDisplay}</span>
         </div>
         <div class="em-kv-grid">
-            <div class="em-kv-label">Raw Score</div>
-            <div class="em-kv-value">${rawDisplay}</div>
-            <div class="em-kv-label">Calibrated Probability</div>
-            <div class="em-kv-value">${scoreDisplay}</div>
             <div class="em-kv-label">Confidence Tier</div>
-            <div class="em-kv-value">${escapeHtml(evt.confidence_tier || "—")}</div>
-            <div class="em-kv-label">User Position</div>
-            <div class="em-kv-value">${escapeHtml(evt.user_position || "—")}</div>
-            <div class="em-kv-label">Has Question</div>
-            <div class="em-kv-value">${evt.has_question ? "Yes" : "No"}</div>
-            <div class="em-kv-label">Has Action Language</div>
-            <div class="em-kv-value">${evt.has_action_language ? "Yes" : "No"}</div>
-            <div class="em-kv-label">Subject Type</div>
-            <div class="em-kv-value">${escapeHtml(evt.subject_type || "—")}</div>
-            <div class="em-kv-label">Total Recipients</div>
-            <div class="em-kv-value">${evt.total_recipients ?? "—"}</div>
-            <div class="em-kv-label">Is Recurring</div>
-            <div class="em-kv-value">${evt.is_recurring ? "Yes" : "No"}</div>
+            <div class="em-kv-value"><span class="em-badge em-badge-${evt.confidence_tier === "strong" ? "green" : evt.confidence_tier === "likely" ? "blue" : evt.confidence_tier === "possible" ? "amber" : "slate"}">${escapeHtml(evt.confidence_tier || "—")}</span></div>
+        </div>
+        ${waterfallHtml}
+        <div style="margin-top:14px">
+            <div style="font-size:12px;font-weight:600;color:var(--em-slate-500);margin-bottom:6px">Input Signals</div>
+            <div style="display:flex;flex-wrap:wrap">${signalTags}</div>
         </div>
         ${wasGated ? '<div class="em-trace-note">Pipeline stopped here — email was gated by the scorer.</div>' : ""}
     `);
