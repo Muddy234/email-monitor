@@ -168,8 +168,16 @@ def run_onboarding(db, user_id, profile):
                 extract_writing_styles,
                 sent,
             )
-            extraction_result = f_extract.result()
-            style_result = f_style.result()
+
+            try:
+                extraction_result = f_extract.result()
+            except Exception:
+                logger.exception("Phase 3: email feature extraction raised")
+
+            try:
+                style_result = f_style.result()
+            except Exception:
+                logger.exception("Phase 4C-1: writing style extraction raised")
 
         if extraction_result is None:
             logger.error("Phase 3 extraction failed completely")
