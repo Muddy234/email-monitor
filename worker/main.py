@@ -216,12 +216,43 @@ def accumulate_emails(db, window_seconds):
 # ---------------------------------------------------------------------------
 
 
+def _recover_stuck_onboarding(db):
+    """Reset any users whose onboarding was interrupted mid-stage.
+
+    On deploy/restart, a user may be stuck in a transient status like
+    'collecting', 'extracting', etc.  Reset them to 'pending' so
+    onboarding restarts cleanly on the next loop.
+    """
+    TERMINAL = {"complete", "pending", "failed"}
+    result = (
+        db.client.table("profiles")
+        .select("id, onboarding_status")
+        .is_("onboarding_completed_at", "null")
+        .execute()
+    )
+    for row in (result.data or []):
+        status = row.get("onboarding_status")
+        if status and status not in TERMINAL:
+            uid = row["id"]
+            logger.warning(
+                f"Recovering stuck onboarding for {uid[:8]}... "
+                f"(was '{status}') → resetting to 'pending'"
+            )
+            db.update_onboarding_status(uid, "pending")
+
+
 def main():
     logger.info("Worker starting (batch mode)")
     logger.info(f"Poll interval: {POLL_INTERVAL}s, Initial window: {INITIAL_WINDOW}s, Max window: {MAX_WINDOW}s")
 
     db = SupabaseWorkerClient()
     logger.info("Supabase client initialized")
+
+    # Recover any onboarding interrupted by a previous crash/redeploy
+    try:
+        _recover_stuck_onboarding(db)
+    except Exception as e:
+        logger.error(f"Stuck onboarding recovery error: {e}")
 
     current_window = INITIAL_WINDOW
 
