@@ -314,9 +314,9 @@ class SupabaseWorkerClient:
         ready = []
         for row in result.data:
             uid = row["id"]
-            # Skip users already mid-onboarding (unless failed)
+            # Skip users already mid-onboarding (unless pending or failed)
             status = row.get("onboarding_status")
-            if status and status != "failed":
+            if status and status not in ("pending", "failed"):
                 continue
             # Check email count
             count_result = (

@@ -632,15 +632,15 @@ def _update_response_labels(db, user_id, threads_map, user_aliases):
 
 def _update_contact_stats(db, user_id, filtered_emails, contacts_map):
     """Create/update contact records for senders not yet in contacts table."""
-    new_senders = []
+    seen = {}
     for ed in filtered_emails:
         sender = (ed.get("sender_email") or ed.get("sender") or "").lower()
         if sender and sender not in contacts_map:
-            new_senders.append({
-                "email": sender,
-                "received_time": ed.get("received_time"),
-            })
+            rt = ed.get("received_time")
+            if sender not in seen or (rt and rt > seen[sender]["received_time"]):
+                seen[sender] = {"email": sender, "received_time": rt}
 
+    new_senders = list(seen.values())
     if new_senders:
         try:
             db.bulk_upsert_contact_stats(user_id, new_senders)
