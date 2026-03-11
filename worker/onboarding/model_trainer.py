@@ -21,7 +21,7 @@ logger = logging.getLogger("worker.onboarding")
 # ---------------------------------------------------------------------------
 
 BAYESIAN_PRIOR_WEIGHT = 3
-MIN_EVENTS_TO_TRAIN = 50
+MIN_EVENTS_TO_TRAIN = 30
 COMBINED_PENALTY_FLOOR = 0.30
 SCORE_CAP = 0.95
 SCORE_FLOOR = 0.01
