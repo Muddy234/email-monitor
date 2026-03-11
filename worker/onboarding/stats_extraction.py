@@ -292,7 +292,10 @@ def _fix_fanout(events):
     for resp_id, group in by_response.items():
         if len(group) <= 1:
             continue
-        group.sort(key=lambda e: e.get("received_time") or "", reverse=True)
+        group.sort(
+            key=lambda e: _parse_time(e.get("received_time")) or datetime.min.replace(tzinfo=timezone.utc),
+            reverse=True,
+        )
         for ev in group[1:]:
             ev["responded"] = False
             demoted += 1
@@ -458,7 +461,9 @@ def _build_threads(emails, user_aliases):
 
     threads = {}
     for conv_id, msgs in by_conv.items():
-        msgs.sort(key=lambda m: m.get("received_time") or "")
+        msgs.sort(
+            key=lambda m: _parse_time(m.get("received_time")) or datetime.min.replace(tzinfo=timezone.utc),
+        )
         total = len(msgs)
 
         user_msgs = []
