@@ -142,7 +142,8 @@ def accumulate_emails(db, window_seconds):
     """Poll for emails over the window, claiming them as they arrive.
 
     Returns:
-        dict: {user_id: {"profile": profile, "emails": [rows]}}
+        tuple: (dict {user_id: {"profile": profile, "emails": [rows]}},
+                bool onboarding_needed — True if loop broke early for onboarding)
     """
     accumulated = {}  # user_id → {"profile": ..., "emails": [...]}
     deadline = time.time() + window_seconds
@@ -151,6 +152,17 @@ def accumulate_emails(db, window_seconds):
 
     while time.time() < deadline and not _shutdown:
         poll_count += 1
+
+        # Check for pending onboarding — break early so main loop handles it
+        if poll_count % 3 == 0 or poll_count == 1:
+            try:
+                pending = db.get_users_needing_onboarding()
+                if pending:
+                    logger.info(f"  Onboarding needed for {len(pending)} user(s) — breaking accumulation")
+                    return accumulated, True
+            except Exception:
+                pass
+
         user_ids = db.get_users_with_unprocessed()
 
         for user_id in user_ids:
@@ -192,7 +204,7 @@ def accumulate_emails(db, window_seconds):
                 break
             time.sleep(1)
 
-    return accumulated
+    return accumulated, False
 
 
 # ---------------------------------------------------------------------------
@@ -249,10 +261,16 @@ def main():
         logger.info(f"--- Accumulation window: {current_window}s ---")
 
         try:
-            accumulated = accumulate_emails(db, current_window)
+            accumulated, onboarding_needed = accumulate_emails(db, current_window)
         except Exception as e:
             logger.exception(f"Accumulation error: {e}")
             accumulated = {}
+            onboarding_needed = False
+
+        # If accumulation broke early for onboarding, skip straight to next loop
+        if onboarding_needed:
+            current_window = INITIAL_WINDOW
+            continue
 
         # Check if any emails were found
         total_emails = sum(len(u["emails"]) for u in accumulated.values())
