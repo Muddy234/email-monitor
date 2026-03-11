@@ -154,14 +154,13 @@ def accumulate_emails(db, window_seconds):
         poll_count += 1
 
         # Check for pending onboarding — break early so main loop handles it
-        if poll_count % 3 == 0 or poll_count == 1:
-            try:
-                pending = db.get_users_needing_onboarding()
-                if pending:
-                    logger.info(f"  Onboarding needed for {len(pending)} user(s) — breaking accumulation")
-                    return accumulated, True
-            except Exception:
-                pass
+        try:
+            pending = db.get_users_needing_onboarding()
+            if pending:
+                logger.info(f"  Onboarding needed for {len(pending)} user(s) — breaking accumulation")
+                return accumulated, True
+        except Exception:
+            pass
 
         user_ids = db.get_users_with_unprocessed()
 
