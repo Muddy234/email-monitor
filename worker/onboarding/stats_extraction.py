@@ -255,27 +255,37 @@ def _find_response(email, received_time, sender, sent_by_conv,
         if best:
             return best
 
-    # Tier 2: Subject similarity + sent to sender within 48h
+    # Tier 2: Subject similarity + sent to sender within 48h — closest match
     if received_time and sender:
         subject_clean = _normalize_subject(email.get("subject"))
         if sender in sent_by_recipient:
+            best = None
+            best_delta = None
             for s in sent_by_recipient[sender]:
                 s_clean = _normalize_subject(s.get("subject"))
                 if subject_clean and s_clean and _subject_similar(subject_clean, s_clean):
                     sent_time = _parse_time(s.get("received_time"))
                     if sent_time and sent_time > received_time:
-                        hours = (sent_time - received_time).total_seconds() / 3600
-                        if hours < 48:
-                            return s
+                        delta = (sent_time - received_time).total_seconds()
+                        if delta < 48 * 3600 and (best_delta is None or delta < best_delta):
+                            best = s
+                            best_delta = delta
+            if best:
+                return best
 
-    # Tier 3: Sent to sender within 4h (loose)
+    # Tier 3: Sent to sender within 4h (loose) — closest match
     if received_time and sender and sender in sent_by_recipient:
+        best = None
+        best_delta = None
         for s in sent_by_recipient[sender]:
             sent_time = _parse_time(s.get("received_time"))
             if sent_time and sent_time > received_time:
-                hours = (sent_time - received_time).total_seconds() / 3600
-                if hours < 4:
-                    return s
+                delta = (sent_time - received_time).total_seconds()
+                if delta < 4 * 3600 and (best_delta is None or delta < best_delta):
+                    best = s
+                    best_delta = delta
+        if best:
+            return best
 
     return None
 
