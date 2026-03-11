@@ -162,6 +162,9 @@ def accumulate_emails(db, window_seconds):
                 profile = db.fetch_user_config(user_id)
                 if not profile or not _is_user_active(profile):
                     continue
+                # Don't process emails until onboarding is complete
+                if not profile.get("onboarding_completed_at"):
+                    continue
                 accumulated[user_id] = {"profile": profile, "emails": []}
 
             claimed = db.claim_unprocessed_emails(user_id, limit=BATCH_SIZE)
