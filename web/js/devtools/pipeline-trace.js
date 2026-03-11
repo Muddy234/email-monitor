@@ -169,8 +169,10 @@ function _factorLabel(name) {
         cc_only_high_sender: "CC-only (high-freq sender)",
         low_thread_participation: "Low thread participation",
         med_thread_participation: "Medium thread participation",
+        thread_participation: "Thread participation",
         thread_recency_24h: "Recent thread activity (<24h)",
         thread_recency_72h: "Recent thread activity (<72h)",
+        thread_recency: "Thread recency",
         penalty_floor: "Penalty floor applied",
     };
     // Handle parameterized names like "rate_x_to[low]", "msg_type[reply]", "cold_start(2)"

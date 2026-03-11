@@ -237,6 +237,10 @@ def score_email(email_data, signals, contact, thread_info, artifacts,
             score *= to_mult
             factors.append(f"rate_x_to[{rate_bin}]={to_mult:.3f}")
             applied_to_lift = True
+        else:
+            factors.append(f"rate_x_to[{rate_bin}]=1.000")
+    else:
+        factors.append("rate_x_to[not_in_to]=1.000")
 
     # -- Step 3: Boolean lifts -----------------------------------------------
     # Map signals to scorer features
@@ -263,27 +267,29 @@ def score_email(email_data, signals, contact, thread_info, artifacts,
         if feature_map.get(feat, False):
             score *= lift
             factors.append(f"{feat}={lift:.3f}")
+        else:
+            factors.append(f"{feat}=1.000")
 
     # -- Step 4: Recipient count multiplier ----------------------------------
     recip_count = signals.get("total_recipients", 1)
     recip_mult = _lookup_bin(recip_count, artifacts.recipient_multipliers)
     if abs(recip_mult - 1.0) > 0.01:
         score *= recip_mult
-        factors.append(f"recip_mult={recip_mult:.3f}")
+    factors.append(f"recip_mult={recip_mult:.3f}")
 
     # -- Step 5: Thread depth multiplier -------------------------------------
     depth = thread_info.get("total_messages", 1)
     depth_mult = _lookup_bin(depth, artifacts.depth_multipliers)
     if abs(depth_mult - 1.0) > 0.01:
         score *= depth_mult
-        factors.append(f"depth_mult={depth_mult:.3f}")
+    factors.append(f"depth_mult={depth_mult:.3f}")
 
     # -- Step 6: Message type lift -------------------------------------------
     msg_type = _subject_to_msg_type(subject)
-    msg_lift = artifacts.msg_type_lifts.get(msg_type)
-    if msg_lift and abs(msg_lift - 1.0) > 0.01:
+    msg_lift = artifacts.msg_type_lifts.get(msg_type, 1.0)
+    if abs(msg_lift - 1.0) > 0.01:
         score *= msg_lift
-        factors.append(f"msg_type[{msg_type}]={msg_lift:.3f}")
+    factors.append(f"msg_type[{msg_type}]={msg_lift:.3f}")
 
     # -- Step 7: Thread participation adjustment -----------------------------
     thread_part = thread_info.get("participation_rate")
@@ -294,6 +300,10 @@ def score_email(email_data, signals, contact, thread_info, artifacts,
         elif thread_part < 0.15 and depth <= 10:
             score *= 0.75
             factors.append("med_thread_participation=0.750")
+        else:
+            factors.append("thread_participation=1.000")
+    else:
+        factors.append("thread_participation=1.000")
 
     # -- Step 8: CC-only penalty ---------------------------------------------
     if not user_in_to and not applied_to_lift:
@@ -303,12 +313,17 @@ def score_email(email_data, signals, contact, thread_info, artifacts,
         else:
             score *= 0.8
             factors.append("cc_only=0.800")
+    else:
+        factors.append("cc_only=1.000")
 
     # -- Step 9: Cold-start dampening ----------------------------------------
     sender_events = thread_info.get("sender_events_count")
     if sender_events is not None and sender_events < 3:
         score *= 0.7
         factors.append(f"cold_start({sender_events})=0.700")
+    else:
+        n = sender_events if sender_events is not None else "?"
+        factors.append(f"cold_start({n})=1.000")
 
     # -- Step 10: Thread recency lift ----------------------------------------
     recency_hrs = thread_info.get("hours_since_user_reply")
@@ -319,12 +334,18 @@ def score_email(email_data, signals, contact, thread_info, artifacts,
         elif recency_hrs < 72:
             score *= 1.2
             factors.append("thread_recency_72h=1.200")
+        else:
+            factors.append("thread_recency=1.000")
+    else:
+        factors.append("thread_recency=1.000")
 
     # -- Step 11: Combined penalty floor -------------------------------------
     floor = base * COMBINED_PENALTY_FLOOR
     if score < floor:
         score = floor
         factors.append(f"penalty_floor={floor:.3f}")
+    else:
+        factors.append("penalty_floor=1.000")
 
     # -- Cap and floor -------------------------------------------------------
     raw_score = round(max(artifacts.score_floor, min(artifacts.score_cap, score)), 4)
