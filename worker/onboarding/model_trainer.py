@@ -26,6 +26,9 @@ COMBINED_PENALTY_FLOOR = 0.30
 SCORE_CAP = 0.95
 SCORE_FLOOR = 0.01
 SEPARATION_THRESHOLD = 0.03
+PENALTY_DAMPEN_ALPHA = 0.8
+LIFT_CAP_UPPER = 2.5
+LIFT_CAP_LOWER = 0.7
 RECURRING_CV_THRESHOLD = 0.5
 MIN_CADENCE_OBSERVATIONS = 3
 RETRAIN_EVENT_THRESHOLD = 500
@@ -313,8 +316,11 @@ def _derive_lift_factors(feature_results, global_rate):
         if isinstance(info, dict) and info.get("type") == "boolean":
             if abs(info.get("separation", 0)) >= SEPARATION_THRESHOLD:
                 lift = info["lift"]
-                # Cap lifts to [0.5, 5.0]
-                lift = max(0.5, min(5.0, lift))
+                # Cap lifts to [LIFT_CAP_LOWER, LIFT_CAP_UPPER]
+                lift = max(LIFT_CAP_LOWER, min(LIFT_CAP_UPPER, lift))
+                # Dampen reductive lifts toward 1.0
+                if lift < 1.0:
+                    lift = 1.0 + PENALTY_DAMPEN_ALPHA * (lift - 1.0)
                 boolean_lifts[feat] = round(lift, 3)
 
     # Message type lifts
@@ -322,21 +328,30 @@ def _derive_lift_factors(feature_results, global_rate):
     msg_data = feature_results.get("msg_type", {})
     for mtype, info in msg_data.items():
         if isinstance(info, dict) and info.get("lift"):
-            msg_type_lifts[mtype] = info["lift"]
+            lift = max(LIFT_CAP_LOWER, min(LIFT_CAP_UPPER, info["lift"]))
+            if lift < 1.0:
+                lift = 1.0 + PENALTY_DAMPEN_ALPHA * (lift - 1.0)
+            msg_type_lifts[mtype] = round(lift, 3)
 
     # Recipient bin multipliers
     recipient_bins = {}
     recip_data = feature_results.get("recipient_bins", {})
     for bin_label, info in recip_data.items():
         if isinstance(info, dict) and info.get("lift"):
-            recipient_bins[bin_label] = info["lift"]
+            lift = max(LIFT_CAP_LOWER, min(LIFT_CAP_UPPER, info["lift"]))
+            if lift < 1.0:
+                lift = 1.0 + PENALTY_DAMPEN_ALPHA * (lift - 1.0)
+            recipient_bins[bin_label] = round(lift, 3)
 
     # Depth bin multipliers — computed from thread_depth on events
     depth_bins = {}
     depth_data = feature_results.get("depth_bins", {})
     for bin_label, info in depth_data.items():
         if isinstance(info, dict) and info.get("lift"):
-            depth_bins[bin_label] = info["lift"]
+            lift = max(LIFT_CAP_LOWER, min(LIFT_CAP_UPPER, info["lift"]))
+            if lift < 1.0:
+                lift = 1.0 + PENALTY_DAMPEN_ALPHA * (lift - 1.0)
+            depth_bins[bin_label] = round(lift, 3)
     # Fallback to identity if no depth data (pre-migration events)
     if not depth_bins:
         depth_bins = {
@@ -355,8 +370,12 @@ def _derive_lift_factors(feature_results, global_rate):
                 to_mult = info["rate_in_to"] / max(global_rate, 0.01)
             else:
                 to_mult = 1.0
+            to_capped = max(LIFT_CAP_LOWER, min(LIFT_CAP_UPPER, to_mult))
+            # Dampen reductive lifts toward 1.0
+            if to_capped < 1.0:
+                to_capped = 1.0 + PENALTY_DAMPEN_ALPHA * (to_capped - 1.0)
             rate_x_to[label] = {
-                "to": round(max(0.5, min(5.0, to_mult)), 3),
+                "to": round(to_capped, 3),
                 "not_to": 1.0,
             }
 
@@ -460,17 +479,17 @@ def _score_all_events(events, lift_factors, global_rate, recurring_patterns):
         else:
             score *= rate_to_data.get("not_to", 1.0)
 
-        # CC-only penalty
+        # CC-only penalty (dampened toward 1.0)
         if ev.get("user_position") != "TO":
             if sender_rate > 0.25:
-                score *= 0.90
+                score *= 1.0 + PENALTY_DAMPEN_ALPHA * (0.90 - 1.0)  # 0.92
             else:
-                score *= 0.80
+                score *= 1.0 + PENALTY_DAMPEN_ALPHA * (0.80 - 1.0)  # 0.84
 
-        # Cold-start dampening
+        # Cold-start dampening (dampened toward 1.0)
         sender_count = stats.get("total", 0)
         if sender_count < 3:
-            score *= 0.70
+            score *= 1.0 + PENALTY_DAMPEN_ALPHA * (0.70 - 1.0)  # 0.76
 
         # Combined penalty floor
         score = max(score, base_rate * COMBINED_PENALTY_FLOOR)
