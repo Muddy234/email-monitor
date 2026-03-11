@@ -1,14 +1,27 @@
-"""Onboarding orchestrator: runs Phases 1-7 in dependency order.
+"""Onboarding orchestrator – three-stage pipeline.
 
-Execution graph:
-  Phase 1 (collect)           → status="collecting"
-  Phase 2 (stats extraction)  → status="statistics"
-  Phase 3 + 4C-1 (parallel)  → status="extracting"
-  Phase 4A (contacts)         → status="synthesizing"
-  Phase 4B + 4C-2 (parallel) → status="style_guide"
-  Phase 6 (write to DB)       → status="finalizing"
-  Phase 7 (model training)    → status="training"
-  Set completed_at            → status="complete"
+Stage 1 – Ingest & Persist (pure Python, no AI):
+  Phase 1  (collect)           → status="collecting"
+  Phase 2  (stats extraction)  → status="statistics"
+  DB write (core data)         → status="persisting"
+    Writes: response_events, threads, domains, contacts (stats-only),
+            baseline user_topic_profile
+
+Stage 2 – AI Enrichment:
+  Phase 3 + 4C-1 (Haiku)      → status="extracting"
+  Phase 4A  (Sonnet contacts)  → status="synthesizing"
+    DB write: enriched contacts
+  Phase 4B + 4C-2 (Sonnet)    → status="style_guide"
+    DB write: topic domains, style guide
+
+Stage 3 – Model Training:
+  Phase 7  (train model)       → status="training"
+  Set completed_at             → status="complete"
+
+Design principle: each stage writes to the DB before the next stage begins.
+If Stage 2 fails, Stage 1 data is already persisted — the user has a
+functional (if un-enriched) system. If Stage 3 fails, enrichments are
+still saved.
 """
 
 import logging
@@ -44,6 +57,10 @@ def run_onboarding(db, user_id, profile):
             started_at=datetime.utcnow().isoformat(),
         )
 
+        # ================================================================
+        # STAGE 1: Ingest & Persist  (pure Python, no AI)
+        # ================================================================
+
         # ── Phase 1: Collect ─────────────────────────────────────
         db.update_onboarding_status(user_id, "collecting")
         email_data = collect_onboarding_emails(db, user_id, aliases, days=120, max_emails=100)
@@ -77,6 +94,64 @@ def run_onboarding(db, user_id, profile):
         logger.info(f"Phase 2 complete: {len(extraction['response_events'])} events, "
                     f"{len(extraction['contacts'])} contacts")
 
+        # ── Persist Stage 1 data to DB ────────────────────────────
+        db.update_onboarding_status(user_id, "persisting")
+        stage1_failures = []
+
+        # Response events
+        try:
+            db.upsert_response_events(user_id, extraction["response_events"])
+        except Exception as e:
+            logger.error(f"Stage 1: upsert_response_events failed: {e}")
+            stage1_failures.append("response_events")
+
+        # Threads
+        try:
+            db.upsert_threads(user_id, list(extraction["threads"].values()))
+        except Exception as e:
+            logger.error(f"Stage 1: upsert_threads failed: {e}")
+            stage1_failures.append("threads")
+
+        # Domains
+        try:
+            db.upsert_domains(user_id, list(extraction["domains"].values()))
+        except Exception as e:
+            logger.error(f"Stage 1: upsert_domains failed: {e}")
+            stage1_failures.append("domains")
+
+        # Contacts (stats-only — all contacts, no AI enrichment yet)
+        try:
+            stats_contacts = _build_stats_only_contacts(extraction["contacts"])
+            if stats_contacts:
+                db.upsert_contacts(user_id, stats_contacts)
+                logger.info(f"Wrote {len(stats_contacts)} stats-only contacts")
+        except Exception as e:
+            logger.error(f"Stage 1: upsert_contacts (stats-only) failed: {e}")
+            stage1_failures.append("contacts")
+
+        # Baseline topic profile (user_profile + empty enrichment fields)
+        try:
+            db.upsert_topic_profile(user_id, {
+                "domains": [],
+                "high_signal_keywords": [],
+                "token_frequencies": stats.get("subject_tokens"),
+                "baseline_statistics": extraction["user_profile"],
+            })
+        except Exception as e:
+            logger.error(f"Stage 1: upsert_topic_profile (baseline) failed: {e}")
+            stage1_failures.append("topic_profile")
+
+        if stage1_failures:
+            logger.error(f"Stage 1: {len(stage1_failures)} writes failed: {stage1_failures}")
+            db.update_onboarding_status(user_id, "failed")
+            return False
+
+        logger.info("Stage 1 complete: core data persisted")
+
+        # ================================================================
+        # STAGE 2: AI Enrichment  (Haiku + Sonnet)
+        # ================================================================
+
         # ── Phase 3 + 4C-1: Parallel Haiku extraction ───────────
         db.update_onboarding_status(user_id, "extracting")
 
@@ -93,8 +168,16 @@ def run_onboarding(db, user_id, profile):
                 extract_writing_styles,
                 sent,
             )
-            extraction_result = f_extract.result()
-            style_result = f_style.result()
+
+            try:
+                extraction_result = f_extract.result()
+            except Exception:
+                logger.exception("Phase 3: email feature extraction raised")
+
+            try:
+                style_result = f_style.result()
+            except Exception:
+                logger.exception("Phase 4C-1: writing style extraction raised")
 
         if extraction_result is None:
             logger.error("Phase 3 extraction failed completely")
@@ -122,6 +205,18 @@ def run_onboarding(db, user_id, profile):
 
         logger.info(f"Phase 4A complete: {len(contact_profiles)} contact profiles")
 
+        # Write enriched contacts to DB immediately
+        try:
+            contacts_for_db = _merge_extraction_into_contacts(
+                contact_profiles, extraction["contacts"]
+            )
+            if contacts_for_db:
+                db.upsert_contacts(user_id, contacts_for_db)
+                logger.info(f"Wrote {len(contacts_for_db)} enriched contacts")
+        except Exception as e:
+            logger.error(f"Stage 2: upsert enriched contacts failed: {e}")
+            # Non-fatal — stats-only contacts from Stage 1 are already in DB
+
         # ── Phase 4B + 4C-2: Parallel Sonnet synthesis ───────────
         db.update_onboarding_status(user_id, "style_guide")
 
@@ -146,82 +241,7 @@ def run_onboarding(db, user_id, profile):
 
         logger.info("Phase 4B + 4C-2 complete: topics + style guide done")
 
-        # ── Phase 6: Write to DB ─────────────────────────────────
-        db.update_onboarding_status(user_id, "finalizing")
-
-        write_failures = []
-
-        # 6a: Response events
-        try:
-            db.upsert_response_events(user_id, extraction["response_events"])
-        except Exception as e:
-            logger.error(f"Phase 6: upsert_response_events failed: {e}")
-            write_failures.append("response_events")
-
-        # 6b: Threads
-        try:
-            db.upsert_threads(user_id, list(extraction["threads"].values()))
-        except Exception as e:
-            logger.error(f"Phase 6: upsert_threads failed: {e}")
-            write_failures.append("threads")
-
-        # 6c: Domains
-        try:
-            db.upsert_domains(user_id, list(extraction["domains"].values()))
-        except Exception as e:
-            logger.error(f"Phase 6: upsert_domains failed: {e}")
-            write_failures.append("domains")
-
-        # 6d: Contacts (profiled)
-        contacts_for_db = []
-        try:
-            contacts_for_db = _merge_extraction_into_contacts(
-                contact_profiles, extraction["contacts"]
-            )
-            db.upsert_contacts(user_id, contacts_for_db)
-        except Exception as e:
-            logger.error(f"Phase 6: upsert_contacts (profiled) failed: {e}")
-            write_failures.append("contacts_profiled")
-            contacts_for_db = []
-
-        # 6e: Contacts (stats-only)
-        try:
-            profiled_emails = {c.get("email", "").lower() for c in contacts_for_db}
-            stats_only_contacts = []
-            for sender, ext_data in extraction["contacts"].items():
-                if sender.lower() not in profiled_emails:
-                    stats_only_contacts.append({
-                        "email": sender,
-                        "total_received": ext_data.get("total_received", 0),
-                        "emails_per_month": ext_data.get("emails_per_month", 0),
-                        "response_rate": ext_data.get("reply_rate"),
-                        "reply_rate_30d": ext_data.get("reply_rate_30d"),
-                        "reply_rate_90d": ext_data.get("reply_rate_90d"),
-                        "smoothed_rate": ext_data.get("smoothed_rate"),
-                        "avg_response_time_hours": ext_data.get("avg_response_time_hours"),
-                        "median_response_time_hours": ext_data.get("median_response_time_hours"),
-                        "user_initiates_pct": ext_data.get("user_initiates_pct"),
-                        "forward_rate": ext_data.get("forward_rate"),
-                        "typical_subjects": ext_data.get("typical_subjects", []),
-                        "last_interaction_at": ext_data.get("last_seen"),
-                        "contact_type": ext_data.get("contact_type", "external"),
-                        "relationship_significance": _infer_significance(
-                            ext_data.get("total_received", 0),
-                            ext_data.get("reply_rate", 0),
-                        ),
-                        "inferred_organization": _org_from_domain(sender),
-                    })
-            if stats_only_contacts:
-                db.upsert_contacts(user_id, stats_only_contacts)
-                logger.info(
-                    f"Wrote {len(stats_only_contacts)} stats-only contacts "
-                    f"(total: {len(contacts_for_db) + len(stats_only_contacts)})"
-                )
-        except Exception as e:
-            logger.error(f"Phase 6: upsert_contacts (stats-only) failed: {e}")
-            write_failures.append("contacts_stats")
-
-        # 6f: Topic profile
+        # Write enrichment results to DB
         try:
             db.upsert_topic_profile(user_id, {
                 "domains": topic_result.get("domains", []),
@@ -230,33 +250,28 @@ def run_onboarding(db, user_id, profile):
                 "baseline_statistics": extraction["user_profile"],
             })
         except Exception as e:
-            logger.error(f"Phase 6: upsert_topic_profile failed: {e}")
-            write_failures.append("topic_profile")
+            logger.error(f"Stage 2: upsert_topic_profile (enriched) failed: {e}")
 
-        # 6g: Writing style guide
         try:
             if style_guide:
                 sample_count = style_result.get("sample_count", 0) if style_result else 0
                 db.update_writing_style(user_id, style_guide, sample_count)
         except Exception as e:
-            logger.error(f"Phase 6: update_writing_style failed: {e}")
-            write_failures.append("writing_style")
+            logger.error(f"Stage 2: update_writing_style failed: {e}")
 
-        if write_failures:
-            logger.error(f"Phase 6: {len(write_failures)} writes failed: {write_failures}")
-            db.update_onboarding_status(user_id, "failed")
-            return False
+        logger.info("Stage 2 complete: AI enrichments persisted")
 
-        logger.info("Phase 6 complete: DB writes done")
+        # ================================================================
+        # STAGE 3: Model Training
+        # ================================================================
 
-        # ── Phase 7: Model training ───────────────────────────────
         db.update_onboarding_status(user_id, "training")
         try:
             params = train_user_model(db, user_id)
-            logger.info(f"Phase 7 complete: model trained "
+            logger.info(f"Stage 3 complete: model trained "
                         f"(global_rate={params.get('meta', {}).get('global_rate', '?')})")
         except Exception:
-            logger.exception("Phase 7: model training failed (non-fatal)")
+            logger.exception("Stage 3: model training failed (non-fatal)")
 
         # Mark complete
         db.update_onboarding_status(
@@ -276,6 +291,38 @@ def run_onboarding(db, user_id, profile):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _build_stats_only_contacts(extraction_contacts):
+    """Build contact records from Phase 2 stats only (no AI enrichment).
+
+    Used in Stage 1 to persist all contacts immediately after stats extraction.
+    These rows are later updated with AI-enriched fields in Stage 2.
+    """
+    contacts = []
+    for sender, ext_data in extraction_contacts.items():
+        contacts.append({
+            "email": sender,
+            "total_received": ext_data.get("total_received", 0),
+            "emails_per_month": ext_data.get("emails_per_month", 0),
+            "response_rate": ext_data.get("reply_rate"),
+            "reply_rate_30d": ext_data.get("reply_rate_30d"),
+            "reply_rate_90d": ext_data.get("reply_rate_90d"),
+            "smoothed_rate": ext_data.get("smoothed_rate"),
+            "avg_response_time_hours": ext_data.get("avg_response_time_hours"),
+            "median_response_time_hours": ext_data.get("median_response_time_hours"),
+            "user_initiates_pct": ext_data.get("user_initiates_pct"),
+            "forward_rate": ext_data.get("forward_rate"),
+            "typical_subjects": ext_data.get("typical_subjects", []),
+            "last_interaction_at": ext_data.get("last_seen"),
+            "contact_type": ext_data.get("contact_type", "external"),
+            "relationship_significance": _infer_significance(
+                ext_data.get("total_received", 0),
+                ext_data.get("reply_rate", 0),
+            ),
+            "inferred_organization": _org_from_domain(sender),
+        })
+    return contacts
+
 
 def _fallback_contact_profiles(contact_freq, response_rates):
     """Build minimal contact profiles from stats only (no Sonnet)."""
