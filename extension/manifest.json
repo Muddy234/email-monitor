@@ -4,6 +4,7 @@
   "short_name": "Clarion",
   "version": "1.0.0",
   "description": "Syncs your Outlook emails for AI-powered analysis and draft generation.",
+  "homepage_url": "https://clarion-ai.app",
 
   "permissions": [
     "alarms",

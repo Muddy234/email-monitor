@@ -1,5 +1,11 @@
 /** Popup script — auth flow + status dashboard.
  *  Depends on: supabase-config.js (loaded via <script> in popup.html)
+ *
+ *  Onboarding state machine (stored in chrome.storage.local as onboardingState):
+ *    "welcome" → first install, show value prop + Get Started
+ *    "login"   → show login/signup form
+ *    "setup"   → post-login checklist (auth ✓, token ?, sync ?)
+ *    "complete" → full status dashboard
  */
 
 // ---------------------------------------------------------------------------
@@ -31,6 +37,27 @@ function showError(msg) {
 function hideError() {
   const el = document.getElementById("authError");
   el.style.display = "none";
+}
+
+function showStatusError(msg) {
+  const el = document.getElementById("statusError");
+  if (!el) return;
+  el.textContent = msg;
+  el.style.display = "block";
+}
+
+function hideStatusError() {
+  const el = document.getElementById("statusError");
+  if (!el) return;
+  el.style.display = "none";
+}
+
+const ALL_VIEWS = ["welcomeView", "loginView", "setupView", "statusView"];
+
+function showView(viewId) {
+  for (const id of ALL_VIEWS) {
+    document.getElementById(id).style.display = id === viewId ? "block" : "none";
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -75,67 +102,217 @@ function sessionFromResponse(data) {
     access_token: data.access_token,
     refresh_token: data.refresh_token,
     expires_at: Math.floor(Date.now() / 1000) + (data.expires_in || 3600),
-    user: { id: data.user?.id, email: data.user?.email },
+    user: {
+      id: data.user?.id,
+      email: data.user?.email,
+      name: data.user?.user_metadata?.full_name || data.user?.user_metadata?.name || "",
+    },
   };
 }
 
 // ---------------------------------------------------------------------------
-// View toggling
+// Stats helpers
 // ---------------------------------------------------------------------------
+
+async function supabaseQuery(path, session) {
+  const resp = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${session.access_token}`,
+    },
+  });
+  if (!resp.ok) throw new Error(`Query failed: ${resp.status}`);
+  return resp.json();
+}
+
+function todayISO() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.toISOString();
+}
+
+async function fetchStats(session) {
+  const today = todayISO();
+  const uid = session.user?.id;
+  if (!uid) return { received: null, drafts: null, important: null };
+
+  try {
+    const [emails, drafts, classifications] = await Promise.all([
+      supabaseQuery(
+        `emails?select=id&user_id=eq.${uid}&folder=eq.Inbox&received_time=gte.${today}`,
+        session
+      ),
+      supabaseQuery(
+        `drafts?select=id,email_id&user_id=eq.${uid}&created_at=gte.${today}`,
+        session
+      ),
+      supabaseQuery(
+        `classifications?select=id,email_id&user_id=eq.${uid}&needs_response=eq.true&created_at=gte.${today}`,
+        session
+      ),
+    ]);
+
+    const draftedEmailIds = new Set(drafts.map((d) => d.email_id));
+    const importantCount = classifications.filter(
+      (c) => !draftedEmailIds.has(c.email_id)
+    ).length;
+
+    return {
+      received: emails.length,
+      drafts: drafts.length,
+      important: importantCount,
+    };
+  } catch (_) {
+    return { received: null, drafts: null, important: null };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// State machine
+// ---------------------------------------------------------------------------
+
+async function getState() {
+  const result = await chrome.storage.local.get("onboardingState");
+  return result.onboardingState || "welcome";
+}
+
+async function setState(state) {
+  await chrome.storage.local.set({ onboardingState: state });
+}
 
 async function checkSessionAndRender() {
   const result = await chrome.storage.local.get("supabaseSession");
   const session = result.supabaseSession;
+  const state = await getState();
 
-  if (session && session.access_token) {
+  if (!session || !session.access_token) {
+    // No session — show welcome or login depending on state
+    if (state === "welcome") {
+      showView("welcomeView");
+    } else {
+      showView("loginView");
+    }
+    return;
+  }
+
+  // Has session — determine if setup or complete
+  if (state === "complete") {
     showStatusView(session);
   } else {
-    showLoginView();
+    // Any non-complete state with a valid session → setup
+    await setState("setup");
+    showSetupView(session);
   }
 }
 
-function showLoginView() {
-  document.getElementById("loginView").style.display = "block";
-  document.getElementById("statusView").style.display = "none";
+// ---------------------------------------------------------------------------
+// View renderers
+// ---------------------------------------------------------------------------
+
+function showSetupView(session) {
+  showView("setupView");
+
+  // Dynamic greeting
+  const name = session.user?.name;
+  const greeting = document.getElementById("setupGreeting");
+  greeting.textContent = name ? `Welcome, ${name}! Almost there.` : "Almost there!";
+
+  // Update checklist
+  updateSetupChecklist(session);
+}
+
+function updateSetupChecklist(session) {
+  const setCheck = (id, done) => {
+    const el = document.getElementById(id);
+    if (done) {
+      el.textContent = "\u2705";
+      el.className = "check-icon check-done";
+    } else {
+      el.textContent = "\u2B58";
+      el.className = "check-icon check-pending";
+    }
+  };
+
+  // Auth — always done if we're on this view
+  setCheck("checkAuth", true);
+
+  // Token + sync — ask background
+  chrome.runtime.sendMessage({ type: "getStatus" }, async (status) => {
+    if (chrome.runtime.lastError || !status) return;
+
+    const hasToken = status.has_token && !status.token_expired;
+    setCheck("checkOutlook", hasToken);
+    setCheck("checkSync", !!status.last_sync);
+
+    // All three done → transition to complete
+    if (hasToken && status.last_sync) {
+      await setState("complete");
+      const result = await chrome.storage.local.get("supabaseSession");
+      if (result.supabaseSession) {
+        showStatusView(result.supabaseSession);
+      }
+    }
+  });
 }
 
 function showStatusView(session) {
-  document.getElementById("loginView").style.display = "none";
-  document.getElementById("statusView").style.display = "block";
-
-  // User email
+  showView("statusView");
   document.getElementById("userEmail").textContent = session.user?.email || "—";
-
-  // Supabase auth status
-  const now = Math.floor(Date.now() / 1000);
-  const authEl = document.getElementById("supabaseAuth");
-  if (session.expires_at > now) {
-    setStatusDot(authEl, "green", "Authenticated");
-  } else {
-    setStatusDot(authEl, "yellow", "Token expired");
-  }
-
-  // Refresh the rest of the dashboard
-  refreshStatus();
+  refreshStatus(session);
 }
 
-function refreshStatus() {
+function refreshStatus(session) {
+  // Connection indicator + advanced details
   chrome.runtime.sendMessage({ type: "getStatus" }, (status) => {
     if (chrome.runtime.lastError || !status) return;
 
-    // Outlook token
+    const now = Math.floor(Date.now() / 1000);
+    const supabaseOk = session && session.expires_at > now;
+    const outlookOk = status.has_token && !status.token_expired;
+    const connected = supabaseOk && outlookOk;
+
+    // Top-level connection bar
+    const bar = document.getElementById("connectionBar");
+    const hint = document.getElementById("connectionHint");
+    bar.textContent = "";
+    const dot = document.createElement("span");
+    dot.className = `dot ${connected ? "green" : "red"}`;
+    bar.appendChild(dot);
+    const txt = document.createElement("span");
+    txt.id = "connectionText";
+    txt.textContent = connected ? "Connected" : "Disconnected";
+    bar.appendChild(txt);
+
+    if (!connected) {
+      let hintMsg = "";
+      if (!supabaseOk) hintMsg = "Session expired — please log in again";
+      else if (!status.has_token) hintMsg = "Open Outlook in this browser to connect";
+      else if (status.token_expired) hintMsg = "Reopen Outlook to refresh your session";
+      hint.textContent = hintMsg;
+      hint.style.display = hintMsg ? "block" : "none";
+    } else {
+      hint.style.display = "none";
+    }
+
+    // Advanced section
+    const authEl = document.getElementById("supabaseAuth");
+    setStatusDot(authEl, supabaseOk ? "green" : "red",
+      supabaseOk ? "Authenticated" : "Expired");
+
     const tokenEl = document.getElementById("tokenStatus");
     const expiresEl = document.getElementById("tokenExpires");
     const originEl = document.getElementById("tokenOrigin");
+    const realtimeEl = document.getElementById("realtimeStatus");
+    const syncEl = document.getElementById("lastSync");
 
     if (!status.has_token) {
-      setStatusDot(tokenEl, "red", "Missing");
+      setStatusDot(tokenEl, "red", "Not connected");
       expiresEl.textContent = "—";
     } else if (status.token_expired) {
-      setStatusDot(tokenEl, "yellow", "Expired");
-      expiresEl.textContent = status.token_expires || "—";
+      setStatusDot(tokenEl, "red", "Expired");
+      expiresEl.textContent = "—";
     } else {
-      setStatusDot(tokenEl, "green", "Valid");
+      setStatusDot(tokenEl, "green", "Connected");
       if (status.token_expires) {
         const exp = new Date(status.token_expires);
         const hours = Math.max(0, Math.round((exp - Date.now()) / 3_600_000));
@@ -147,12 +324,27 @@ function refreshStatus() {
       ? new URL(status.token_origin).hostname
       : "—";
 
-    // Last sync
-    const syncEl = document.getElementById("lastSync");
+    if (realtimeEl) {
+      setStatusDot(realtimeEl, status.realtime_connected ? "green" : "gray",
+        status.realtime_connected ? "Connected" : "Disconnected");
+    }
+
     syncEl.textContent = status.last_sync
       ? relativeTime(status.last_sync)
       : "never";
   });
+
+  // Stats
+  if (session && session.access_token) {
+    fetchStats(session).then((stats) => {
+      document.getElementById("statReceived").textContent =
+        stats.received !== null ? stats.received : "—";
+      document.getElementById("statDrafts").textContent =
+        stats.drafts !== null ? stats.drafts : "—";
+      document.getElementById("statImportant").textContent =
+        stats.important !== null ? stats.important : "—";
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -161,6 +353,13 @@ function refreshStatus() {
 
 let isSignUpMode = false;
 
+// Welcome → Get Started
+document.getElementById("getStartedBtn").addEventListener("click", async () => {
+  await setState("login");
+  showView("loginView");
+});
+
+// Login / Sign Up
 document.getElementById("loginBtn").addEventListener("click", async () => {
   hideError();
   const email = document.getElementById("authEmail").value.trim();
@@ -214,7 +413,9 @@ document.getElementById("loginBtn").addEventListener("click", async () => {
     // Notify background to initialize Supabase features
     chrome.runtime.sendMessage({ type: "supabaseSessionChanged" });
 
-    showStatusView(session);
+    // Transition to setup checklist
+    await setState("setup");
+    showSetupView(session);
   } catch (err) {
     showError(err.message);
   } finally {
@@ -237,30 +438,60 @@ document.getElementById("toggleAuth").addEventListener("click", () => {
   hideError();
 });
 
+// Logout
 document.getElementById("logoutBtn").addEventListener("click", async () => {
-  // Deactivate worker processing (non-blocking — don't let it stall logout)
   const result = await chrome.storage.local.get("supabaseSession");
   const session = result.supabaseSession;
   if (session?.access_token && session?.user?.id) {
     setWorkerActive(session.access_token, session.user.id, false).catch(() => {});
   }
 
+  // Clean up all session data
   await chrome.storage.local.remove("supabaseSession");
+  await chrome.storage.local.remove("lastSyncTime");
+  await chrome.storage.session.remove("exchangeToken");
+  await setState("login");
+
   chrome.runtime.sendMessage({ type: "supabaseSessionChanged" });
-  showLoginView();
+  showView("loginView");
 });
 
-document.getElementById("syncNowBtn").addEventListener("click", () => {
-  const btn = document.getElementById("syncNowBtn");
+// Sync buttons (status view + setup view)
+function friendlySyncError(raw) {
+  if (!raw) return null;
+  if (raw === "No valid Outlook token") return "Outlook not connected — open Outlook in this browser";
+  if (raw === "Not logged in to Supabase") return "Please log in first";
+  if (raw === "TOKEN_EXPIRED") return "Outlook session expired — reopen Outlook to refresh";
+  if (/Failed to fetch|NetworkError|TypeError/i.test(raw)) return "Unable to reach server — check your internet connection";
+  if (/50[234]/i.test(raw)) return "Server temporarily unavailable — try again in a moment";
+  return "Sync failed — try again later";
+}
+
+function handleSyncClick(btn, errorFn) {
   btn.disabled = true;
   btn.textContent = "Syncing...";
   chrome.runtime.sendMessage({ type: "syncNow" }, (resp) => {
     btn.disabled = false;
     btn.textContent = "Sync Now";
     if (resp && resp.error) {
-      showError(resp.error);
+      errorFn(friendlySyncError(resp.error));
+    } else {
+      // Refresh stats after successful sync
+      chrome.storage.local.get("supabaseSession", (result) => {
+        if (result.supabaseSession) refreshStatus(result.supabaseSession);
+      });
     }
   });
+}
+
+document.getElementById("syncNowBtn").addEventListener("click", () => {
+  hideStatusError();
+  handleSyncClick(document.getElementById("syncNowBtn"), showStatusError);
+});
+
+document.getElementById("setupSyncBtn").addEventListener("click", () => {
+  hideError();
+  handleSyncClick(document.getElementById("setupSyncBtn"), showError);
 });
 
 document.getElementById("visitWebBtn").addEventListener("click", () => {
@@ -277,4 +508,18 @@ document.getElementById("authPassword").addEventListener("keydown", (e) => {
 // ---------------------------------------------------------------------------
 
 checkSessionAndRender();
-setInterval(refreshStatus, 5000);
+
+// Periodic refresh — updates whichever view is visible
+setInterval(() => {
+  const statusVisible = document.getElementById("statusView").style.display !== "none";
+  const setupVisible = document.getElementById("setupView").style.display !== "none";
+  if (statusVisible) {
+    chrome.storage.local.get("supabaseSession", (result) => {
+      if (result.supabaseSession) refreshStatus(result.supabaseSession);
+    });
+  } else if (setupVisible) {
+    chrome.storage.local.get("supabaseSession", (result) => {
+      if (result.supabaseSession) updateSetupChecklist(result.supabaseSession);
+    });
+  }
+}, 5000);

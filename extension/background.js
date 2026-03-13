@@ -60,13 +60,14 @@ async function restoreSyncTime() {
 
 function setBadge(status) {
   const map = {
-    ok: { text: "", color: "#22c55e" },          // green — token valid
-    no_token: { text: "?", color: "#eab308" },   // yellow — no token
-    error: { text: "!", color: "#ef4444" },       // red — token expired
+    ok:       { text: "",  color: "#22c55e", title: "Clarion AI — Syncing" },
+    no_token: { text: "?", color: "#eab308", title: "Clarion AI — Open Outlook to connect" },
+    error:    { text: "!", color: "#ef4444", title: "Clarion AI — Token expired, reopen Outlook" },
   };
   const cfg = map[status] || map.no_token;
   chrome.action.setBadgeText({ text: cfg.text });
   chrome.action.setBadgeBackgroundColor({ color: cfg.color });
+  chrome.action.setTitle({ title: cfg.title });
 }
 
 function updateBadge() {
@@ -691,6 +692,10 @@ async function syncEmailsToSupabase() {
     return { synced: rows.length, sent_synced: sentCount };
   } catch (err) {
     if (DEBUG) console.error("Email sync error:", err.message);
+    // Surface network/server errors distinctly
+    if (err instanceof TypeError || /Failed to fetch|NetworkError/i.test(err.message)) {
+      return { error: "Failed to fetch" };
+    }
     return { error: err.message };
   } finally {
     isSyncing = false;
@@ -760,6 +765,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       is_syncing: isSyncing,
     });
   } else if (msg.type === "supabaseSessionChanged") {
+    // Clear cached token if session was removed (logout)
+    chrome.storage.local.get("supabaseSession", (result) => {
+      if (!result.supabaseSession) {
+        token = null;
+        lastSyncTime = null;
+        updateBadge();
+      }
+    });
     initSupabase();
     sendResponse({ ok: true });
   } else if (msg.type === "syncNow") {
