@@ -22,7 +22,7 @@ importScripts(
 // ---------------------------------------------------------------------------
 
 const EMAIL_SYNC_ALARM = "email-sync";
-const EMAIL_SYNC_PERIOD_MIN = 5;   // 5 min
+const EMAIL_SYNC_PERIOD_MIN = 2;   // 2 min
 const MAX_CATCHUP_EMAILS = 6000;   // cap for first-time or stale syncs
 const MAX_CATCHUP_DAYS = 120;      // how far back to look on first sync
 
@@ -731,9 +731,32 @@ async function initSupabase() {
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === EMAIL_SYNC_ALARM) {
-    syncEmailsToSupabase().catch((err) => {
-      if (DEBUG) console.error("Alarm sync error:", err.message);
-    });
+    (async () => {
+      // 1. Sync emails
+      try {
+        await syncEmailsToSupabase();
+      } catch (err) {
+        if (DEBUG) console.error("Alarm sync error:", err.message);
+      }
+
+      // 2. Reconnect Realtime if the WebSocket dropped (MV3 idle kill)
+      const session = await getSupabaseSession();
+      if (session?.access_token && !isRealtimeConnected()) {
+        try {
+          const accessToken = await getValidAccessToken();
+          if (accessToken) connectRealtime(session.user.id, accessToken);
+        } catch (_) {}
+      }
+
+      // 3. Sweep pending drafts missed while WebSocket was dead
+      if (session?.user?.id && token?.token && !isTokenExpired()) {
+        try {
+          await sweepPendingDrafts(session.user.id);
+        } catch (err) {
+          if (DEBUG) console.error("Alarm sweep error:", err.message);
+        }
+      }
+    })();
   }
 });
 

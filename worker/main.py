@@ -4,7 +4,7 @@ Accumulates emails over an adaptive time window, then processes them
 in batch via the Anthropic Message Batches API (50% cost discount).
 
 Adaptive window logic:
-- Starts at INITIAL_WINDOW (3 minutes).
+- Starts at INITIAL_WINDOW (45 seconds).
 - If no emails arrive during a window, the next window doubles in length.
 - Caps at MAX_WINDOW (1 hour).
 - Resets to INITIAL_WINDOW whenever emails are found.
@@ -48,7 +48,7 @@ logger = logging.getLogger("worker")
 
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL_SECONDS", "30"))
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", "10"))
-INITIAL_WINDOW = int(os.environ.get("INITIAL_WINDOW_SECONDS", "180"))  # 3 min
+INITIAL_WINDOW = int(os.environ.get("INITIAL_WINDOW_SECONDS", "45"))  # 45s
 MAX_WINDOW = int(os.environ.get("MAX_WINDOW_SECONDS", "3600"))  # 1 hour
 
 # ---------------------------------------------------------------------------
@@ -337,6 +337,10 @@ def main():
             if _shutdown:
                 break
             if not data["emails"]:
+                continue
+
+            if not db.is_subscription_active(user_id):
+                logger.info(f"Skipping user {user_id[:8]}...: no active subscription")
                 continue
 
             logger.info(f"Processing user {user_id[:8]}...: {len(data['emails'])} emails")

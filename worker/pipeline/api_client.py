@@ -6,6 +6,7 @@ workers in the multi-user Phase 2 deployment.
 """
 
 import logging
+import os
 import time
 
 import anthropic
@@ -121,7 +122,7 @@ def create_message_batch(requests, api_key=None, timeout=120):
 
 
 def poll_batch_until_done(batch_id, api_key=None, timeout=120,
-                          poll_interval=10, max_wait=900):
+                          poll_interval=3, max_wait=900):
     """Poll a batch until processing_status == 'ended'.
 
     Args:
@@ -180,11 +181,52 @@ def get_batch_results(batch_id, api_key=None, timeout=120):
     return results, total_usage
 
 
-def submit_and_wait(requests, api_key=None, timeout=120,
-                    poll_interval=10, max_wait=900):
-    """Submit a batch and block until results are ready.
+DIRECT_API_THRESHOLD = int(os.environ.get("DIRECT_API_THRESHOLD", "2"))
 
-    Convenience wrapper combining create → poll → results.
+
+def _submit_direct(requests, api_key=None, timeout=120):
+    """Execute requests synchronously via messages.create() for small batches.
+
+    Avoids Batch API overhead (submission + polling) when there are only a
+    few requests. Returns the same (results_dict, total_usage_dict) format.
+    """
+    client = anthropic.Anthropic(api_key=api_key, timeout=timeout)
+    results = {}
+    total_usage = {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 0,
+    }
+
+    for req in requests:
+        custom_id = req["custom_id"]
+        params = req["params"]
+        try:
+            message = client.messages.create(**params)
+            text = "".join(
+                block.text for block in message.content if block.type == "text"
+            )
+            results[custom_id] = text
+            usage = _extract_usage(message)
+            for k in total_usage:
+                total_usage[k] += usage.get(k, 0)
+        except Exception as e:
+            logger.warning(f"  Direct API call failed for {custom_id}: {e}")
+            results[custom_id] = None
+
+    succeeded = sum(1 for v in results.values() if v is not None)
+    logger.info(f"  Direct API: {succeeded}/{len(requests)} succeeded")
+    return results, total_usage
+
+
+def submit_and_wait(requests, api_key=None, timeout=120,
+                    poll_interval=3, max_wait=900):
+    """Submit requests and block until results are ready.
+
+    For small batches (≤DIRECT_API_THRESHOLD), uses synchronous API calls
+    to avoid Batch API overhead. For larger batches, uses the async Batch
+    API with 50% cost discount.
 
     Returns:
         tuple: (results_dict, total_usage_dict)
@@ -193,6 +235,10 @@ def submit_and_wait(requests, api_key=None, timeout=120,
     """
     if not requests:
         return {}, {}
+
+    if len(requests) <= DIRECT_API_THRESHOLD:
+        logger.info(f"  Small batch ({len(requests)} requests) — using direct API")
+        return _submit_direct(requests, api_key=api_key, timeout=timeout)
 
     batch = create_message_batch(requests, api_key=api_key, timeout=timeout)
     logger.info(f"  Batch {batch.id} submitted ({len(requests)} requests)")

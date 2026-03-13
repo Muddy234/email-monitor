@@ -849,7 +849,7 @@ def process_user_batch_enriched(db, user_id, profile, emails):
     config = build_config_from_profile(profile)
     user_aliases = [a.lower() for a in config.get("user_email_aliases", []) if a]
     run_id = db.create_pipeline_run(user_id, trigger_type="scheduled")
-    batch_poll_interval = int(os.environ.get("BATCH_POLL_INTERVAL", "10"))
+    batch_poll_interval = int(os.environ.get("BATCH_POLL_INTERVAL", "3"))
     batch_max_wait = int(os.environ.get("BATCH_MAX_WAIT", "900"))
     api_key = config.get("anthropic_api_key")
 
@@ -1148,7 +1148,7 @@ def process_user_batch_signals(db, user_id, profile, emails):
     config = build_config_from_profile(profile)
     user_aliases = [a.lower() for a in config.get("user_email_aliases", []) if a]
     run_id = db.create_pipeline_run(user_id, trigger_type="scheduled")
-    batch_poll_interval = int(os.environ.get("BATCH_POLL_INTERVAL", "10"))
+    batch_poll_interval = int(os.environ.get("BATCH_POLL_INTERVAL", "3"))
     batch_max_wait = int(os.environ.get("BATCH_MAX_WAIT", "900"))
     api_key = config.get("anthropic_api_key")
     draft_max_age_hours = int(os.environ.get("DRAFT_MAX_AGE_HOURS", "24"))
