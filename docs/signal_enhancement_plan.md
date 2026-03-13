@@ -45,7 +45,8 @@ Meanwhile, `contacts_map[sender]` has `response_rate`, `smoothed_rate`, `reply_r
 **Location:** After `build_signals()` (line ~448)
 
 ```python
-def backfill_signals(signals, contact, thread_info, thread_messages, user_aliases):
+def backfill_signals(signals, contact, thread_info, thread_messages,
+                     user_aliases, current_email_id=None):
     """Backfill null signal fields using fetched context data.
 
     Called after build_signals() once contacts_map and threads_map
@@ -57,10 +58,22 @@ def backfill_signals(signals, contact, thread_info, thread_messages, user_aliase
         thread_info: dict from threads_map (or None).
         thread_messages: list of message dicts from thread (or []).
         user_aliases: list[str] of user email addresses (lowercase).
+        current_email_id: str or None. The email_id/email_ref of the
+            email being classified. If provided, this message is excluded
+            from thread_messages before computing subsequent_replies_count
+            to avoid counting the inbound email itself as a "reply."
     """
     contact = contact or {}
     thread_info = thread_info or {}
     thread_messages = thread_messages or []
+
+    # Exclude the email being classified from thread messages so it
+    # doesn't inflate subsequent_replies_count by counting itself.
+    if current_email_id and thread_messages:
+        thread_messages = [
+            m for m in thread_messages
+            if (m.get("id") or m.get("email_ref") or "") != current_email_id
+        ]
 
     # --- Sender signals ---
     signals["sender_conditional_response_rate"] = (
@@ -148,7 +161,10 @@ def _compute_thread_velocity(thread_messages):
 
         msgs_per_day = (len(timestamps) - 1) / max(span_hours / 24, 0.01)
 
-        if msgs_per_day > 3:
+        # Require at least 4 messages before labeling "high" — a
+        # 3-message thread over 2 hours computes ~24 msgs/day but is
+        # likely just a quick back-and-forth, not a genuinely fast thread.
+        if msgs_per_day > 3 and len(timestamps) >= 4:
             return "high"
         elif msgs_per_day >= 1:
             return "medium"
@@ -172,6 +188,7 @@ backfill_signals(
     thread_info=threads_map.get(conv_id),
     thread_messages=thread_messages,
     user_aliases=user_aliases,
+    current_email_id=email_data.get("id") or email_data.get("email_ref"),
 )
 rec = assemble_enrichment(email_data, signals, raw_score, ...)
 ```
@@ -194,6 +211,9 @@ def test_backfill_signals_with_contact():
     assert signals["sender_emails_last_30d"] == 15
 
 def test_backfill_signals_with_thread():
+    # NOTE: The thread message list intentionally does NOT include the
+    # inbound email being classified. In production, pass current_email_id
+    # to exclude it automatically (see edge case in backfill_signals docs).
     signals = {"thread_message_count": None, "user_replies_in_thread": 0, ...}
     messages = [
         {"sender_email": "user@co.com", "received_time": "2026-03-10T10:00:00Z", "body": "ok"},
@@ -203,7 +223,7 @@ def test_backfill_signals_with_thread():
     assert signals["thread_message_count"] == 2
     assert signals["user_replies_in_thread"] == 1
     assert signals["user_active_in_thread"] is True
-    assert signals["subsequent_replies_count"] == 1
+    assert signals["subsequent_replies_count"] == 1  # Bob's reply after user's message
 
 def test_thread_velocity_high():
     msgs = [
@@ -218,11 +238,11 @@ def test_thread_velocity_high():
 
 ---
 
-## Enhancement 2: Thread-Aware Feature Checks
+## Enhancement 2: Thread-Aware Feature Check
 
 ### Vision
 
-Feature checks are the most powerful lever we have — they're pointed yes/no questions that force Haiku to verify its assumptions against the email content. Currently we have 5 generic checks. By adding thread-aware checks that reference *specific numbers* from the enrichment data, we turn Haiku into a calibrated verifier rather than an independent judge. Instead of "does this need a response?", Haiku answers "the user has replied 3 times in this 5-message thread and the sender has a 72% response rate — does the *content* of this email warrant reply #4?"
+Feature checks are pointed yes/no questions that force Haiku to verify its assumptions. Currently we have 5 generic checks that ignore thread context entirely. Rather than building conditional logic that coaches Haiku on what to conclude, we add one factual thread summary line — just the numbers. Haiku can reason from there.
 
 ### Current State
 
@@ -233,138 +253,84 @@ Feature checks are the most powerful lever we have — they're pointed yes/no qu
 4. Action language
 5. Forward detection
 
-It ignores: thread participation, sender response rate, thread velocity, thread duration, other replies since user's last message, archetype prediction.
+It has no thread context at all.
 
 ### Implementation
 
 **File:** `worker/pipeline/enrichment.py`
 
-#### Step 1: Extend `_build_feature_checks()` to accept enrichment-stage data
+#### Step 1: Extend signature to accept thread data
 
 ```python
-def _build_feature_checks(email_data, signals, contact=None,
-                          thread_briefing=None):
+def _build_feature_checks(email_data, signals, thread_briefing=None):
 ```
 
-#### Step 2: Add thread participation checks
+#### Step 2: Add a single factual thread summary
 
 After the existing 5 checks, append:
 
 ```python
-    # --- Thread participation ---
+    # --- Thread context (single factual line, no coaching) ---
     if thread_briefing and thread_briefing.get("total_messages", 0) > 1:
-        user_msgs = thread_briefing.get("user_messages", 0)
         total = thread_briefing["total_messages"]
+        user_msgs = thread_briefing.get("user_messages", 0)
         participation = thread_briefing.get("participation_rate", 0) or 0
+        other_since = signals.get("subsequent_replies_count", 0)
 
-        if user_msgs == 0:
-            checks.append(
-                f"User has NOT participated in this {total}-message thread — "
-                "does this email specifically pull them in, or is it still "
-                "not directed at them?"
-            )
-        elif participation > 0.4:
-            checks.append(
-                f"User is actively engaged ({user_msgs}/{total} messages, "
-                f"{participation:.0%} participation) — is this a continuation "
-                "that expects their reply?"
-            )
-
-        # Other replies since user's last message
-        other_since = thread_briefing.get("other_replies_since", 0)
-        if other_since >= 2:
-            checks.append(
-                f"{other_since} other people have replied since user's last "
-                "message — has the user's question/task already been "
-                "addressed by others?"
-            )
+        parts = [f"Thread: {total} messages"]
+        parts.append(f"user sent {user_msgs} ({participation:.0%} participation)")
+        if other_since:
+            parts.append(f"{other_since} replies since user's last message")
+        checks.append(", ".join(parts) + ".")
 ```
 
-#### Step 3: Add sender response rate check
-
-```python
-    # --- Sender response rate context ---
-    if contact:
-        rate = contact.get("smoothed_rate") or contact.get("response_rate")
-        if rate is not None:
-            if rate > 0.7:
-                checks.append(
-                    f"User historically responds to {rate:.0%} of emails "
-                    "from this sender — is this email an exception "
-                    "(FYI, mass send, no action needed)?"
-                )
-            elif rate < 0.15:
-                checks.append(
-                    f"User rarely responds to this sender ({rate:.0%} rate) "
-                    "— does this email contain an unusually direct or "
-                    "urgent request?"
-                )
-```
-
-#### Step 4: Add thread velocity check
-
-```python
-    # --- Thread velocity ---
-    velocity = signals.get("thread_velocity")
-    if velocity == "high":
-        checks.append(
-            "This is a fast-moving thread (>3 messages/day) — "
-            "is the user expected to jump in, or is the conversation "
-            "resolving without them?"
-        )
-```
-
-#### Step 5: Update caller in `assemble_enrichment()`
+#### Step 3: Update caller in `assemble_enrichment()`
 
 ```python
     feature_checks = _build_feature_checks(
         email_data, signals,
-        contact=contact,
         thread_briefing=thread_briefing,
     )
 ```
 
-Note: `thread_briefing` is built *before* `feature_checks` in `assemble_enrichment()`, so this dependency is safe.
+Note: `thread_briefing` is built *before* `feature_checks` in `assemble_enrichment()`, so this dependency is safe. Sender response rate context is already handled by E4 (base rate explanation) and doesn't need to be duplicated here.
 
 ### Impact
 
-- Haiku stops guessing about thread dynamics and instead verifies specific claims
-- "User has NOT participated in this 8-message thread" is far more actionable than "User is CC'd"
-- Response rate context prevents Haiku from overriding a statistically strong prior without evidence
-- High-velocity thread check catches the common "reply-all storm" pattern
+- Haiku gets thread facts without opinionated coaching — one line instead of multiple conditional branches
+- "Thread: 8 messages, user sent 0 (0% participation)" tells Haiku everything it needs without prescribing a conclusion
+- Zero maintenance burden — no thresholds to tune, no branching logic to debug
 
 ### Testing
 
 ```python
-def test_feature_check_no_participation():
-    signals = {"user_position": "TO", "user_mentioned_by_name": False, ...}
+def test_feature_check_thread_summary():
+    signals = {"subsequent_replies_count": 2, "user_position": "TO", ...}
     thread_briefing = {
-        "total_messages": 8, "user_messages": 0,
-        "participation_rate": 0.0, "other_replies_since": 0,
+        "total_messages": 5, "user_messages": 2,
+        "participation_rate": 0.4,
     }
     checks = _build_feature_checks(
         {"body": "meeting at 3pm"}, signals,
         thread_briefing=thread_briefing,
     )
-    assert any("NOT participated" in c for c in checks)
+    assert any("Thread: 5 messages" in c for c in checks)
+    assert any("user sent 2" in c for c in checks)
+    assert any("2 replies since" in c for c in checks)
 
-def test_feature_check_high_sender_rate():
-    signals = {**base_signals}
-    contact = {"smoothed_rate": 0.85}
-    checks = _build_feature_checks(
-        {"body": "FYI — see attached"}, signals,
-        contact=contact,
-    )
-    assert any("85%" in c for c in checks)
+def test_feature_check_no_thread():
+    signals = {"user_position": "TO", ...}
+    checks = _build_feature_checks({"body": "hello"}, signals)
+    assert not any("Thread:" in c for c in checks)
 ```
 
 ---
 
-## Enhancement 3: Improved Intent Classification
+## Enhancement 3: Expand Intent Classification (Minimal)
 
 ### Vision
 
-The current intent classifier uses 5 keyword buckets that miss entire categories of real-world email intent. An email that says "Let me know your thoughts on the attached proposal" has no question mark, no "can you" phrase, and no scheduling keyword — so it falls to "unclassified", forcing Haiku to do all the intent work from scratch. By expanding the regex patterns (still zero-cost), we pre-classify more emails correctly, giving Haiku a reliable starting hypothesis instead of a blank slate.
+The current intent classifier misses indirect requests — the #1 gap. An email saying "Let me know your thoughts on the attached proposal" has no question mark and no "can you" phrase, so it falls to "unclassified." We fix this by adding indirect request patterns to the existing `direct_request` bucket and adding one new sub-check for FYI emails with embedded requests. No new categories, no cascade rewrite.
 
 ### Current State
 
@@ -379,83 +345,50 @@ The current intent classifier uses 5 keyword buckets that miss entire categories
 ### Problems
 
 1. **Indirect requests missed:** "Let me know", "your thoughts on", "take a look at", "circle back on"
-2. **Delegated requests missed:** "Can someone", "who can handle", "anyone available"
-3. **Conditional requests missed:** "If you have time", "when you get a chance", "at your convenience"
-4. **Approval requests missed:** "Please approve", "sign off on", "green light"
-5. **Question-without-question-mark missed:** "I wanted to check if", "wondering whether"
-6. **Multi-intent not detected:** An email can be both FYI and contain an embedded request
+2. **Multi-intent not detected:** An email can be FYI framing but contain an embedded request
 
 ### Implementation
 
 **File:** `worker/run_pipeline.py`
 
-#### Step 1: Add new pattern groups after the existing ones (line ~396)
+#### Step 1: Add indirect request patterns (line ~396)
 
 ```python
-    # --- Signal 5b: Expanded intent patterns ---
-    indirect_request_patterns = [
-        r'\b(?:let me know|let us know)\b',
-        r'\byour (?:thoughts|feedback|input|take|opinion|view)\b',
-        r'\b(?:take|have) a look\b',
-        r'\b(?:circle|follow|loop) back\b',
-        r'\b(?:get back to|respond to|reply to)\s+(?:me|us)\b',
-        r'\bwould (?:love|appreciate|like)\s+(?:your|to (?:hear|get|see))\b',
-        r'\b(?:weigh in|chime in)\b',
-    ]
-    approval_patterns = [
-        r'\b(?:please |kindly )?(?:approve|sign off|green.?light)\b',
-        r'\b(?:needs?|requires?|awaiting)\s+(?:your\s+)?(?:approval|sign.?off|authorization)\b',
-        r'\b(?:for your|pending your)\s+(?:approval|review|signature)\b',
-    ]
-    implicit_question_patterns = [
-        r'\b(?:wanted to|I\'d like to)\s+(?:check|confirm|verify|ask|see)\b',
-        r'\bwondering (?:if|whether|about)\b',
-        r'\b(?:curious|interested)\s+(?:if|whether|to (?:know|hear|see))\b',
-        r'\bany (?:thoughts|updates|progress|news)\b',
-    ]
-    delegated_request_patterns = [
-        r'\b(?:can|could)\s+(?:someone|anyone|somebody)\b',
-        r'\bwho\s+(?:can|could|will|should)\b',
-        r'\b(?:anyone|someone)\s+(?:available|able|willing)\b',
-    ]
+    # --- Signal 5b: Indirect request patterns ---
+    # These get folded into direct_request — no new category needed.
+    # Haiku can distinguish urgency from the email body itself.
+    _INDIRECT_REQUEST_RE = re.compile(
+        r'\b(?:let me know|let us know'
+        r'|your (?:thoughts|feedback|input|take|opinion|view)'
+        r'|(?:take|have) a look'
+        r'|(?:circle|follow|loop) back'
+        r'|(?:get back to|respond to|reply to)\s+(?:me|us)'
+        r'|would (?:love|appreciate|like)\s+(?:your|to (?:hear|get|see))'
+        r'|(?:weigh in|chime in))\b',
+        re.IGNORECASE,
+    )
 ```
 
-#### Step 2: Integrate into the classification cascade
+#### Step 2: Expand the `direct_request` branch and add `informational_with_request`
 
-Replace the current cascade (lines 410-424) with a richer version:
+Minimal change to the existing cascade — add the indirect regex to the `direct_request` check, and add a sub-check inside the `informational` branch:
 
 ```python
-    # --- Signal 5: Intent classification (expanded) ---
+    # --- Signal 5: Intent classification ---
     if terminal:
         intent_category = "acknowledgment"
     elif fyi_detected or no_response_detected:
         # Check for embedded request in FYI emails
-        has_embedded_request = any(
-            re.search(p, new_body_lower) for p in indirect_request_patterns
-        ) or any(
-            re.search(p, new_body_lower) for p in approval_patterns
-        )
-        intent_category = "informational_with_request" if has_embedded_request else "informational"
-    elif subject_type in ("forward", "chain_forward"):
-        # Forwards with explicit requests should be classified differently
-        has_fwd_request = any(
-            re.search(p, new_body_lower) for p in
-            indirect_request_patterns + approval_patterns
-        ) or re.search(
-            r'\b(can you|could you|please|would you|need you to)\b',
-            new_body_lower,
-        )
-        intent_category = "forward_with_request" if has_fwd_request else "informational"
-    elif re.search(r'\b(can you|could you|please|would you|need you to)\b', new_body_lower):
+        if (re.search(r'\b(can you|could you|please|would you|need you to)\b',
+                       new_body_lower)
+                or _INDIRECT_REQUEST_RE.search(new_body_lower)):
+            intent_category = "informational_with_request"
+        else:
+            intent_category = "informational"
+    elif (re.search(r'\b(can you|could you|please|would you|need you to)\b',
+                     new_body_lower)
+              or _INDIRECT_REQUEST_RE.search(new_body_lower)):
         intent_category = "direct_request"
-    elif any(re.search(p, new_body_lower) for p in approval_patterns):
-        intent_category = "approval_request"
-    elif any(re.search(p, new_body_lower) for p in indirect_request_patterns):
-        intent_category = "indirect_request"
-    elif any(re.search(p, new_body_lower) for p in delegated_request_patterns):
-        intent_category = "delegated_request"
-    elif any(re.search(p, new_body_lower) for p in implicit_question_patterns):
-        intent_category = "implicit_question"
     elif re.search(r'\b(update|status|progress|where are we)\b', new_body_lower):
         intent_category = "status_update"
     elif re.search(r'\b(schedule|meeting|call|calendar|available)\b', new_body_lower):
@@ -464,90 +397,58 @@ Replace the current cascade (lines 410-424) with a richer version:
         intent_category = "unclassified"
 ```
 
-#### Step 3: Update `_FEATURE_CHECK_MAP` for new intent categories
+That's it. Same 6 categories plus one new sub-type (`informational_with_request`). The cascade stays readable without a comment block explaining priority order.
+
+#### Step 3: Add one feature check for the new sub-type
 
 **File:** `worker/pipeline/enrichment.py`
 
-Add entries to `_build_feature_checks()`:
-
 ```python
-    # Intent-based checks (new categories)
     intent = signals.get("intent_category", "unclassified")
-    if intent == "indirect_request":
-        checks.append(
-            "Indirect request detected (e.g. 'let me know', 'your thoughts') "
-            "— is this genuinely asking the user to act, or just a social "
-            "courtesy closing?"
-        )
-    elif intent == "approval_request":
-        checks.append(
-            "Approval language detected — does the user have authority to "
-            "approve, or is this addressed to someone else?"
-        )
-    elif intent == "delegated_request":
-        checks.append(
-            "Delegated request ('can someone...') — is the user the most "
-            "likely person to handle this, or will someone else pick it up?"
-        )
-    elif intent == "implicit_question":
-        checks.append(
-            "Implicit question detected (checking/confirming) — does the "
-            "sender expect a reply, or is this rhetorical?"
-        )
-    elif intent == "informational_with_request":
+    if intent == "informational_with_request":
         checks.append(
             "Email is mostly FYI but contains an embedded request — "
             "is the request directed at the user specifically?"
-        )
-    elif intent == "forward_with_request":
-        checks.append(
-            "Forwarded message with an explicit request in the forwarding "
-            "note — verify the request is for the user, not just context."
         )
 ```
 
 ### Impact
 
-- **"unclassified" rate drops significantly** — fewer emails arrive at Haiku without a hypothesis
-- **Multi-intent detection** (FYI + embedded request) catches the common pattern of "FYI — also, can you review the budget section?"
-- **Approval requests** are distinct from general requests — different urgency, different archetype
-- **Indirect requests** ("let me know your thoughts") are the #1 missed category in most email classifiers
-- **Delegated requests** ("can someone...") are correctly identified as lower-probability for any specific user
+- **Indirect requests** ("let me know your thoughts") now classified as `direct_request` instead of `unclassified`
+- **FYI + embedded request** detected as its own sub-type, giving Haiku a useful signal
+- **No new categories to maintain** — everything folds into the existing structure
+- **~10 lines of new regex**, not a cascade rewrite
+
+### Validation
+
+After implementation, sample 50-100 emails that were previously `unclassified` and verify they're now correctly classified. A wrong label is worse than `unclassified` — see Success Metrics for details.
 
 ### Testing
 
 ```python
-def test_indirect_request():
+def test_indirect_request_classified():
     signals = build_signals(
         {"body": "Hi Nate, let me know your thoughts on the proposal.",
          "subject": "Project update", ...},
         ["nate@co.com"],
     )
-    assert signals["intent_category"] == "indirect_request"
+    assert signals["intent_category"] == "direct_request"
 
 def test_fyi_with_embedded_request():
     signals = build_signals(
-        {"body": "FYI — the vendor sent the final quote. Can you approve?",
+        {"body": "FYI — the vendor sent the final quote. Let me know your thoughts.",
          "subject": "Fw: Vendor quote", ...},
         ["nate@co.com"],
     )
     assert signals["intent_category"] == "informational_with_request"
 
-def test_approval_request():
+def test_pure_fyi_unchanged():
     signals = build_signals(
-        {"body": "The purchase order is ready for your approval.",
-         "subject": "PO #4521 — pending approval", ...},
+        {"body": "FYI — see the attached report.",
+         "subject": "Fw: Q1 numbers", ...},
         ["nate@co.com"],
     )
-    assert signals["intent_category"] == "approval_request"
-
-def test_delegated_not_direct():
-    signals = build_signals(
-        {"body": "Can someone on the team handle the site inspection Tuesday?",
-         "subject": "Site inspection", ...},
-        ["nate@co.com"],
-    )
-    assert signals["intent_category"] == "delegated_request"
+    assert signals["intent_category"] == "informational"
 ```
 
 ---
@@ -728,7 +629,11 @@ _QUOTE_BOUNDARY_PATTERNS = [
     re.compile(r'^On .{10,80} wrote:\s*$', re.MULTILINE),
     # Generic "From: ... Sent: ... To: ..." block (Outlook headers)
     re.compile(r'^From:\s+\S+.*\nSent:\s+', re.MULTILINE),
-    # Plain "From:" at start of line (but not in first 5 chars of body)
+    # Plain "From:" at start of line (but not in first 5 chars of body).
+    # NOTE: The lookbehind (?<=\n) means this won't match "From:" at
+    # position 0 of the string (no preceding \n). This is acceptable —
+    # position 0 would mean the entire body is quoted, and earliest_pos
+    # would be 0, returning an empty string. Not worth a special case.
     re.compile(r'(?<=\n)From:\s+\S+@\S+', re.MULTILINE),
 ]
 
@@ -760,11 +665,15 @@ def _extract_new_content(body):
 
     new_content = body[:earliest_pos]
 
-    # Strip >-prefixed quoted lines
+    # Strip >-prefixed quoted lines.
+    # IMPORTANT: Only strip lines where > is followed by a space or another >
+    # (the actual email quoting convention). A bare > could appear in normal
+    # content (e.g. ">$500k for the lot") and should not be stripped.
     lines = new_content.split('\n')
     unquoted_lines = [
         line for line in lines
-        if not line.lstrip().startswith('>')
+        if not (line.lstrip().startswith('> ')
+                or re.match(r'^\s*>[\s>]', line))
     ]
 
     return '\n'.join(unquoted_lines).strip()
@@ -818,11 +727,11 @@ def test_extract_no_boundary():
 |-------|------------|--------|------|---------------|
 | 1 | Quoted content isolation (E5) | Small | Low | High — fixes false positives in all other signals |
 | 2 | Backfill null signals (E1) | Medium | Low | High — 7 new structured signals |
-| 3 | Thread-aware feature checks (E2) | Small | Low | High — better verification questions |
-| 4 | Improved intent classification (E3) | Medium | Low | Medium — reduces "unclassified" rate |
+| 3 | Thread-aware feature check (E2) | Small | Low | Medium — one factual thread summary line |
+| 4 | Expand intent classification (E3) | Small | Low | Medium — indirect requests + FYI sub-check |
 | 5 | Base rate driver explanation (E4) | Small | Low | Medium — better override calibration |
 
-Phase 1 should come first because every other enhancement reads from the email body and benefits from cleaner content extraction. Phase 2 before Phase 3 because the feature checks in Phase 3 depend on the backfilled signal values from Phase 2.
+Phase 1 should come first because every other enhancement reads from the email body and benefits from cleaner content extraction. Phase 2 before Phase 3 because the thread summary in Phase 3 uses backfilled signal values from Phase 2.
 
 ---
 
@@ -830,9 +739,9 @@ Phase 1 should come first because every other enhancement reads from the email b
 
 All measurable without additional infrastructure:
 
-1. **"unclassified" intent rate** — track `intent_category == "unclassified"` percentage before/after. Target: drop from ~40% to <15%.
+1. **"unclassified" intent rate** — track `intent_category == "unclassified"` percentage before/after. Target: drop from ~40% to <15%. **Intermediate validation:** after implementing E3, sample 50-100 emails that were previously unclassified and verify the new classification is actually correct. A drop from 40% to 15% that introduces a 20% misclassification rate in the newly-classified bucket would be worse than staying at 40% unclassified — "unclassified" at least signals honest uncertainty to Haiku, while a wrong label is actively misleading.
 2. **Haiku override rate** — percentage of emails where Haiku's `needs_response` disagrees with the scorer's confidence tier. Should become more selective (fewer overrides, higher quality overrides).
-3. **Feature check coverage** — average number of feature checks per email. Target: increase from 5 to 7-8 for threaded emails.
+3. **Feature check coverage** — average number of feature checks per email. Target: increase from 5 to 6 for threaded emails (one additional thread summary line).
 4. **Null signal rate** — percentage of enrichment records with null `sender_conditional_response_rate` or `thread_velocity`. Target: <20% (from current 100%).
 5. **False positive audit** — sample emails where intent was `direct_request` and check if the request language was in new vs quoted content.
 
@@ -842,7 +751,7 @@ All measurable without additional infrastructure:
 
 | File | Changes |
 |------|---------|
-| `worker/run_pipeline.py` | `backfill_signals()`, `_compute_thread_velocity()`, `_extract_new_content()`, expanded intent patterns, wiring in enrichment loop |
-| `worker/pipeline/enrichment.py` | `_build_feature_checks()` signature + thread/sender/velocity checks, `_build_score_explanation()` base rate extraction |
+| `worker/run_pipeline.py` | `backfill_signals()`, `_compute_thread_velocity()`, `_extract_new_content()`, `_INDIRECT_REQUEST_RE` + `informational_with_request` sub-check, wiring in enrichment loop |
+| `worker/pipeline/enrichment.py` | `_build_feature_checks()` signature + thread summary line + `informational_with_request` check, `_build_score_explanation()` base rate extraction |
 | `worker/pipeline/analyzer.py` | No changes needed — prompt and schema already accommodate richer enrichment |
 | `worker/pipeline/prompts.py` | No changes needed — `ENRICHED_ANALYSIS_PROMPT` instructions already tell Haiku to use feature checks and score context |
