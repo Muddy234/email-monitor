@@ -14,20 +14,21 @@ logger = logging.getLogger("worker")
 
 SIGNAL_EXTRACTION_SYSTEM_PROMPT = """\
 Classify this email. Return JSON only, no other text.
+Focus on the NEWEST message only. Ignore quoted/forwarded text below signature lines or ">" markers.
 
 Signals:
 mc (bool): Financial/legal/deal consequence. Triggers: funding, closing, default, penalty, expiration, compliance, rate lock, guaranty, wire, lien, amendment, maturity.
 ar (bool): Sender needs recipient to do something. Includes implicit asks and follow-ups.
 ub (bool): Someone downstream is blocked waiting on recipient. Process paused pending their input.
 dl (bool): Time constraint on a request. Explicit date/time or urgency language tied to an ask. Ignore dates as context only.
-rt (enum none|ack|ans|act|dec): Expected response type. If multiple apply, pick highest: dec>act>ans>ack>none.
+rt (enum none|ack|ans|act|dec): Expected response type. If multiple apply, pick highest: dec>act>ans>ack>none. If rt=none, draft should almost always be false.
 
 Action target (required when ar=true):
 target (enum user|other|all|unclear): Who the action/request is directed at.
-- user: Action is directed at USER (named, addressed, or sole TO recipient).
-- other: Action is directed at someone else (another name mentioned, USER is CC-only, or body addresses a specific person who is not USER).
-- all: Action applies to all recipients equally.
-- unclear: Cannot determine who the action targets.
+- user: Action is directed at USER (named, addressed, or sole TO recipient). → draft=true when response needed.
+- other: Action is directed at someone else (another name mentioned, USER is CC-only, or body addresses a specific person who is not USER). → draft=false.
+- all: Action applies to all recipients equally. → draft=true only if USER must respond individually.
+- unclear: Cannot determine who the action targets. → default draft=true to avoid missing real requests.
 When ar=false, set target="user" (default, ignored).
 
 Key heuristics for target:
@@ -36,19 +37,22 @@ Key heuristics for target:
 - If USER is sole TO recipient → target=user.
 - If body uses "all" / "everyone" / "team" language → target=all.
 
+Context fields:
+- tier: Sender importance. C=critical (lenders, investors, legal) → bias pri toward high. I=internal (colleagues) → normal. P=professional (vendors, consultants) → normal. U=unknown → bias pri toward low.
+- thread_depth: Number of messages in this thread (1=new email). Higher depth in active threads may reduce urgency if others are already engaged.
+- unanswered: Whether USER has a prior message in this thread that went unanswered by the sender. true suggests a follow-up the user was waiting for → bias draft=true.
+
 Decisions:
 pri (enum high|med|low): Overall priority considering all signals, sender tier, and context.
-draft (bool): Whether USER should draft a response. True ONLY when the email requires a response FROM USER specifically. False when: FYI, action targets someone else (target=other), acknowledgments, no-response-needed.
-reason (string): Why draft is true or false. Under 30 words. Also serves as the draft brief for response generation.
+draft (bool): Whether USER should draft a response. True ONLY when the email requires a response FROM USER specifically. False when: FYI, action targets someone else (target=other), terminal acknowledgments ("Thanks", "Got it"), automated notifications, newsletters, calendar invites, no-response-needed.
+reason (string): Under 30 words. When draft=true, write a brief for what the reply should address. When draft=false, explain why no response is needed.
 
 Context format:
 Line 1 — Sender: sender_name sender_email|tier|thread_depth|unanswered
 Line 2 — User: USER user_name|user_email|position (TO or CC)
 Line 3 — Recipients: TO: addr1;addr2 | CC: addr1;addr2
 
-Tiers: C=critical, I=internal, P=professional, U=unknown
-
-Example 1 (action for user):
+Example 1 (action for user — direct request with deadline):
 Input: Jane Smith jane@lender.com|C|1|false
 USER: Bob Jones|bjones@company.com|TO
 TO: bjones@company.com | CC: (none)
@@ -56,13 +60,37 @@ S:Draw Request #4 — Please Review
 Bob, please review the attached draw request and approve by Friday.
 Output: {"mc":true,"ar":true,"ub":false,"dl":true,"rt":"act","target":"user","pri":"high","draft":true,"reason":"Lender requesting Bob to review and approve draw request by Friday."}
 
-Example 2 (action for someone else):
+Example 2 (action for someone else — USER is CC):
 Input: Gina Kufrovich gina@corridortitle.com|P|1|false
 USER: Nate McBride|nmcbride@arete-collective.com|CC
 TO: wdagestad@polsinelli.com;tmills@arete-collective.com | CC: nmcbride@arete-collective.com
 S:CPL — 123 Main St
 Wes please see attached CPL.
-Output: {"mc":false,"ar":true,"ub":false,"dl":false,"rt":"act","target":"other","pri":"low","draft":false,"reason":"Action directed at Wes (TO recipient), not USER who is CC-only. No response needed."}\
+Output: {"mc":false,"ar":true,"ub":false,"dl":false,"rt":"act","target":"other","pri":"low","draft":false,"reason":"Action directed at Wes (TO recipient), not USER who is CC-only. No response needed."}
+
+Example 3 (FYI / informational — no action needed):
+Input: Sarah Miller sarah@arete-collective.com|I|3|false
+USER: Nate McBride|nmcbride@arete-collective.com|CC
+TO: tmills@arete-collective.com | CC: nmcbride@arete-collective.com;jcrigler@arete-collective.com
+S:Re: Turtle Bay Budget Update
+Updated budget spreadsheet attached. Let me know if you have questions.
+Output: {"mc":false,"ar":false,"ub":false,"dl":false,"rt":"none","target":"user","pri":"low","draft":false,"reason":"Internal FYI update sent to another recipient. USER is CC for visibility only."}
+
+Example 4 (direct question to user — needs answer):
+Input: Dave Wittwer dave@lender.com|C|2|true
+USER: Nate McBride|nmcbride@arete-collective.com|TO
+TO: nmcbride@arete-collective.com | CC: tmills@arete-collective.com
+S:Re: Thomas Ranch Phase 2 — Rate Lock
+Nate, can you confirm whether you want to lock the rate at 6.25% or float until next week?
+Output: {"mc":true,"ar":true,"ub":true,"dl":false,"rt":"dec","target":"user","pri":"high","draft":true,"reason":"Lender asking Nate to decide on rate lock vs float. Confirm preference and timeline."}
+
+Example 5 (terminal acknowledgment — no response needed):
+Input: Jim Crigler jim@contractor.com|P|4|false
+USER: Nate McBride|nmcbride@arete-collective.com|TO
+TO: nmcbride@arete-collective.com | CC: (none)
+S:Re: Inspection Schedule
+Thanks Nate, got it. We'll be there Monday at 9am.
+Output: {"mc":false,"ar":false,"ub":false,"dl":false,"rt":"none","target":"user","pri":"low","draft":false,"reason":"Terminal acknowledgment confirming receipt. No response needed."}\
 """
 
 
@@ -105,7 +133,7 @@ def extract_signals(email_body, subject, sender_name, sender_email,
             prompt=user_message,
             system_prompt=SIGNAL_EXTRACTION_SYSTEM_PROMPT,
             model=resolve_model("haiku"),
-            max_tokens=150,
+            max_tokens=200,
             timeout=30,
             api_key=api_key,
             temperature=0,

@@ -12,31 +12,8 @@
 // Helpers
 // ---------------------------------------------------------------------------
 
-function setStatusDot(el, color, text) {
-  el.textContent = "";
-  const span = document.createElement("span");
-  span.className = `dot ${color}`;
-  el.appendChild(span);
-  el.appendChild(document.createTextNode(text));
-}
-
-function relativeTime(ts) {
-  if (!ts) return "—";
-  const diff = Date.now() - new Date(ts).getTime();
-  if (diff < 60_000) return "just now";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m`;
-  return `${Math.floor(diff / 3_600_000)}h`;
-}
-
-function escapeHtml(str) {
-  if (!str) return "";
-  const div = document.createElement("div");
-  div.textContent = str;
-  return div.innerHTML;
-}
-
-function setStatValue(id, value) {
-  const el = document.getElementById(id);
+function setDraftCount(value) {
+  const el = document.getElementById("draftCount");
   if (!el) return;
   el.classList.remove("skeleton-text");
   el.textContent = value !== null && value !== undefined ? value : "—";
@@ -139,177 +116,25 @@ async function supabaseQuery(path, session) {
   return resp.json();
 }
 
-function todayISO() {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d.toISOString();
-}
-
-async function fetchEnhancedStats(session) {
-  const today = todayISO();
+async function fetchDraftCount(session) {
   const uid = session.user?.id;
   if (!uid) return null;
 
   try {
-    const [processed, classifications, drafts, pipelineRuns] = await Promise.all([
-      // Q1: Processed count
-      supabaseQuery(
-        `emails?select=id&user_id=eq.${uid}&folder=eq.Inbox&received_time=gte.${today}&status=eq.completed`,
-        session
-      ),
-      // Q2: Attention candidates with embedded email data
-      supabaseQuery(
-        `classifications?select=id,email_id,action,created_at,emails(id,email_ref,subject,sender_name,received_time)&user_id=eq.${uid}&needs_response=eq.true&created_at=gte.${today}&order=created_at.desc`,
-        session
-      ),
-      // Q3: Drafts with sender name
-      supabaseQuery(
-        `drafts?select=id,email_id,created_at,emails(sender_name)&user_id=eq.${uid}&created_at=gte.${today}&order=created_at.desc`,
-        session
-      ),
-      // Q4: Pipeline runs for activity feed
-      supabaseQuery(
-        `pipeline_runs?select=id,status,emails_processed,drafts_generated,finished_at&user_id=eq.${uid}&order=finished_at.desc&limit=5`,
-        session
-      ),
-    ]);
-
-    // Client-side cross-reference: exclude classifications that already have drafts
-    const draftedEmailIds = new Set(drafts.map(d => d.email_id));
-    const attentionItems = classifications.filter(c => !draftedEmailIds.has(c.email_id));
-
-    // Build activity feed: merge drafts + pipeline runs, sorted by time, max 3
-    const activities = [];
-    for (const d of drafts) {
-      const senderName = d.emails?.sender_name || "Unknown";
-      activities.push({
-        text: `Draft created for ${senderName}`,
-        time: d.created_at,
-      });
-    }
-    for (const r of pipelineRuns) {
-      if (r.emails_processed > 0 && r.finished_at) {
-        activities.push({
-          text: `${r.emails_processed} emails classified`,
-          time: r.finished_at,
-        });
-      }
-    }
-    activities.sort((a, b) => new Date(b.time) - new Date(a.time));
-
-    return {
-      processedCount: processed.length,
-      draftsCount: drafts.length,
-      attentionItems,
-      attentionCount: attentionItems.length,
-      activities: activities.slice(0, 3),
-    };
+    const drafts = await supabaseQuery(
+      `drafts?select=id&user_id=eq.${uid}&status=eq.pending`,
+      session
+    );
+    return drafts.length;
   } catch (_) {
     return null;
   }
 }
 
-// ---------------------------------------------------------------------------
-// Render helpers for enhanced status view
-// ---------------------------------------------------------------------------
-
-function renderStatusData(data) {
-  if (!data) return;
-
-  setStatValue("statAttention", data.attentionCount);
-  setStatValue("statDrafts", data.draftsCount);
-  setStatValue("statProcessed", data.processedCount);
-
-  // Amber accent on attention card when count > 0
-  const card = document.getElementById("attentionCard");
-  if (card) {
-    card.classList.toggle("attention-active", data.attentionCount > 0);
-  }
-
-  renderAttentionList(data.attentionItems, data.attentionCount);
-  renderActivityFeed(data.activities);
-}
-
-function renderAttentionList(items, total) {
-  const section = document.getElementById("attentionSection");
-  if (!section) return;
-
-  if (total === 0) {
-    section.innerHTML = '<div class="caught-up">All caught up</div>';
-    return;
-  }
-
-  let html = '<div class="section-title">Needs Attention</div>';
-  const display = items.slice(0, 3);
-  for (const c of display) {
-    const email = c.emails;
-    if (!email) continue;
-    const ref = email.email_ref ? encodeURIComponent(email.email_ref) : "";
-    const link = ref ? `https://outlook.office.com/mail/id/${ref}` : "#";
-    const sender = escapeHtml(email.sender_name || "Unknown");
-    const subject = escapeHtml(email.subject || "(no subject)");
-    const time = relativeTime(email.received_time);
-    html += `<div class="attention-item" data-link="${escapeHtml(link)}">
-      <span class="attention-sender">${sender}</span>
-      <span class="attention-subject">${subject}</span>
-      <span class="attention-time">${time}</span>
-    </div>`;
-  }
-  if (total > 3) {
-    html += `<div class="attention-more" id="viewAllAttention">View all ${total} →</div>`;
-  }
-  section.innerHTML = html;
-
-  // Bind click handlers
-  section.querySelectorAll(".attention-item").forEach(el => {
-    el.addEventListener("click", () => {
-      const url = el.getAttribute("data-link");
-      if (url && url !== "#") chrome.tabs.create({ url });
-    });
-  });
-  const viewAll = document.getElementById("viewAllAttention");
-  if (viewAll) {
-    viewAll.addEventListener("click", () => {
-      chrome.tabs.create({ url: "https://clarion-ai.app/app/emails.html" });
-    });
-  }
-}
-
-function renderActivityFeed(activities) {
-  const section = document.getElementById("activitySection");
-  if (!section) return;
-
-  if (!activities || activities.length === 0) {
-    section.innerHTML = '<div class="section-title">Recent Activity</div><div class="activity-empty">No recent activity</div>';
-    return;
-  }
-
-  let html = '<div class="section-title">Recent Activity</div>';
-  for (const a of activities) {
-    html += `<div class="activity-item">
-      <span class="activity-text">${escapeHtml(a.text)}</span>
-      <span class="activity-time">${relativeTime(a.time)}</span>
-    </div>`;
-  }
-  section.innerHTML = html;
-}
-
-let initialLoadDone = false;
-
-async function refreshStatusData(session) {
+async function refreshDraftCount(session) {
   if (!session || !session.access_token) return;
-
-  const useDelay = !initialLoadDone;
-  const fetchStart = Date.now();
-  const data = await fetchEnhancedStats(session);
-  if (useDelay) {
-    const elapsed = Date.now() - fetchStart;
-    if (elapsed < 300) {
-      await new Promise(r => setTimeout(r, 300 - elapsed));
-    }
-    initialLoadDone = true;
-  }
-  renderStatusData(data);
+  const count = await fetchDraftCount(session);
+  setDraftCount(count);
 }
 
 // ---------------------------------------------------------------------------
@@ -402,13 +227,12 @@ function updateSetupChecklist(session) {
 
 function showStatusView(session) {
   showView("statusView");
-  initialLoadDone = false;
   document.getElementById("userEmail").textContent = session.user?.email || "—";
   refreshStatus(session);
 }
 
 function refreshStatus(session) {
-  // Connection indicator (inline in user bar)
+  // Connection indicator
   chrome.runtime.sendMessage({ type: "getStatus" }, (status) => {
     if (chrome.runtime.lastError || !status) return;
 
@@ -417,7 +241,6 @@ function refreshStatus(session) {
     const outlookOk = status.has_token && !status.token_expired;
     const connected = supabaseOk && outlookOk;
 
-    // Inline connection indicator
     const indicator = document.getElementById("connectionIndicator");
     if (indicator) {
       indicator.innerHTML = "";
@@ -441,50 +264,10 @@ function refreshStatus(session) {
     } else {
       hint.style.display = "none";
     }
-
-    // Advanced section
-    const authEl = document.getElementById("supabaseAuth");
-    setStatusDot(authEl, supabaseOk ? "green" : "red",
-      supabaseOk ? "Authenticated" : "Expired");
-
-    const tokenEl = document.getElementById("tokenStatus");
-    const expiresEl = document.getElementById("tokenExpires");
-    const originEl = document.getElementById("tokenOrigin");
-    const realtimeEl = document.getElementById("realtimeStatus");
-    const syncEl = document.getElementById("lastSync");
-
-    if (!status.has_token) {
-      setStatusDot(tokenEl, "red", "Not connected");
-      expiresEl.textContent = "—";
-    } else if (status.token_expired) {
-      setStatusDot(tokenEl, "red", "Expired");
-      expiresEl.textContent = "—";
-    } else {
-      setStatusDot(tokenEl, "green", "Connected");
-      if (status.token_expires) {
-        const exp = new Date(status.token_expires);
-        const hours = Math.max(0, Math.round((exp - Date.now()) / 3_600_000));
-        expiresEl.textContent = `~${hours}h remaining`;
-      }
-    }
-
-    originEl.textContent = status.token_origin
-      ? new URL(status.token_origin).hostname
-      : "—";
-
-    if (realtimeEl) {
-      setStatusDot(realtimeEl, status.realtime_connected ? "green" : "gray",
-        status.realtime_connected ? "Connected" : "Disconnected");
-    }
-
-    const syncAgo = relativeTime(status.last_sync);
-    syncEl.textContent = status.last_sync
-      ? (syncAgo === "just now" ? syncAgo : syncAgo + " ago")
-      : "never";
   });
 
-  // Enhanced stats + render
-  refreshStatusData(session);
+  // Draft count
+  refreshDraftCount(session);
 }
 
 // ---------------------------------------------------------------------------
@@ -640,11 +423,6 @@ function handleSyncClick(btn, errorFn) {
   });
 }
 
-document.getElementById("syncNowBtn").addEventListener("click", () => {
-  hideStatusError();
-  handleSyncClick(document.getElementById("syncNowBtn"), showStatusError);
-});
-
 document.getElementById("setupSyncBtn").addEventListener("click", () => {
   hideError();
   handleSyncClick(document.getElementById("setupSyncBtn"), showError);
@@ -652,6 +430,11 @@ document.getElementById("setupSyncBtn").addEventListener("click", () => {
 
 document.getElementById("visitWebBtn").addEventListener("click", () => {
   chrome.tabs.create({ url: "https://clarion-ai.app/app/dashboard.html" });
+});
+
+// Draft card → open Outlook drafts folder
+document.getElementById("draftCard").addEventListener("click", () => {
+  chrome.tabs.create({ url: "https://outlook.office.com/mail/drafts" });
 });
 
 // Allow Enter key to submit
@@ -665,7 +448,7 @@ document.getElementById("authPassword").addEventListener("keydown", (e) => {
 
 checkSessionAndRender();
 
-// Periodic refresh — updates whichever view is visible
+// Periodic refresh — draft count + connection status
 setInterval(() => {
   const statusVisible = document.getElementById("statusView").style.display !== "none";
   const setupVisible = document.getElementById("setupView").style.display !== "none";
@@ -678,4 +461,4 @@ setInterval(() => {
       if (result.supabaseSession) updateSetupChecklist(result.supabaseSession);
     });
   }
-}, 30000);
+}, 15000);
