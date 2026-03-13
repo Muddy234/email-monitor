@@ -660,6 +660,7 @@ class SupabaseWorkerClient:
                 "ub": event.get("ub"),
                 "dl": event.get("dl"),
                 "rt": event.get("rt"),
+                "target": event.get("target"),
                 "pri": event.get("pri"),
                 "draft": event.get("draft"),
                 "reason": event.get("reason"),

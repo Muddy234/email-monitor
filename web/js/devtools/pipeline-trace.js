@@ -197,6 +197,14 @@ function renderStage3_signals(evt, email, wasFiltered) {
         ? '<span class="em-badge em-badge-green">Yes</span>'
         : '<span class="em-badge em-badge-slate">No</span>';
 
+    // Action target badge
+    const targetLabels = { user: "User", other: "Other", all: "All Recipients", unclear: "Unclear" };
+    const targetColors = { user: "green", other: "amber", all: "blue", unclear: "slate" };
+    const targetVal = evt.target || "user";
+    const targetBadge = evt.ar
+        ? `<span class="em-badge em-badge-${targetColors[targetVal] || "slate"}">${escapeHtml(targetLabels[targetVal] || targetVal)}</span>`
+        : '<span style="color:var(--em-slate-400)">—</span>';
+
     return traceStage("Stage 3: Signals", "active", `
         <div class="em-trace-verdict ${evt.draft ? "em-trace-verdict-pass" : "em-trace-verdict-neutral"}">
             ${evt.draft ? "Draft Recommended" : "No Draft Needed"}
@@ -208,6 +216,8 @@ function renderStage3_signals(evt, email, wasFiltered) {
             <div class="em-kv-value"><span class="em-badge em-badge-${_tierBadge[tierKey] || "slate"}">${escapeHtml(tierKey)} — ${escapeHtml(_tierLabels[tierKey] || "Unknown")}</span></div>
             <div class="em-kv-label">Response Type</div>
             <div class="em-kv-value">${escapeHtml(_rtLabels[evt.rt] || evt.rt || "—")}</div>
+            <div class="em-kv-label">Action Target</div>
+            <div class="em-kv-value">${targetBadge}</div>
             <div class="em-kv-label">Draft</div>
             <div class="em-kv-value">${draftBadge}</div>
         </div>
