@@ -434,11 +434,23 @@ document.getElementById("visitWebBtn").addEventListener("click", () => {
 
 // Draft card → navigate existing Outlook tab to drafts, or open new tab
 document.getElementById("draftCard").addEventListener("click", () => {
+  const outlookPatterns = [
+    "https://outlook.office.com/*",
+    "https://outlook.office365.com/*",
+    "https://outlook.live.com/*",
+    "https://outlook.cloud.microsoft/*",
+  ];
   const draftsUrl = "https://outlook.office.com/mail/drafts";
-  chrome.tabs.query({ url: "https://outlook.office.com/*" }, (tabs) => {
-    if (tabs && tabs.length > 0) {
-      const tab = tabs[0];
-      chrome.tabs.update(tab.id, { url: draftsUrl, active: true });
+
+  // Query all Outlook domains in parallel
+  Promise.all(outlookPatterns.map(url =>
+    chrome.tabs.query({ url })
+  )).then(results => {
+    const tab = results.flat()[0];
+    if (tab) {
+      // Build drafts URL on the same domain the user is already on
+      const origin = new URL(tab.url).origin;
+      chrome.tabs.update(tab.id, { url: `${origin}/mail/drafts`, active: true });
       chrome.windows.update(tab.windowId, { focused: true });
     } else {
       chrome.tabs.create({ url: draftsUrl });
