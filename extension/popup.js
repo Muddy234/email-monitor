@@ -432,9 +432,18 @@ document.getElementById("visitWebBtn").addEventListener("click", () => {
   chrome.tabs.create({ url: "https://clarion-ai.app/app/dashboard.html" });
 });
 
-// Draft card → open Outlook drafts folder
+// Draft card → navigate existing Outlook tab to drafts, or open new tab
 document.getElementById("draftCard").addEventListener("click", () => {
-  chrome.tabs.create({ url: "https://outlook.office.com/mail/drafts" });
+  const draftsUrl = "https://outlook.office.com/mail/drafts";
+  chrome.tabs.query({ url: "https://outlook.office.com/*" }, (tabs) => {
+    if (tabs && tabs.length > 0) {
+      const tab = tabs[0];
+      chrome.tabs.update(tab.id, { url: draftsUrl, active: true });
+      chrome.windows.update(tab.windowId, { focused: true });
+    } else {
+      chrome.tabs.create({ url: draftsUrl });
+    }
+  });
 });
 
 // Allow Enter key to submit
