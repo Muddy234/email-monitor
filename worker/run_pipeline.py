@@ -1185,6 +1185,10 @@ def process_user_batch_signals(db, user_id, profile, emails):
         batch_requests = []
         email_context = {}  # email_id → context needed for post-processing
 
+        # Resolve user identity for action-target detection
+        user_name = config.get("draft_user_name") or ""
+        user_email_primary = user_aliases[0] if user_aliases else ""
+
         for ed in filtered:
             db_id = ed["_db_id"]
             sender_email = (ed.get("sender_email") or ed.get("sender") or "").lower()
@@ -1205,6 +1209,18 @@ def process_user_batch_signals(db, user_id, profile, emails):
                 thread_row, sender_email, user_aliases
             )
 
+            # Compute user position (TO vs CC) for this email
+            to_raw = (ed.get("to_field") or "").lower()
+            cc_raw = (ed.get("cc_field") or "").lower()
+            user_position = "UNKNOWN"
+            for alias in user_aliases:
+                if alias in to_raw:
+                    user_position = "TO"
+                    break
+                if alias in cc_raw:
+                    user_position = "CC"
+                    break
+
             # Build batch request
             req = extract_signals_batch_params(
                 email_body=clean_body,
@@ -1215,6 +1231,11 @@ def process_user_batch_signals(db, user_id, profile, emails):
                 thread_depth=thread_depth,
                 has_unanswered=has_unanswered,
                 custom_id=db_id,
+                user_name=user_name,
+                user_email=user_email_primary,
+                user_position=user_position,
+                to_field=ed.get("to_field") or "",
+                cc_field=ed.get("cc_field") or "",
             )
             batch_requests.append(req)
 
@@ -1226,6 +1247,7 @@ def process_user_batch_signals(db, user_id, profile, emails):
                 "contact": contact,
                 "conv_id": conv_id,
                 "thread_depth": thread_depth,
+                "user_position": user_position,
             }
 
         # Submit batch
@@ -1296,11 +1318,12 @@ def process_user_batch_signals(db, user_id, profile, emails):
                 "ub": signals["ub"],
                 "dl": signals["dl"],
                 "rt": signals["rt"],
+                "target": signals.get("target", "user"),
                 "pri": signals["pri"],
                 "draft": signals["draft"],
                 "reason": signals["reason"],
                 # Legacy fields (backfill for transition)
-                "user_position": ed.get("signals", {}).get("user_position"),
+                "user_position": ctx.get("user_position"),
                 "total_recipients": ed.get("signals", {}).get("total_recipients"),
                 "has_question": signals["ar"],  # approximate mapping
                 "has_action_language": signals["ar"],

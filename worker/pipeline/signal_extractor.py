@@ -22,69 +22,82 @@ ub (bool): Someone downstream is blocked waiting on recipient. Process paused pe
 dl (bool): Time constraint on a request. Explicit date/time or urgency language tied to an ask. Ignore dates as context only.
 rt (enum none|ack|ans|act|dec): Expected response type. If multiple apply, pick highest: dec>act>ans>ack>none.
 
+Action target (required when ar=true):
+target (enum user|other|all|unclear): Who the action/request is directed at.
+- user: Action is directed at USER (named, addressed, or sole TO recipient).
+- other: Action is directed at someone else (another name mentioned, USER is CC-only, or body addresses a specific person who is not USER).
+- all: Action applies to all recipients equally.
+- unclear: Cannot determine who the action targets.
+When ar=false, set target="user" (default, ignored).
+
+Key heuristics for target:
+- If body addresses someone by name ("Wes please...", "John, can you...") and that name is NOT USER → target=other.
+- If USER is in CC (not TO) and the action doesn't reference USER → target=other.
+- If USER is sole TO recipient → target=user.
+- If body uses "all" / "everyone" / "team" language → target=all.
+
 Decisions:
 pri (enum high|med|low): Overall priority considering all signals, sender tier, and context.
-draft (bool): Whether this email warrants a draft response. True for questions, actions, decisions. False for FYI, acknowledgments, no-response-needed.
+draft (bool): Whether USER should draft a response. True ONLY when the email requires a response FROM USER specifically. False when: FYI, action targets someone else (target=other), acknowledgments, no-response-needed.
 reason (string): Why draft is true or false. Under 30 words. Also serves as the draft brief for response generation.
 
-Context line format: sender|tier|thread_depth|unanswered
+Context format:
+Line 1 — Sender: sender_name sender_email|tier|thread_depth|unanswered
+Line 2 — User: USER user_name|user_email|position (TO or CC)
+Line 3 — Recipients: TO: addr1;addr2 | CC: addr1;addr2
+
 Tiers: C=critical, I=internal, P=professional, U=unknown
 
-Example:
+Example 1 (action for user):
 Input: Jane Smith jane@lender.com|C|1|false
-S:Draw Request #4 — Approved
-Your draw request has been approved and funds will wire Thursday. No action needed on your end.
-Output: {"mc":true,"ar":false,"ub":false,"dl":false,"rt":"none","pri":"med","draft":false,"reason":"Informational notice of approved draw request. No action or response needed from recipient."}\
+USER: Bob Jones|bjones@company.com|TO
+TO: bjones@company.com | CC: (none)
+S:Draw Request #4 — Please Review
+Bob, please review the attached draw request and approve by Friday.
+Output: {"mc":true,"ar":true,"ub":false,"dl":true,"rt":"act","target":"user","pri":"high","draft":true,"reason":"Lender requesting Bob to review and approve draw request by Friday."}
+
+Example 2 (action for someone else):
+Input: Gina Kufrovich gina@corridortitle.com|P|1|false
+USER: Nate McBride|nmcbride@arete-collective.com|CC
+TO: wdagestad@polsinelli.com;tmills@arete-collective.com | CC: nmcbride@arete-collective.com
+S:CPL — 123 Main St
+Wes please see attached CPL.
+Output: {"mc":false,"ar":true,"ub":false,"dl":false,"rt":"act","target":"other","pri":"low","draft":false,"reason":"Action directed at Wes (TO recipient), not USER who is CC-only. No response needed."}\
 """
 
 
 def build_signal_prompt(email_body, subject, sender_name, sender_email,
-                        sender_tier, thread_depth, has_unanswered):
-    """Build the user message for the signal extraction call.
-
-    Args:
-        email_body: Pre-processed email body (stripped, truncated).
-        subject: Email subject line.
-        sender_name: Display name of sender.
-        sender_email: Sender email address.
-        sender_tier: One of 'C', 'I', 'P', 'U'.
-        thread_depth: Number of messages in thread.
-        has_unanswered: Whether there's a prior unanswered message from this sender.
-
-    Returns:
-        str: The formatted user message.
-    """
+                        sender_tier, thread_depth, has_unanswered,
+                        user_name="", user_email="", user_position="UNKNOWN",
+                        to_field="", cc_field=""):
+    """Build the user message for the signal extraction call."""
     sender_line = (
         f"{sender_name} {sender_email}"
         f"|{sender_tier}"
         f"|{thread_depth}"
         f"|{str(has_unanswered).lower()}"
     )
-    return f"{sender_line}\nS:{subject}\n\n{email_body}"
+    user_line = f"USER: {user_name}|{user_email}|{user_position}"
+    recip_line = f"TO: {to_field or '(none)'} | CC: {cc_field or '(none)'}"
+    return f"{sender_line}\n{user_line}\n{recip_line}\nS:{subject}\n\n{email_body}"
 
 
 def extract_signals(email_body, subject, sender_name, sender_email,
                     sender_tier, thread_depth, has_unanswered,
+                    user_name="", user_email="", user_position="UNKNOWN",
+                    to_field="", cc_field="",
                     api_key=None):
     """Call Haiku to extract signals and decisions for a single email.
 
-    Args:
-        email_body: Pre-processed email body.
-        subject: Email subject line.
-        sender_name: Sender display name.
-        sender_email: Sender email address.
-        sender_tier: One of 'C', 'I', 'P', 'U'.
-        thread_depth: Thread message count.
-        has_unanswered: Prior unanswered from this sender.
-        api_key: Anthropic API key (None → env var).
-
     Returns:
         tuple: (signal_dict, usage_dict) where signal_dict has keys:
-            mc, ar, ub, dl, rt, pri, draft, reason
+            mc, ar, ub, dl, rt, target, pri, draft, reason
     """
     user_message = build_signal_prompt(
         email_body, subject, sender_name, sender_email,
         sender_tier, thread_depth, has_unanswered,
+        user_name=user_name, user_email=user_email,
+        user_position=user_position, to_field=to_field, cc_field=cc_field,
     )
 
     try:
@@ -107,22 +120,23 @@ def extract_signals(email_body, subject, sender_name, sender_email,
 
 def extract_signals_batch_params(email_body, subject, sender_name,
                                  sender_email, sender_tier, thread_depth,
-                                 has_unanswered, custom_id):
-    """Build a Batches API request dict for signal extraction.
-
-    Returns:
-        dict: With 'custom_id' and 'params' keys for the Batches API.
-    """
+                                 has_unanswered, custom_id,
+                                 user_name="", user_email="",
+                                 user_position="UNKNOWN",
+                                 to_field="", cc_field=""):
+    """Build a Batches API request dict for signal extraction."""
     user_message = build_signal_prompt(
         email_body, subject, sender_name, sender_email,
         sender_tier, thread_depth, has_unanswered,
+        user_name=user_name, user_email=user_email,
+        user_position=user_position, to_field=to_field, cc_field=cc_field,
     )
 
     return {
         "custom_id": custom_id,
         "params": {
             "model": resolve_model("haiku"),
-            "max_tokens": 150,
+            "max_tokens": 200,
             "temperature": 0,
             "system": [
                 {
@@ -171,14 +185,23 @@ def parse_signal_response(raw_text):
 
 def _coerce_signals(data):
     """Per-field coercion: partial results are better than no results."""
+    ar = _coerce_bool(data.get("ar"))
+    target = _coerce_target(data.get("target"))
+    draft = _coerce_bool(data.get("draft"))
+
+    # Safety net: if action targets someone else, override draft to False
+    if ar and target == "other":
+        draft = False
+
     return {
         "mc": _coerce_bool(data.get("mc")),
-        "ar": _coerce_bool(data.get("ar")),
+        "ar": ar,
         "ub": _coerce_bool(data.get("ub")),
         "dl": _coerce_bool(data.get("dl")),
         "rt": _coerce_rt(data.get("rt")),
+        "target": target,
         "pri": _coerce_pri(data.get("pri")),
-        "draft": _coerce_bool(data.get("draft")),
+        "draft": draft,
         "reason": _coerce_reason(data.get("reason")),
     }
 
@@ -191,6 +214,7 @@ def _fallback_signals(reason_msg):
         "ub": False,
         "dl": False,
         "rt": "none",
+        "target": "user",
         "pri": "low",
         "draft": False,
         "reason": reason_msg,
@@ -222,6 +246,14 @@ def _coerce_pri(value):
     if isinstance(value, str) and value.lower() in valid:
         return value.lower()
     return "low"
+
+
+def _coerce_target(value):
+    """Coerce action target enum. Invalid → 'user'."""
+    valid = {"user", "other", "all", "unclear"}
+    if isinstance(value, str) and value.lower() in valid:
+        return value.lower()
+    return "user"
 
 
 def _coerce_reason(value):

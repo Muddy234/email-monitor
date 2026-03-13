@@ -6,3 +6,17 @@ __pycache__/
 legacy/
 tmpclaude-*
 .claude/
+
+# Build artifacts & temp
+nul
+supabase/.temp/
+*.zip
+*.pptx
+
+# Diagnostic scripts & output
+worker/scripts/*.json
+worker/scripts/*.py
+worker/scripts/*.sql
+
+# One-off utility scripts
+*.ps1
