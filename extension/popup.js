@@ -434,26 +434,16 @@ document.getElementById("visitWebBtn").addEventListener("click", () => {
 
 // Draft card → navigate existing Outlook tab to drafts, or open new tab
 document.getElementById("draftCard").addEventListener("click", () => {
-  const outlookPatterns = [
-    "https://outlook.office.com/*",
-    "https://outlook.office365.com/*",
-    "https://outlook.live.com/*",
-    "https://outlook.cloud.microsoft/*",
-  ];
-  const draftsUrl = "https://outlook.office.com/mail/drafts";
-
-  // Query all Outlook domains in parallel
-  Promise.all(outlookPatterns.map(url =>
-    chrome.tabs.query({ url })
-  )).then(results => {
-    const tab = results.flat()[0];
-    if (tab) {
-      // Build drafts URL on the same domain the user is already on
-      const origin = new URL(tab.url).origin;
-      chrome.tabs.update(tab.id, { url: `${origin}/mail/drafts`, active: true });
-      chrome.windows.update(tab.windowId, { focused: true });
+  chrome.tabs.query({}, (tabs) => {
+    const outlookTab = tabs.find(t =>
+      t.url && /^https:\/\/outlook\.(office\.com|office365\.com|live\.com|cloud\.microsoft)(\/|$)/.test(t.url)
+    );
+    if (outlookTab) {
+      const origin = new URL(outlookTab.url).origin;
+      chrome.tabs.update(outlookTab.id, { url: `${origin}/mail/drafts`, active: true });
+      chrome.windows.update(outlookTab.windowId, { focused: true });
     } else {
-      chrome.tabs.create({ url: draftsUrl });
+      chrome.tabs.create({ url: "https://outlook.office.com/mail/drafts" });
     }
   });
 });
