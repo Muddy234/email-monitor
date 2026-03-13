@@ -138,7 +138,7 @@ Generate the reply body text only (no subject, no headers)."""
         prompt_text = self._build_draft_prompt(email_data, action_context)
 
         try:
-            raw_output = call_claude(
+            raw_output, usage = call_claude(
                 prompt=prompt_text,
                 system_prompt=self.system_prompt,
                 model=resolve_model(self.model),
@@ -151,9 +151,10 @@ Generate the reply body text only (no subject, no headers)."""
         except Exception as e:
             subject = email_data.get("subject", "unknown")
             logger.error(f"  Draft generation API call failed for '{subject}': {e}")
-            return None
+            return None, {}
 
-        return self._validate_output(raw_output, email_data)
+        result = self._validate_output(raw_output, email_data)
+        return result, usage
 
     def _validate_output(self, raw_output, email_data):
         """Validate draft output. Returns cleaned text or None."""

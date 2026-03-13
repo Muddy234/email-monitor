@@ -26,7 +26,7 @@ import time
 from datetime import datetime, timezone
 
 from supabase_client import SupabaseWorkerClient
-from run_pipeline import process_user_batch_enriched
+from run_pipeline import process_user_batch_enriched, process_user_batch_signals
 from onboarding import run_onboarding
 from onboarding.model_trainer import check_retrain_needed, train_user_model
 
@@ -340,7 +340,7 @@ def main():
                 continue
 
             logger.info(f"Processing user {user_id[:8]}...: {len(data['emails'])} emails")
-            processed, drafts = process_user_batch_enriched(
+            processed, drafts = process_user_batch_signals(
                 db, user_id, data["profile"], data["emails"]
             )
             total_processed += processed

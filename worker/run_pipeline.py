@@ -19,6 +19,12 @@ from pipeline.drafts import DraftGenerator
 from pipeline.prompts import get_draft_prompt_template
 from pipeline.scorer import UserScoringArtifacts, score_email, check_triage_gate
 from pipeline.enrichment import assemble_enrichment
+from pipeline.signal_extractor import (
+    extract_signals, extract_signals_batch_params, parse_signal_response,
+)
+from pipeline.pre_process import (
+    pre_process_email, resolve_sender_tier, compute_thread_meta,
+)
 
 logger = logging.getLogger("worker")
 
@@ -936,12 +942,14 @@ def process_user_batch_enriched(db, user_id, profile, emails):
                 f"classification chunks ({len(passing)} emails)"
             )
             try:
-                batch_results = submit_and_wait(
+                batch_results, classify_usage = submit_and_wait(
                     batch_requests,
                     api_key=api_key,
                     poll_interval=batch_poll_interval,
                     max_wait=batch_max_wait,
                 )
+                if classify_usage:
+                    db.record_token_usage(user_id, "sonnet", "classify", classify_usage)
             except Exception as e:
                 logger.warning(f"  Batch classification failed: {e}")
                 batch_results = {}
@@ -1031,12 +1039,14 @@ def process_user_batch_enriched(db, user_id, profile, emails):
             )
 
             try:
-                draft_results = submit_and_wait(
+                draft_results, draft_usage = submit_and_wait(
                     draft_requests,
                     api_key=api_key,
                     poll_interval=batch_poll_interval,
                     max_wait=batch_max_wait,
                 )
+                if draft_usage:
+                    db.record_token_usage(user_id, "sonnet", "draft", draft_usage)
             except Exception as e:
                 logger.warning(f"  Batch draft generation failed: {e}")
                 draft_results = {}
@@ -1046,9 +1056,11 @@ def process_user_batch_enriched(db, user_id, profile, emails):
                 draft_body = draft_results.get(db_id)
 
                 if not draft_body:
-                    draft_body = draft_generator.generate_draft(
+                    draft_body, fallback_usage = draft_generator.generate_draft(
                         candidate["email_data"], candidate["action_context"]
                     )
+                    if fallback_usage:
+                        db.record_token_usage(user_id, "sonnet", "draft", fallback_usage)
 
                 if draft_body and draft_generator._validate_output(
                     draft_body, candidate["email_data"]
@@ -1070,6 +1082,354 @@ def process_user_batch_enriched(db, user_id, profile, emails):
 
     except Exception as e:
         logger.exception(f"  User {user_id[:8]}...: enriched pipeline error: {e}")
+        for email in emails:
+            try:
+                db.update_email_status(email["id"], "error")
+            except Exception:
+                pass
+        db.update_pipeline_run(
+            run_id, status="failed", error_message=str(e)[:500]
+        )
+        return 0, 0
+
+
+# ---------------------------------------------------------------------------
+# Domain tiers cache (module-level, refreshed per worker cycle)
+# ---------------------------------------------------------------------------
+
+_domain_tiers_cache = {}
+_domain_tiers_loaded_at = 0
+_DOMAIN_TIERS_TTL = 300  # 5 min
+
+
+def _get_domain_tiers(db):
+    """Load domain tiers with 5-min cache."""
+    import time
+    global _domain_tiers_cache, _domain_tiers_loaded_at
+    now = time.time()
+    if _domain_tiers_cache and (now - _domain_tiers_loaded_at) < _DOMAIN_TIERS_TTL:
+        return _domain_tiers_cache
+    _domain_tiers_cache = db.fetch_domain_tiers()
+    _domain_tiers_loaded_at = now
+    return _domain_tiers_cache
+
+
+def _resolve_user_domain(profile):
+    """Extract the user's org domain from their email aliases or profile email."""
+    aliases = profile.get("user_email_aliases") or []
+    for alias in aliases:
+        if "@" in alias:
+            return alias.split("@")[1].lower()
+    # Fall back to profile email
+    email = profile.get("email", "")
+    if "@" in email:
+        return email.split("@")[1].lower()
+    return ""
+
+
+# ---------------------------------------------------------------------------
+# Signal extraction pipeline (replaces scorer + classify)
+# ---------------------------------------------------------------------------
+
+def process_user_batch_signals(db, user_id, profile, emails):
+    """Process emails using the signal extraction pipeline.
+
+    Flow: filter → pre-process + context fetch → signal extraction (Haiku)
+         → draft (Sonnet)
+
+    This replaces process_user_batch_enriched. The old scorer.py, enrichment.py,
+    and Haiku classify call are replaced by a single Haiku signal extraction call.
+
+    Returns:
+        tuple: (emails_processed, drafts_generated)
+    """
+    from pipeline.api_client import submit_and_wait
+
+    config = build_config_from_profile(profile)
+    user_aliases = [a.lower() for a in config.get("user_email_aliases", []) if a]
+    run_id = db.create_pipeline_run(user_id, trigger_type="scheduled")
+    batch_poll_interval = int(os.environ.get("BATCH_POLL_INTERVAL", "10"))
+    batch_max_wait = int(os.environ.get("BATCH_MAX_WAIT", "900"))
+    api_key = config.get("anthropic_api_key")
+    draft_max_age_hours = int(os.environ.get("DRAFT_MAX_AGE_HOURS", "24"))
+
+    try:
+        # ── Stage 1: Filter ──────────────────────────────────────
+        filtered = filter_emails(db, emails, user_id, config)
+        if not filtered:
+            logger.info(f"  User {user_id[:8]}...: all emails filtered out")
+            db.update_pipeline_run(
+                run_id, status="completed",
+                emails_scanned=len(emails), emails_processed=0, drafts_generated=0,
+            )
+            return 0, 0
+
+        # ── Stage 2: Pre-process + context fetch ─────────────────
+        # Fetch batch context (contacts, threads)
+        contacts_map, threads_map, _ = _fetch_batch_context(db, user_id, filtered)
+        domain_tiers = _get_domain_tiers(db)
+        user_domain = _resolve_user_domain(profile)
+
+        # Upsert contact stats for unknown senders
+        _update_contact_stats(db, user_id, filtered, contacts_map)
+
+        # Retroactive response labeling
+        _update_response_labels(db, user_id, threads_map, user_aliases)
+
+        logger.info(
+            f"  Context: {len(contacts_map)} contacts, "
+            f"{len(threads_map)} threads, {len(domain_tiers)} domain tiers"
+        )
+
+        # ── Stage 3: Signal extraction (Haiku batch) ─────────────
+        batch_requests = []
+        email_context = {}  # email_id → context needed for post-processing
+
+        for ed in filtered:
+            db_id = ed["_db_id"]
+            sender_email = (ed.get("sender_email") or ed.get("sender") or "").lower()
+            contact = contacts_map.get(sender_email)
+            conv_id = ed.get("conversation_id")
+            thread_row = threads_map.get(conv_id) if conv_id else None
+
+            # Pre-process body
+            clean_body = pre_process_email(ed)
+
+            # Resolve sender tier
+            sender_tier = resolve_sender_tier(
+                sender_email, contact, user_domain, domain_tiers
+            )
+
+            # Thread metadata
+            thread_depth, has_unanswered = compute_thread_meta(
+                thread_row, sender_email, user_aliases
+            )
+
+            # Build batch request
+            req = extract_signals_batch_params(
+                email_body=clean_body,
+                subject=ed.get("subject", ""),
+                sender_name=ed.get("sender_name") or sender_email.split("@")[0],
+                sender_email=sender_email,
+                sender_tier=sender_tier,
+                thread_depth=thread_depth,
+                has_unanswered=has_unanswered,
+                custom_id=db_id,
+            )
+            batch_requests.append(req)
+
+            # Stash context for post-processing
+            email_context[db_id] = {
+                "ed": ed,
+                "sender_email": sender_email,
+                "sender_tier": sender_tier,
+                "contact": contact,
+                "conv_id": conv_id,
+                "thread_depth": thread_depth,
+            }
+
+        # Submit batch
+        batch_results = {}
+        if batch_requests:
+            logger.info(
+                f"  User {user_id[:8]}...: submitting signal extraction batch "
+                f"({len(batch_requests)} emails)"
+            )
+            try:
+                batch_results, signal_usage = submit_and_wait(
+                    batch_requests,
+                    api_key=api_key,
+                    poll_interval=batch_poll_interval,
+                    max_wait=batch_max_wait,
+                )
+                if signal_usage:
+                    db.record_token_usage(user_id, "haiku", "signals", signal_usage)
+            except Exception as e:
+                logger.warning(f"  Signal extraction batch failed: {e}")
+
+        # Fallback: sync extraction for emails without batch results
+        for db_id, ctx in email_context.items():
+            if db_id not in batch_results or batch_results[db_id] is None:
+                ed = ctx["ed"]
+                clean_body = pre_process_email(ed)
+                try:
+                    signals, fallback_usage = extract_signals(
+                        email_body=clean_body,
+                        subject=ed.get("subject", ""),
+                        sender_name=ed.get("sender_name") or ctx["sender_email"].split("@")[0],
+                        sender_email=ctx["sender_email"],
+                        sender_tier=ctx["sender_tier"],
+                        thread_depth=ctx["thread_depth"],
+                        has_unanswered=False,
+                        api_key=api_key,
+                    )
+                    if fallback_usage:
+                        db.record_token_usage(user_id, "haiku", "signals", fallback_usage)
+                    # Serialize back to raw JSON for uniform post-processing
+                    import json
+                    batch_results[db_id] = json.dumps(signals)
+                except Exception as e:
+                    logger.warning(f"  Sync signal extraction failed for {db_id[:8]}: {e}")
+
+        # ── Stage 4: Post-process results ────────────────────────
+        response_events = []
+        draft_candidates = []
+        emails_processed = 0
+
+        for db_id, ctx in email_context.items():
+            ed = ctx["ed"]
+            raw_text = batch_results.get(db_id)
+            signals = parse_signal_response(raw_text)
+
+            # Build response_event for persistence
+            event = {
+                "email_id": db_id,
+                "sender_email": ctx["sender_email"],
+                "received_time": ed.get("received_time"),
+                "conversation_id": ctx["conv_id"],
+                "subject": ed.get("subject", ""),
+                "thread_depth": ctx["thread_depth"],
+                "sender_tier": ctx["sender_tier"],
+                # Signal fields
+                "mc": signals["mc"],
+                "ar": signals["ar"],
+                "ub": signals["ub"],
+                "dl": signals["dl"],
+                "rt": signals["rt"],
+                "pri": signals["pri"],
+                "draft": signals["draft"],
+                "reason": signals["reason"],
+                # Legacy fields (backfill for transition)
+                "user_position": ed.get("signals", {}).get("user_position"),
+                "total_recipients": ed.get("signals", {}).get("total_recipients"),
+                "has_question": signals["ar"],  # approximate mapping
+                "has_action_language": signals["ar"],
+                "sender_is_internal": ctx["sender_tier"] == "I",
+            }
+            response_events.append(event)
+
+            # Write classification (backfill old columns for transition)
+            classification = {
+                "needs_response": signals["draft"],
+                "action": signals["reason"],
+                "context": signals["reason"],
+                "project": "",
+                "priority": 1 if signals["pri"] == "high" else 0,
+            }
+            db.insert_classification(db_id, user_id, classification)
+            db.update_email_status(db_id, "completed")
+            emails_processed += 1
+
+            # Check if draft needed
+            if signals["draft"]:
+                email_age_ok = _is_recent(ed.get("received_time"), draft_max_age_hours)
+                if email_age_ok and config.get("enable_draft_generation", True):
+                    action_context = {
+                        "reason": signals["reason"],
+                        "action": signals["reason"],
+                        "context": signals["reason"],
+                    }
+
+                    # Add conversation history for thread context
+                    conv_id = ed.get("conversation_id")
+                    if conv_id:
+                        conv_messages = db.fetch_conversation_context(user_id, conv_id)
+                        if conv_messages:
+                            action_context["conversation_history"] = conv_messages
+
+                    style_guide = profile.get("writing_style_guide") or ""
+                    if style_guide:
+                        action_context["style_guide"] = style_guide
+
+                    draft_candidates.append({
+                        "db_id": db_id,
+                        "email_data": ed,
+                        "action_context": action_context,
+                    })
+                elif not email_age_ok:
+                    logger.info(f"  Skipping draft (too old): {ed.get('subject', '?')[:60]}")
+
+        # Persist response events
+        if response_events:
+            try:
+                db.upsert_response_events(user_id, response_events)
+            except Exception as e:
+                logger.warning(f"  Failed to persist response_events: {e}")
+
+        # ── Stage 5: Draft generation (Sonnet batch) ─────────────
+        drafts_generated = 0
+        if draft_candidates:
+            draft_generator = DraftGenerator(
+                config, system_prompt_template=get_draft_prompt_template()
+            )
+
+            # Deduplicate by db_id
+            seen_ids = set()
+            unique_candidates = []
+            for candidate in draft_candidates:
+                if candidate["db_id"] not in seen_ids:
+                    seen_ids.add(candidate["db_id"])
+                    unique_candidates.append(candidate)
+            draft_candidates = unique_candidates
+
+            draft_requests = []
+            for candidate in draft_candidates:
+                req = draft_generator.build_batch_params(
+                    candidate["email_data"],
+                    candidate["action_context"],
+                    custom_id=candidate["db_id"],
+                )
+                draft_requests.append(req)
+
+            logger.info(
+                f"  User {user_id[:8]}...: submitting draft batch "
+                f"({len(draft_requests)} drafts)"
+            )
+
+            try:
+                draft_results, draft_usage = submit_and_wait(
+                    draft_requests,
+                    api_key=api_key,
+                    poll_interval=batch_poll_interval,
+                    max_wait=batch_max_wait,
+                )
+                if draft_usage:
+                    db.record_token_usage(user_id, "sonnet", "draft", draft_usage)
+            except Exception as e:
+                logger.warning(f"  Batch draft generation failed: {e}")
+                draft_results = {}
+
+            for candidate in draft_candidates:
+                db_id = candidate["db_id"]
+                draft_body = draft_results.get(db_id)
+
+                if not draft_body:
+                    draft_body, fallback_usage = draft_generator.generate_draft(
+                        candidate["email_data"], candidate["action_context"]
+                    )
+                    if fallback_usage:
+                        db.record_token_usage(user_id, "sonnet", "draft", fallback_usage)
+
+                if draft_body and draft_generator._validate_output(
+                    draft_body, candidate["email_data"]
+                ):
+                    db.insert_draft(db_id, user_id, draft_body)
+                    drafts_generated += 1
+                    logger.info(
+                        f"  Draft generated for: "
+                        f"{candidate['email_data'].get('subject', '?')[:60]}"
+                    )
+
+        db.update_pipeline_run(
+            run_id, status="completed",
+            emails_scanned=len(emails),
+            emails_processed=emails_processed,
+            drafts_generated=drafts_generated,
+        )
+        return emails_processed, drafts_generated
+
+    except Exception as e:
+        logger.exception(f"  User {user_id[:8]}...: signal pipeline error: {e}")
         for email in emails:
             try:
                 db.update_email_status(email["id"], "error")

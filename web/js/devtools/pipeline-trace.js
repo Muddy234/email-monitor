@@ -1,15 +1,14 @@
 /**
  * Panel 4: Pipeline Trace
- * Select an email → vertical trace showing all 7 pipeline stages.
+ * Select an email → vertical trace showing all 6 pipeline stages.
  *
  * Stages:
  *   1. Raw Email — sender, subject, time, body preview
  *   2. Filter — was it filtered out? why?
- *   3. Score — signals, raw/calibrated score, tier, gate decision
- *   4. Enrich — contact info, thread context
- *   5. Classify — needs_response, confidence, archetype, reason
- *   6. Draft — generated draft body
- *   7. Delivery — outlook draft status
+ *   3. Signals — Haiku extraction: mc/ar/ub/dl/rt + pri/draft/reason
+ *   4. Context — contact info, sender tier
+ *   5. Draft — generated draft body
+ *   6. Delivery — outlook draft status
  */
 import { supabase } from "../supabase-client.js";
 import { escapeHtml, formatDate } from "../ui.js";
@@ -60,7 +59,6 @@ async function renderTrace(email, userId) {
         cls.context?.startsWith("Skipped:") ||
         cls.action?.startsWith("Auto-skipped")
     );
-    const wasGated = evt?.gate_reason != null;
 
     // Body preview (first 500 chars)
     let bodyPreview = (email.body || "").substring(0, 500);
@@ -70,11 +68,10 @@ async function renderTrace(email, userId) {
         <div class="em-card" style="padding:28px 24px">
             ${renderStage1(email, bodyPreview)}
             ${renderStage2(email, cls, wasFiltered)}
-            ${renderStage3(evt, email, wasFiltered, wasGated)}
-            ${renderStage4(contact, evt, email, wasFiltered, wasGated)}
-            ${renderStage5(cls, email, wasFiltered, wasGated)}
-            ${renderStage6(draft, cls, wasFiltered, wasGated)}
-            ${renderStage7(draft)}
+            ${renderStage3_signals(evt, email, wasFiltered)}
+            ${renderStage4_context(contact, evt, email, wasFiltered)}
+            ${renderStage5_draft(draft, evt, cls, wasFiltered)}
+            ${renderStage6_delivery(draft)}
         </div>
     `;
 }
@@ -108,7 +105,7 @@ function renderStage2(email, cls, wasFiltered) {
                 <div class="em-kv-label">Reason</div>
                 <div class="em-kv-value">${escapeHtml(reason)}</div>
             </div>
-            <div class="em-trace-note">Pipeline stopped here — email did not proceed to scoring.</div>
+            <div class="em-trace-note">Pipeline stopped here — email did not proceed to signal extraction.</div>
         `);
     }
 
@@ -121,204 +118,132 @@ function renderStage2(email, cls, wasFiltered) {
     `);
 }
 
-// ─── Stage 3: Score ──────────────────────────────────────────
+// ─── Stage 3: Signal Extraction ─────────────────────────────
 
-/** Parse "factor_name=value" strings into structured objects and compute running product. */
-function _parseFactors(factorsArr) {
-    if (!factorsArr || !factorsArr.length) return [];
+/** Tier label map. */
+const _tierLabels = { C: "Critical", I: "Internal", P: "Professional", U: "Unknown" };
+const _tierBadge = { C: "red", I: "blue", P: "green", U: "slate" };
 
-    const steps = [];
-    let running = null;
+/** Response type label map. */
+const _rtLabels = { none: "None", ack: "Acknowledge", ans: "Answer", act: "Action", dec: "Decision" };
 
-    for (const raw of factorsArr) {
-        const eqIdx = raw.lastIndexOf("=");
-        if (eqIdx < 0) continue;
-        const name = raw.substring(0, eqIdx);
-        const value = parseFloat(raw.substring(eqIdx + 1));
-        if (isNaN(value)) continue;
-
-        const isBase = name.includes("global_rate") || name.includes("sender_rate") || name.includes("recurring_pattern_rate");
-        if (isBase) {
-            running = value;
-            steps.push({ name, value, running, isBase: true });
-        } else {
-            if (running === null) running = value;
-            else running *= value;
-            steps.push({ name, value, running, isBase: false });
-        }
-    }
-    return steps;
-}
-
-/** Human-readable label for a factor name. */
-function _factorLabel(name) {
-    const labels = {
-        global_rate: "Global response rate",
-        sender_rate: "Sender response rate (smoothed)",
-        recurring_pattern_rate: "Recurring pattern rate",
-        mentions_user_name: "Mentions user by name",
-        has_question: "Contains a question",
-        has_action_language: "Has action language",
-        sender_is_internal: "Internal sender",
-        thread_user_initiated: "User started thread",
-        arrived_during_active_hours: "Arrived during active hours",
-        arrived_on_active_day: "Arrived on active day",
-        recip_mult: "Recipient count adjustment",
-        depth_mult: "Thread depth adjustment",
-        cc_only: "CC-only penalty",
-        cc_only_high_sender: "CC-only (high-freq sender)",
-        low_thread_participation: "Low thread participation",
-        med_thread_participation: "Medium thread participation",
-        thread_participation: "Thread participation",
-        thread_recency_24h: "Recent thread activity (<24h)",
-        thread_recency_72h: "Recent thread activity (<72h)",
-        thread_recency: "Thread recency",
-        penalty_floor: "Penalty floor applied",
-    };
-    // Handle parameterized names like "rate_x_to[low]", "msg_type[reply]", "cold_start(2)"
-    if (name.startsWith("rate_x_to")) return `Rate × TO position (${name.match(/\[(.+)\]/)?.[1] || ""})`;
-    if (name.startsWith("msg_type")) return `Message type: ${name.match(/\[(.+)\]/)?.[1] || ""}`;
-    if (name.startsWith("cold_start")) return `Cold start (${name.match(/\((\d+)\)/)?.[1] || "<3"} prior emails)`;
-    return labels[name] || name;
-}
-
-function renderStage3(evt, email, wasFiltered, wasGated) {
+function renderStage3_signals(evt, email, wasFiltered) {
     if (wasFiltered) {
-        return traceStage("Stage 3: Score", "skipped", `
+        return traceStage("Stage 3: Signals", "skipped", `
             <div class="em-trace-note">Skipped — email was filtered in Stage 2.</div>
         `);
     }
 
     if (!evt) {
         if (email.status === "processing") {
-            return traceStage("Stage 3: Score", "pending", `
+            return traceStage("Stage 3: Signals", "pending", `
                 <div class="em-trace-verdict em-trace-verdict-pending">Processing</div>
-                <div class="em-trace-note">Email is currently in the processing queue. Scoring data will appear once the worker completes this batch.</div>
+                <div class="em-trace-note">Email is in the processing queue. Signal data will appear once the worker completes this batch.</div>
             `);
         }
         if (email.status === "unprocessed") {
-            return traceStage("Stage 3: Score", "pending", `
+            return traceStage("Stage 3: Signals", "pending", `
                 <div class="em-trace-verdict em-trace-verdict-pending">Queued</div>
                 <div class="em-trace-note">Email is queued but not yet claimed by the worker.</div>
             `);
         }
-        return traceStage("Stage 3: Score", "empty", `
-            <div class="em-trace-note">No scoring data found. Email may have been processed before scoring was added.</div>
+        return traceStage("Stage 3: Signals", "empty", `
+            <div class="em-trace-note">No signal data found. Email may have been processed before signal extraction was added.</div>
         `);
     }
 
-    const scoreDisplay = evt.calibrated_prob != null
-        ? `${(evt.calibrated_prob * 100).toFixed(1)}%`
-        : "—";
-    const rawDisplay = evt.raw_score != null
-        ? evt.raw_score.toFixed(4)
-        : "—";
+    // Check if this is a new-pipeline event (has signal fields) vs legacy
+    const hasSignals = evt.pri != null || evt.mc != null;
 
-    let verdictHtml = "";
-    if (wasGated) {
-        verdictHtml = `<div class="em-trace-verdict em-trace-verdict-stop">Gated — ${escapeHtml(evt.gate_reason)}</div>`;
-    } else {
-        verdictHtml = `<div class="em-trace-verdict em-trace-verdict-pass">Passed scoring gate</div>`;
-    }
-
-    // Build the factor waterfall
-    const steps = _parseFactors(evt.scoring_factors);
-    let waterfallHtml = "";
-    if (steps.length) {
-        const rows = steps.map(s => {
-            const direction = s.isBase ? "" : s.value > 1.0 ? " ↑" : s.value < 1.0 ? " ↓" : "";
-            const colorClass = s.isBase ? "em-factor-base" : s.value > 1.0 ? "em-factor-boost" : s.value < 1.0 ? "em-factor-penalty" : "em-factor-neutral";
-            return `<tr class="${colorClass}">
-                <td style="padding:4px 10px 4px 0;font-size:13px">${escapeHtml(_factorLabel(s.name))}</td>
-                <td style="padding:4px 10px;font-family:monospace;font-size:13px;text-align:right">${s.isBase ? s.value.toFixed(4) : "×" + s.value.toFixed(3)}${direction}</td>
-                <td style="padding:4px 0 4px 10px;font-family:monospace;font-size:13px;text-align:right;color:var(--em-slate-500)">${s.running.toFixed(4)}</td>
-            </tr>`;
-        }).join("");
-
-        waterfallHtml = `
-            <div style="margin-top:14px">
-                <div style="font-size:12px;font-weight:600;color:var(--em-slate-500);margin-bottom:6px">Scoring Waterfall</div>
-                <table style="width:100%;border-collapse:collapse">
-                    <thead>
-                        <tr style="border-bottom:1px solid var(--em-slate-200)">
-                            <th style="padding:4px 10px 4px 0;font-size:11px;font-weight:500;color:var(--em-slate-400);text-align:left">Factor</th>
-                            <th style="padding:4px 10px;font-size:11px;font-weight:500;color:var(--em-slate-400);text-align:right">Multiplier</th>
-                            <th style="padding:4px 0 4px 10px;font-size:11px;font-weight:500;color:var(--em-slate-400);text-align:right">Running</th>
-                        </tr>
-                    </thead>
-                    <tbody>${rows}</tbody>
-                    <tfoot>
-                        <tr style="border-top:1px solid var(--em-slate-200)">
-                            <td style="padding:6px 10px 4px 0;font-size:13px;font-weight:600">Raw Score</td>
-                            <td></td>
-                            <td style="padding:6px 0 4px 10px;font-family:monospace;font-size:13px;font-weight:600;text-align:right">${rawDisplay}</td>
-                        </tr>
-                        <tr>
-                            <td style="padding:4px 10px 4px 0;font-size:13px;font-weight:600">Calibrated</td>
-                            <td></td>
-                            <td style="padding:4px 0 4px 10px;font-family:monospace;font-size:13px;font-weight:600;text-align:right">${scoreDisplay}</td>
-                        </tr>
-                    </tfoot>
-                </table>
+    if (!hasSignals) {
+        // Legacy scoring data — show abbreviated view
+        const scoreDisplay = evt.calibrated_prob != null
+            ? `${(evt.calibrated_prob * 100).toFixed(1)}%`
+            : "—";
+        return traceStage("Stage 3: Signals", "active", `
+            <div class="em-trace-note" style="margin-bottom:8px">Processed with legacy scoring pipeline.</div>
+            <div class="em-kv-grid">
+                <div class="em-kv-label">Calibrated Score</div>
+                <div class="em-kv-value">${scoreDisplay}</div>
+                <div class="em-kv-label">Confidence Tier</div>
+                <div class="em-kv-value"><span class="em-badge em-badge-${evt.confidence_tier === "strong" ? "green" : evt.confidence_tier === "likely" ? "blue" : "slate"}">${escapeHtml(evt.confidence_tier || "—")}</span></div>
+                ${evt.gate_reason ? `
+                    <div class="em-kv-label">Gate</div>
+                    <div class="em-kv-value"><span class="em-badge em-badge-red">Gated: ${escapeHtml(evt.gate_reason)}</span></div>
+                ` : ""}
             </div>
-        `;
+        `);
     }
 
-    // Signal flags summary
-    const signals = [
-        { label: "Position", value: evt.user_position || "—" },
-        { label: "Question", value: evt.has_question ? "Yes" : "No" },
-        { label: "Action language", value: evt.has_action_language ? "Yes" : "No" },
-        { label: "Subject type", value: evt.subject_type || "—" },
-        { label: "Recipients", value: evt.total_recipients ?? "—" },
-        { label: "Thread depth", value: evt.thread_depth ?? "—" },
-        { label: "Internal sender", value: evt.sender_is_internal ? "Yes" : "No" },
-        { label: "Recurring", value: evt.is_recurring ? "Yes" : "No" },
-    ];
-    const signalTags = signals.map(s =>
-        `<span style="display:inline-block;padding:2px 8px;margin:2px 4px 2px 0;background:var(--em-slate-100);border-radius:var(--em-radius-sm);font-size:12px;color:var(--em-slate-600)">${escapeHtml(s.label)}: <strong>${escapeHtml(String(s.value))}</strong></span>`
-    ).join("");
+    // New signal extraction data
+    const priColor = evt.pri === "high" ? "red" : evt.pri === "med" ? "amber" : "slate";
+    const tierKey = evt.sender_tier || "U";
 
-    return traceStage("Stage 3: Score", wasGated ? "stopped" : "active", `
-        ${verdictHtml}
-        <div class="em-trace-score-bar">
-            <div class="em-trace-score-fill" style="width:${Math.min(100, (evt.calibrated_prob || 0) * 100)}%"></div>
-            <span class="em-trace-score-label">${scoreDisplay}</span>
+    // Build signal pills
+    const signalDefs = [
+        { key: "mc", label: "Material", desc: "Financial/legal consequence" },
+        { key: "ar", label: "Action Req", desc: "Sender needs recipient action" },
+        { key: "ub", label: "Blocker", desc: "Someone blocked on recipient" },
+        { key: "dl", label: "Deadline", desc: "Time constraint" },
+    ];
+    const signalPills = signalDefs.map(s => {
+        const on = evt[s.key] === true;
+        const color = on ? "var(--em-amber-100)" : "var(--em-slate-50)";
+        const textColor = on ? "var(--em-amber-700)" : "var(--em-slate-400)";
+        return `<span title="${s.desc}" style="display:inline-block;padding:3px 10px;margin:2px 4px 2px 0;background:${color};border-radius:var(--em-radius-sm);font-size:12px;color:${textColor};font-weight:${on ? 600 : 400}">${s.label}${on ? " ✓" : ""}</span>`;
+    }).join("");
+
+    const draftBadge = evt.draft
+        ? '<span class="em-badge em-badge-green">Yes</span>'
+        : '<span class="em-badge em-badge-slate">No</span>';
+
+    return traceStage("Stage 3: Signals", "active", `
+        <div class="em-trace-verdict ${evt.draft ? "em-trace-verdict-pass" : "em-trace-verdict-neutral"}">
+            ${evt.draft ? "Draft Recommended" : "No Draft Needed"}
         </div>
         <div class="em-kv-grid">
-            <div class="em-kv-label">Confidence Tier</div>
-            <div class="em-kv-value"><span class="em-badge em-badge-${evt.confidence_tier === "strong" ? "green" : evt.confidence_tier === "likely" ? "blue" : evt.confidence_tier === "possible" ? "amber" : "slate"}">${escapeHtml(evt.confidence_tier || "—")}</span></div>
+            <div class="em-kv-label">Priority</div>
+            <div class="em-kv-value"><span class="em-badge em-badge-${priColor}">${escapeHtml((evt.pri || "low").toUpperCase())}</span></div>
+            <div class="em-kv-label">Sender Tier</div>
+            <div class="em-kv-value"><span class="em-badge em-badge-${_tierBadge[tierKey] || "slate"}">${escapeHtml(tierKey)} — ${escapeHtml(_tierLabels[tierKey] || "Unknown")}</span></div>
+            <div class="em-kv-label">Response Type</div>
+            <div class="em-kv-value">${escapeHtml(_rtLabels[evt.rt] || evt.rt || "—")}</div>
+            <div class="em-kv-label">Draft</div>
+            <div class="em-kv-value">${draftBadge}</div>
         </div>
-        ${waterfallHtml}
         <div style="margin-top:14px">
-            <div style="font-size:12px;font-weight:600;color:var(--em-slate-500);margin-bottom:6px">Input Signals</div>
-            <div style="display:flex;flex-wrap:wrap">${signalTags}</div>
+            <div style="font-size:12px;font-weight:600;color:var(--em-slate-500);margin-bottom:6px">Signals</div>
+            <div style="display:flex;flex-wrap:wrap">${signalPills}</div>
         </div>
-        ${wasGated ? '<div class="em-trace-note">Pipeline stopped here — email was gated by the scorer.</div>' : ""}
+        ${evt.reason ? `
+            <div style="margin-top:14px">
+                <div style="font-size:12px;font-weight:600;color:var(--em-slate-500);margin-bottom:4px">Reason</div>
+                <div style="font-size:13px;color:var(--em-slate-600);line-height:1.5">${escapeHtml(evt.reason)}</div>
+            </div>
+        ` : ""}
     `);
 }
 
-// ─── Stage 4: Enrich ─────────────────────────────────────────
-function renderStage4(contact, evt, email, wasFiltered, wasGated) {
-    if (wasFiltered || wasGated) {
-        const reason = wasFiltered ? "filtered in Stage 2" : "gated in Stage 3";
-        return traceStage("Stage 4: Enrich", "skipped", `
-            <div class="em-trace-note">Skipped — email was ${reason}.</div>
+// ─── Stage 4: Context ────────────────────────────────────────
+function renderStage4_context(contact, evt, email, wasFiltered) {
+    if (wasFiltered) {
+        return traceStage("Stage 4: Context", "skipped", `
+            <div class="em-trace-note">Skipped — email was filtered in Stage 2.</div>
         `);
     }
 
     if (!contact && !evt) {
         if (email.status === "processing" || email.status === "unprocessed") {
-            return traceStage("Stage 4: Enrich", "pending", `
+            return traceStage("Stage 4: Context", "pending", `
                 <div class="em-trace-note">Waiting for earlier pipeline stages to complete.</div>
             `);
         }
-        return traceStage("Stage 4: Enrich", "empty", `
-            <div class="em-trace-note">No enrichment data available.</div>
+        return traceStage("Stage 4: Context", "empty", `
+            <div class="em-trace-note">No context data available.</div>
         `);
     }
 
-    return traceStage("Stage 4: Enrich", "active", `
+    return traceStage("Stage 4: Context", "active", `
         <div class="em-kv-grid">
             ${contact ? `
                 <div class="em-kv-label">Contact Type</div>
@@ -345,83 +270,29 @@ function renderStage4(contact, evt, email, wasFiltered, wasGated) {
     `);
 }
 
-// ─── Stage 5: Classify ───────────────────────────────────────
-function renderStage5(cls, email, wasFiltered, wasGated) {
-    if (wasFiltered || wasGated) {
-        const reason = wasFiltered ? "filtered in Stage 2" : "gated in Stage 3";
-        return traceStage("Stage 5: Classify", "skipped", `
-            <div class="em-trace-note">Skipped — email was ${reason}.</div>
+// ─── Stage 5: Draft ──────────────────────────────────────────
+function renderStage5_draft(draft, evt, cls, wasFiltered) {
+    if (wasFiltered) {
+        return traceStage("Stage 5: Draft", "skipped", `
+            <div class="em-trace-note">Skipped — email was filtered in Stage 2.</div>
         `);
     }
 
-    if (!cls) {
-        return traceStage("Stage 5: Classify", "empty", `
-            <div class="em-trace-note">Email not yet classified — may still be processing.</div>
-        `);
-    }
-
-    // Skip filter-generated classifications (those are shown in Stage 2)
-    if (cls.action === "skip" || cls.context?.startsWith("Filtered") || cls.context?.startsWith("Skipped:")) {
-        return traceStage("Stage 5: Classify", "skipped", `
-            <div class="em-trace-note">No AI classification — email was handled by filter rules.</div>
-        `);
-    }
-
-    // Enriched fields (reason, archetype, confidence) are stored on the emails
-    // table, not on classifications. Pull from the email row as primary source.
-    const confidence = email.classification_confidence ?? cls.confidence;
-    const archetype = email.archetype || cls.archetype || "";
-    const reason = email.reason || cls.reason || cls.context || "";
-
-    const needsBadge = cls.needs_response
-        ? '<span class="em-badge em-badge-amber">Yes</span>'
-        : '<span class="em-badge em-badge-slate">No</span>';
-
-    return traceStage("Stage 5: Classify", "active", `
-        <div class="em-trace-verdict ${cls.needs_response ? "em-trace-verdict-pass" : "em-trace-verdict-neutral"}">
-            ${cls.needs_response ? "Needs Response" : "No Response Needed"}
-        </div>
-        <div class="em-kv-grid">
-            <div class="em-kv-label">Needs Response</div>
-            <div class="em-kv-value">${needsBadge}</div>
-            <div class="em-kv-label">Confidence</div>
-            <div class="em-kv-value">${confidence != null ? (confidence * 100).toFixed(0) + "%" : "—"}</div>
-            <div class="em-kv-label">Archetype</div>
-            <div class="em-kv-value">${escapeHtml(archetype || "—")}</div>
-            <div class="em-kv-label">Reason</div>
-            <div class="em-kv-value">${escapeHtml(reason || "—")}</div>
-            <div class="em-kv-label">Action</div>
-            <div class="em-kv-value">${escapeHtml(cls.action || "—")}</div>
-            <div class="em-kv-label">Project</div>
-            <div class="em-kv-value">${escapeHtml(cls.project || "—")}</div>
-            <div class="em-kv-label">Priority</div>
-            <div class="em-kv-value">${cls.priority === "x" || cls.priority === 1 ? '<span class="em-badge em-badge-red">Urgent</span>' : "Normal"}</div>
-        </div>
-    `);
-}
-
-// ─── Stage 6: Draft ──────────────────────────────────────────
-function renderStage6(draft, cls, wasFiltered, wasGated) {
-    if (wasFiltered || wasGated) {
-        const reason = wasFiltered ? "filtered in Stage 2" : "gated in Stage 3";
-        return traceStage("Stage 6: Draft", "skipped", `
-            <div class="em-trace-note">Skipped — email was ${reason}.</div>
-        `);
-    }
-
-    if (cls && !cls.needs_response) {
-        return traceStage("Stage 6: Draft", "skipped", `
-            <div class="em-trace-note">No draft needed — email was classified as not needing a response.</div>
+    // Check draft decision — prefer new signal field, fall back to old classification
+    const draftNeeded = evt?.draft ?? cls?.needs_response;
+    if (draftNeeded === false) {
+        return traceStage("Stage 5: Draft", "skipped", `
+            <div class="em-trace-note">No draft needed — signal extraction determined no response is warranted.</div>
         `);
     }
 
     if (!draft) {
-        return traceStage("Stage 6: Draft", "empty", `
+        return traceStage("Stage 5: Draft", "empty", `
             <div class="em-trace-note">No draft generated yet. Email may still be processing, or it may be too old for drafting (&gt;24h).</div>
         `);
     }
 
-    return traceStage("Stage 6: Draft", "active", `
+    return traceStage("Stage 5: Draft", "active", `
         <div style="white-space:pre-wrap;font-size:14px;line-height:1.7;color:var(--em-slate-700);padding:12px 16px;background:var(--em-slate-50);border-radius:var(--em-radius-sm);max-height:300px;overflow-y:auto">${escapeHtml(draft.draft_body)}</div>
         <div style="margin-top:8px;font-size:12px;color:var(--em-slate-400);display:flex;gap:16px">
             <span>${draft.user_edited ? "Edited by user" : "Auto-generated"}</span>
@@ -431,10 +302,10 @@ function renderStage6(draft, cls, wasFiltered, wasGated) {
     `);
 }
 
-// ─── Stage 7: Delivery ───────────────────────────────────────
-function renderStage7(draft) {
+// ─── Stage 6: Delivery ───────────────────────────────────────
+function renderStage6_delivery(draft) {
     if (!draft) {
-        return traceStage("Stage 7: Delivery", "skipped", `
+        return traceStage("Stage 6: Delivery", "skipped", `
             <div class="em-trace-note">No draft to deliver.</div>
         `, true);
     }
@@ -443,7 +314,7 @@ function renderStage7(draft) {
     const deliveredAt = draft.delivered_at;
 
     if (hasOutlookId || deliveredAt) {
-        return traceStage("Stage 7: Delivery", "active", `
+        return traceStage("Stage 6: Delivery", "active", `
             <div class="em-trace-verdict em-trace-verdict-pass">Delivered to Outlook</div>
             <div class="em-kv-grid">
                 <div class="em-kv-label">Outlook Draft ID</div>
@@ -456,7 +327,7 @@ function renderStage7(draft) {
         `, true);
     }
 
-    return traceStage("Stage 7: Delivery", "pending", `
+    return traceStage("Stage 6: Delivery", "pending", `
         <div class="em-trace-verdict em-trace-verdict-pending">Pending Delivery</div>
         <div class="em-trace-note">Draft is waiting for the browser extension to push it to Outlook.</div>
     `, true);
