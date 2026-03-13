@@ -415,7 +415,7 @@ class ClaudeAnalyzer:
         scaled_max_tokens = min(2048, 256 + len(email_batch) * 150)
 
         try:
-            raw_output = call_claude(
+            raw_output, _usage = call_claude(
                 prompt=prompt_text,
                 system_prompt=system,
                 model=resolve_model(self.model),
@@ -467,7 +467,7 @@ class ClaudeAnalyzer:
         )
 
         try:
-            raw_output = call_claude(
+            raw_output, _usage = call_claude(
                 prompt=retry_prompt,
                 system_prompt="You are a JSON repair assistant. Return only valid JSON.",
                 model=resolve_model(self.model),

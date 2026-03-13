@@ -248,7 +248,7 @@ def _prepare_batches(emails, batch_size):
 
 def _run_extraction_batch(batch_text, batch_idx):
     """Run a single Haiku extraction batch. Returns list of extractions."""
-    response = call_with_retry(
+    response, _usage = call_with_retry(
         prompt=batch_text,
         system_prompt=HAIKU_EXTRACTION_PROMPT,
         model="haiku",
@@ -269,7 +269,7 @@ def _run_extraction_batch(batch_text, batch_idx):
 
 def _run_style_batch(batch_text, batch_idx):
     """Run a single Haiku style extraction batch. Returns list of features."""
-    response = call_with_retry(
+    response, _usage = call_with_retry(
         prompt=batch_text,
         system_prompt=HAIKU_STYLE_EXTRACTION_PROMPT,
         model="haiku",

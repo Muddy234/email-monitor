@@ -37,7 +37,7 @@ def call_with_retry(
         cache_system_prompt: Enable prompt caching.
 
     Returns:
-        Response text string, or None if all retries exhausted.
+        tuple: (response_text, usage_dict), or (None, {}) if all retries exhausted.
     """
     resolved = resolve_model(model)
 
@@ -55,7 +55,7 @@ def call_with_retry(
         except anthropic.RateLimitError as e:
             if attempt == max_retries:
                 logger.error(f"Rate limit exceeded after {max_retries} retries")
-                return None
+                return None, {}
             retry_after = getattr(e, "retry_after", None)
             wait = float(retry_after) if retry_after else min(2 ** (attempt + 1), 60)
             logger.warning(f"Rate limited, waiting {wait:.0f}s (attempt {attempt + 1}/{max_retries})")
@@ -63,7 +63,7 @@ def call_with_retry(
         except anthropic.APITimeoutError:
             if attempt == max_retries:
                 logger.error(f"Timeout after {max_retries} retries")
-                return None
+                return None, {}
             wait = min(2 ** (attempt + 1), 60)
             logger.warning(f"Timeout, retrying in {wait}s (attempt {attempt + 1}/{max_retries})")
             time.sleep(wait)
@@ -71,7 +71,7 @@ def call_with_retry(
             if e.status_code >= 500:
                 if attempt == max_retries:
                     logger.error(f"Server error {e.status_code} after {max_retries} retries")
-                    return None
+                    return None, {}
                 wait = min(2 ** (attempt + 1), 60)
                 logger.warning(f"Server error {e.status_code}, retrying in {wait}s")
                 time.sleep(wait)

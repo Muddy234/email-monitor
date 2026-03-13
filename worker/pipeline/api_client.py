@@ -29,6 +29,19 @@ def resolve_model(short_name: str) -> str:
     return MODEL_MAP.get(short_name, short_name)
 
 
+def _extract_usage(message) -> dict:
+    """Extract token usage from an Anthropic API response."""
+    usage = getattr(message, "usage", None)
+    if not usage:
+        return {}
+    return {
+        "input_tokens": getattr(usage, "input_tokens", 0) or 0,
+        "output_tokens": getattr(usage, "output_tokens", 0) or 0,
+        "cache_read_input_tokens": getattr(usage, "cache_read_input_tokens", 0) or 0,
+        "cache_creation_input_tokens": getattr(usage, "cache_creation_input_tokens", 0) or 0,
+    }
+
+
 def call_claude(
     prompt: str,
     system_prompt: str = "",
@@ -38,8 +51,8 @@ def call_claude(
     api_key: str = None,
     temperature: float = None,
     cache_system_prompt: bool = False,
-) -> str:
-    """Send a message to Claude and return the text response.
+) -> tuple:
+    """Send a message to Claude and return (text, usage_dict).
 
     Args:
         prompt: The user message content.
@@ -51,6 +64,11 @@ def call_claude(
         temperature: Sampling temperature (0 = deterministic, None = API default).
         cache_system_prompt: If True, wrap system prompt with cache_control
             for Anthropic prompt caching (90% input token discount on cache hit).
+
+    Returns:
+        tuple: (response_text, usage_dict) where usage_dict has keys:
+            input_tokens, output_tokens, cache_read_input_tokens,
+            cache_creation_input_tokens.
     """
     resolved = resolve_model(model)
     client = anthropic.Anthropic(api_key=api_key, timeout=timeout)
@@ -76,10 +94,10 @@ def call_claude(
 
     message = client.messages.create(**kwargs)
 
-    # Extract text from response content blocks
-    return "".join(
+    text = "".join(
         block.text for block in message.content if block.type == "text"
     )
+    return text, _extract_usage(message)
 
 
 # ---------------------------------------------------------------------------
@@ -130,10 +148,18 @@ def get_batch_results(batch_id, api_key=None, timeout=120):
     """Retrieve results for a completed batch.
 
     Returns:
-        dict mapping custom_id → response text (or None on failure).
+        tuple: (results_dict, total_usage_dict)
+            results_dict maps custom_id → response text (or None on failure).
+            total_usage_dict aggregates tokens across all succeeded requests.
     """
     client = anthropic.Anthropic(api_key=api_key, timeout=timeout)
     results = {}
+    total_usage = {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 0,
+    }
 
     for result in client.messages.batches.results(batch_id):
         if result.result.type == "succeeded":
@@ -142,13 +168,16 @@ def get_batch_results(batch_id, api_key=None, timeout=120):
                 if block.type == "text"
             )
             results[result.custom_id] = text
+            usage = _extract_usage(result.result.message)
+            for k in total_usage:
+                total_usage[k] += usage.get(k, 0)
         else:
             logger.warning(
                 f"  Batch request {result.custom_id} failed: {result.result.type}"
             )
             results[result.custom_id] = None
 
-    return results
+    return results, total_usage
 
 
 def submit_and_wait(requests, api_key=None, timeout=120,
@@ -158,10 +187,12 @@ def submit_and_wait(requests, api_key=None, timeout=120,
     Convenience wrapper combining create → poll → results.
 
     Returns:
-        dict mapping custom_id → response text (or None on failure).
+        tuple: (results_dict, total_usage_dict)
+            results_dict maps custom_id → response text (or None on failure).
+            total_usage_dict aggregates tokens across all succeeded requests.
     """
     if not requests:
-        return {}
+        return {}, {}
 
     batch = create_message_batch(requests, api_key=api_key, timeout=timeout)
     logger.info(f"  Batch {batch.id} submitted ({len(requests)} requests)")
@@ -171,7 +202,7 @@ def submit_and_wait(requests, api_key=None, timeout=120,
         poll_interval=poll_interval, max_wait=max_wait,
     )
 
-    results = get_batch_results(batch.id, api_key=api_key, timeout=timeout)
+    results, total_usage = get_batch_results(batch.id, api_key=api_key, timeout=timeout)
     succeeded = sum(1 for v in results.values() if v is not None)
     logger.info(f"  Batch {batch.id} complete: {succeeded}/{len(requests)} succeeded")
-    return results
+    return results, total_usage

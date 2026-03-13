@@ -654,6 +654,16 @@ class SupabaseWorkerClient:
                 "calibrated_prob": event.get("calibrated_prob"),
                 "confidence_tier": event.get("confidence_tier"),
                 "gate_reason": event.get("gate_reason"),
+                # Signal extraction fields
+                "mc": event.get("mc"),
+                "ar": event.get("ar"),
+                "ub": event.get("ub"),
+                "dl": event.get("dl"),
+                "rt": event.get("rt"),
+                "pri": event.get("pri"),
+                "draft": event.get("draft"),
+                "reason": event.get("reason"),
+                "sender_tier": event.get("sender_tier"),
             }
             rows.append(row)
 
@@ -755,6 +765,64 @@ class SupabaseWorkerClient:
                 self.client.table("threads").upsert(
                     rows[i:i + 500], on_conflict="user_id,conversation_id"
                 ).execute()
+
+    # ------------------------------------------------------------------
+    # Domain tiers (for signal extraction sender tier resolution)
+    # ------------------------------------------------------------------
+
+    def fetch_domain_tiers(self):
+        """Load all domain → tier mappings.
+
+        Returns:
+            dict: {domain: tier_letter} e.g. {'zionsbank.com': 'C'}
+        """
+        result = (
+            self.client.table("domain_tiers")
+            .select("domain, tier")
+            .execute()
+        )
+        return {row["domain"]: row["tier"] for row in (result.data or [])}
+
+    # ------------------------------------------------------------------
+    # Token usage tracking
+    # ------------------------------------------------------------------
+
+    def record_token_usage(self, user_id, model, stage, usage):
+        """Record API token usage (daily rollup via upsert).
+
+        Args:
+            user_id: User UUID string.
+            model: Short model name ('haiku' or 'sonnet').
+            stage: Pipeline stage ('signal_extraction', 'draft', 'onboarding', etc.).
+            usage: dict with keys: input_tokens, output_tokens,
+                   cache_read_input_tokens, cache_creation_input_tokens.
+        """
+        if not usage:
+            return
+
+        input_t = usage.get("input_tokens", 0) or 0
+        output_t = usage.get("output_tokens", 0) or 0
+        cache_read = usage.get("cache_read_input_tokens", 0) or 0
+        cache_create = usage.get("cache_creation_input_tokens", 0) or 0
+
+        if input_t + output_t + cache_read + cache_create == 0:
+            return
+
+        today = datetime.utcnow().strftime("%Y-%m-%d")
+
+        try:
+            self.client.rpc("increment_token_usage", {
+                "p_user_id": user_id,
+                "p_model": model,
+                "p_stage": stage,
+                "p_usage_date": today,
+                "p_input_tokens": input_t,
+                "p_output_tokens": output_t,
+                "p_cache_read_tokens": cache_read,
+                "p_cache_creation_tokens": cache_create,
+            }).execute()
+        except Exception as e:
+            logger.warning(f"Failed to record token usage: {e}")
 
     # ------------------------------------------------------------------
     # Domains

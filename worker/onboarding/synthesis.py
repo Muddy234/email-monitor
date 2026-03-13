@@ -43,7 +43,7 @@ def synthesize_contacts(contact_freq, response_rates, extractions):
     # Format for Sonnet
     prompt_text = _format_contact_prompt(contact_inputs)
 
-    response = call_with_retry(
+    response, _usage = call_with_retry(
         prompt=prompt_text,
         system_prompt=SONNET_CONTACT_PROFILE_PROMPT,
         model="sonnet",
@@ -83,7 +83,7 @@ def synthesize_topics(keyword_frequencies):
     lines = [f"- \"{kw}\" (frequency: {count})" for kw, count in sorted_kw[:150]]
     prompt_text = "Ranked keywords by frequency:\n" + "\n".join(lines)
 
-    response = call_with_retry(
+    response, _usage = call_with_retry(
         prompt=prompt_text,
         system_prompt=SONNET_TOPIC_CLUSTERING_PROMPT,
         model="sonnet",
@@ -143,7 +143,7 @@ def synthesize_style_guide(style_features, contact_profiles):
         + json.dumps(enriched, indent=2)
     )
 
-    response = call_with_retry(
+    response, _usage = call_with_retry(
         prompt=prompt_text,
         system_prompt=SONNET_STYLE_GUIDE_PROMPT,
         model="sonnet",
