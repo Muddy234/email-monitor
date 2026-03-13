@@ -24,8 +24,22 @@ function relativeTime(ts) {
   if (!ts) return "—";
   const diff = Date.now() - new Date(ts).getTime();
   if (diff < 60_000) return "just now";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  return `${Math.floor(diff / 3_600_000)}h ago`;
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m`;
+  return `${Math.floor(diff / 3_600_000)}h`;
+}
+
+function escapeHtml(str) {
+  if (!str) return "";
+  const div = document.createElement("div");
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function setStatValue(id, value) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.remove("skeleton-text");
+  el.textContent = value !== null && value !== undefined ? value : "—";
 }
 
 function showError(msg) {
@@ -131,40 +145,171 @@ function todayISO() {
   return d.toISOString();
 }
 
-async function fetchStats(session) {
+async function fetchEnhancedStats(session) {
   const today = todayISO();
   const uid = session.user?.id;
-  if (!uid) return { received: null, drafts: null, important: null };
+  if (!uid) return null;
 
   try {
-    const [emails, drafts, classifications] = await Promise.all([
+    const [processed, classifications, drafts, pipelineRuns] = await Promise.all([
+      // Q1: Processed count
       supabaseQuery(
-        `emails?select=id&user_id=eq.${uid}&folder=eq.Inbox&received_time=gte.${today}`,
+        `emails?select=id&user_id=eq.${uid}&folder=eq.Inbox&received_time=gte.${today}&status=eq.completed`,
         session
       ),
+      // Q2: Attention candidates with embedded email data
       supabaseQuery(
-        `drafts?select=id,email_id&user_id=eq.${uid}&created_at=gte.${today}`,
+        `classifications?select=id,email_id,action,created_at,emails(id,email_ref,subject,sender_name,received_time)&user_id=eq.${uid}&needs_response=eq.true&created_at=gte.${today}&order=created_at.desc`,
         session
       ),
+      // Q3: Drafts with sender name
       supabaseQuery(
-        `classifications?select=id,email_id&user_id=eq.${uid}&needs_response=eq.true&created_at=gte.${today}`,
+        `drafts?select=id,email_id,created_at,emails(sender_name)&user_id=eq.${uid}&created_at=gte.${today}&order=created_at.desc`,
+        session
+      ),
+      // Q4: Pipeline runs for activity feed
+      supabaseQuery(
+        `pipeline_runs?select=id,status,emails_processed,drafts_generated,finished_at&user_id=eq.${uid}&order=finished_at.desc&limit=5`,
         session
       ),
     ]);
 
-    const draftedEmailIds = new Set(drafts.map((d) => d.email_id));
-    const importantCount = classifications.filter(
-      (c) => !draftedEmailIds.has(c.email_id)
-    ).length;
+    // Client-side cross-reference: exclude classifications that already have drafts
+    const draftedEmailIds = new Set(drafts.map(d => d.email_id));
+    const attentionItems = classifications.filter(c => !draftedEmailIds.has(c.email_id));
+
+    // Build activity feed: merge drafts + pipeline runs, sorted by time, max 3
+    const activities = [];
+    for (const d of drafts) {
+      const senderName = d.emails?.sender_name || "Unknown";
+      activities.push({
+        text: `Draft created for ${senderName}`,
+        time: d.created_at,
+      });
+    }
+    for (const r of pipelineRuns) {
+      if (r.emails_processed > 0 && r.finished_at) {
+        activities.push({
+          text: `${r.emails_processed} emails classified`,
+          time: r.finished_at,
+        });
+      }
+    }
+    activities.sort((a, b) => new Date(b.time) - new Date(a.time));
 
     return {
-      received: emails.length,
-      drafts: drafts.length,
-      important: importantCount,
+      processedCount: processed.length,
+      draftsCount: drafts.length,
+      attentionItems,
+      attentionCount: attentionItems.length,
+      activities: activities.slice(0, 3),
     };
   } catch (_) {
-    return { received: null, drafts: null, important: null };
+    return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Render helpers for enhanced status view
+// ---------------------------------------------------------------------------
+
+function renderStatusData(data) {
+  if (!data) return;
+
+  setStatValue("statAttention", data.attentionCount);
+  setStatValue("statDrafts", data.draftsCount);
+  setStatValue("statProcessed", data.processedCount);
+
+  // Amber accent on attention card when count > 0
+  const card = document.getElementById("attentionCard");
+  if (card) {
+    card.classList.toggle("attention-active", data.attentionCount > 0);
+  }
+
+  renderAttentionList(data.attentionItems, data.attentionCount);
+  renderActivityFeed(data.activities);
+}
+
+function renderAttentionList(items, total) {
+  const section = document.getElementById("attentionSection");
+  if (!section) return;
+
+  if (total === 0) {
+    section.innerHTML = '<div class="caught-up">All caught up</div>';
+    return;
+  }
+
+  let html = '<div class="section-title">Needs Attention</div>';
+  const display = items.slice(0, 3);
+  for (const c of display) {
+    const email = c.emails;
+    if (!email) continue;
+    const ref = email.email_ref ? encodeURIComponent(email.email_ref) : "";
+    const link = ref ? `https://outlook.office.com/mail/id/${ref}` : "#";
+    const sender = escapeHtml(email.sender_name || "Unknown");
+    const subject = escapeHtml(email.subject || "(no subject)");
+    const time = relativeTime(email.received_time);
+    html += `<div class="attention-item" data-link="${escapeHtml(link)}">
+      <span class="attention-sender">${sender}</span>
+      <span class="attention-subject">${subject}</span>
+      <span class="attention-time">${time}</span>
+    </div>`;
+  }
+  if (total > 3) {
+    html += `<div class="attention-more" id="viewAllAttention">View all ${total} →</div>`;
+  }
+  section.innerHTML = html;
+
+  // Bind click handlers
+  section.querySelectorAll(".attention-item").forEach(el => {
+    el.addEventListener("click", () => {
+      const url = el.getAttribute("data-link");
+      if (url && url !== "#") chrome.tabs.create({ url });
+    });
+  });
+  const viewAll = document.getElementById("viewAllAttention");
+  if (viewAll) {
+    viewAll.addEventListener("click", () => {
+      chrome.tabs.create({ url: "https://clarion-ai.app/app/emails.html" });
+    });
+  }
+}
+
+function renderActivityFeed(activities) {
+  const section = document.getElementById("activitySection");
+  if (!section) return;
+
+  if (!activities || activities.length === 0) {
+    section.innerHTML = '<div class="section-title">Recent Activity</div><div class="activity-empty">No recent activity</div>';
+    return;
+  }
+
+  let html = '<div class="section-title">Recent Activity</div>';
+  for (const a of activities) {
+    html += `<div class="activity-item">
+      <span class="activity-text">${escapeHtml(a.text)}</span>
+      <span class="activity-time">${relativeTime(a.time)}</span>
+    </div>`;
+  }
+  section.innerHTML = html;
+}
+
+let initialLoadDone = false;
+
+async function refreshStatusData(session) {
+  if (!session || !session.access_token) return;
+
+  const useDelay = !initialLoadDone;
+  const fetchStart = Date.now();
+  const data = await fetchEnhancedStats(session);
+  if (useDelay) {
+    const elapsed = Date.now() - fetchStart;
+    if (elapsed < 300) {
+      await new Promise(r => setTimeout(r, 300 - elapsed));
+    }
+    initialLoadDone = true;
+  }
+  renderStatusData(data);
 }
 
 // ---------------------------------------------------------------------------
@@ -257,12 +402,13 @@ function updateSetupChecklist(session) {
 
 function showStatusView(session) {
   showView("statusView");
+  initialLoadDone = false;
   document.getElementById("userEmail").textContent = session.user?.email || "—";
   refreshStatus(session);
 }
 
 function refreshStatus(session) {
-  // Connection indicator + advanced details
+  // Connection indicator (inline in user bar)
   chrome.runtime.sendMessage({ type: "getStatus" }, (status) => {
     if (chrome.runtime.lastError || !status) return;
 
@@ -271,18 +417,20 @@ function refreshStatus(session) {
     const outlookOk = status.has_token && !status.token_expired;
     const connected = supabaseOk && outlookOk;
 
-    // Top-level connection bar
-    const bar = document.getElementById("connectionBar");
-    const hint = document.getElementById("connectionHint");
-    bar.textContent = "";
-    const dot = document.createElement("span");
-    dot.className = `dot ${connected ? "green" : "red"}`;
-    bar.appendChild(dot);
-    const txt = document.createElement("span");
-    txt.id = "connectionText";
-    txt.textContent = connected ? "Connected" : "Disconnected";
-    bar.appendChild(txt);
+    // Inline connection indicator
+    const indicator = document.getElementById("connectionIndicator");
+    if (indicator) {
+      indicator.innerHTML = "";
+      const dot = document.createElement("span");
+      dot.className = `dot ${connected ? "green" : "red"}`;
+      indicator.appendChild(dot);
+      const txt = document.createElement("span");
+      txt.id = "connectionText";
+      txt.textContent = connected ? "Connected" : "Disconnected";
+      indicator.appendChild(txt);
+    }
 
+    const hint = document.getElementById("connectionHint");
     if (!connected) {
       let hintMsg = "";
       if (!supabaseOk) hintMsg = "Session expired — please log in again";
@@ -329,22 +477,14 @@ function refreshStatus(session) {
         status.realtime_connected ? "Connected" : "Disconnected");
     }
 
+    const syncAgo = relativeTime(status.last_sync);
     syncEl.textContent = status.last_sync
-      ? relativeTime(status.last_sync)
+      ? (syncAgo === "just now" ? syncAgo : syncAgo + " ago")
       : "never";
   });
 
-  // Stats
-  if (session && session.access_token) {
-    fetchStats(session).then((stats) => {
-      document.getElementById("statReceived").textContent =
-        stats.received !== null ? stats.received : "—";
-      document.getElementById("statDrafts").textContent =
-        stats.drafts !== null ? stats.drafts : "—";
-      document.getElementById("statImportant").textContent =
-        stats.important !== null ? stats.important : "—";
-    });
-  }
+  // Enhanced stats + render
+  refreshStatusData(session);
 }
 
 // ---------------------------------------------------------------------------
@@ -438,23 +578,39 @@ document.getElementById("toggleAuth").addEventListener("click", () => {
   hideError();
 });
 
-// Logout
-document.getElementById("logoutBtn").addEventListener("click", async () => {
-  const result = await chrome.storage.local.get("supabaseSession");
-  const session = result.supabaseSession;
-  if (session?.access_token && session?.user?.id) {
-    setWorkerActive(session.access_token, session.user.id, false).catch(() => {});
-  }
+// Logout — two-step confirmation
+function initLogoutBtn() {
+  const container = document.getElementById("logoutContainer");
+  container.innerHTML = '<button class="btn btn-sm btn-outline" id="logoutBtn">Logout</button>';
+  document.getElementById("logoutBtn").addEventListener("click", showLogoutConfirm);
+}
 
-  // Clean up all session data
-  await chrome.storage.local.remove("supabaseSession");
-  await chrome.storage.local.remove("lastSyncTime");
-  await chrome.storage.session.remove("exchangeToken");
-  await setState("login");
+function showLogoutConfirm() {
+  const container = document.getElementById("logoutContainer");
+  container.innerHTML = `<span class="logout-confirm">
+    <span>Are you sure?</span>
+    <button class="btn btn-sm btn-danger" id="logoutYes">Yes</button>
+    <button class="btn btn-sm btn-outline" id="logoutCancel">Cancel</button>
+  </span>`;
 
-  chrome.runtime.sendMessage({ type: "supabaseSessionChanged" });
-  showView("loginView");
-});
+  document.getElementById("logoutYes").addEventListener("click", async () => {
+    const result = await chrome.storage.local.get("supabaseSession");
+    const session = result.supabaseSession;
+    if (session?.access_token && session?.user?.id) {
+      setWorkerActive(session.access_token, session.user.id, false).catch(() => {});
+    }
+    await chrome.storage.local.remove("supabaseSession");
+    await chrome.storage.local.remove("lastSyncTime");
+    await chrome.storage.session.remove("exchangeToken");
+    await setState("login");
+    chrome.runtime.sendMessage({ type: "supabaseSessionChanged" });
+    showView("loginView");
+  });
+
+  document.getElementById("logoutCancel").addEventListener("click", () => initLogoutBtn());
+}
+
+document.getElementById("logoutBtn").addEventListener("click", showLogoutConfirm);
 
 // Sync buttons (status view + setup view)
 function friendlySyncError(raw) {
@@ -522,4 +678,4 @@ setInterval(() => {
       if (result.supabaseSession) updateSetupChecklist(result.supabaseSession);
     });
   }
-}, 5000);
+}, 30000);
