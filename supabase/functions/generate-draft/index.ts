@@ -68,10 +68,13 @@ Deno.serve(async (req) => {
     }
 
     const result = await response.json();
-    const draft = result.content
+    let draft = result.content
       ?.filter((b: { type: string }) => b.type === "text")
       .map((b: { text: string }) => b.text)
       .join("") || "";
+
+    // Strip chain-of-thought <thinking> block from model output
+    draft = draft.replace(/<thinking>[\s\S]*?<\/thinking>/g, "").trim();
 
     return new Response(
       JSON.stringify({ draft }),

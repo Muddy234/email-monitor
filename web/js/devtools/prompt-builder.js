@@ -24,7 +24,7 @@ Then generate an email reply that:
 - Acknowledges the sender's message and addresses each point raised
 - Provides clear next steps or responses to questions
 - Adjusts tone based on recipient: more formal for external legal/lender contacts, conversational for internal colleagues
-- Uses the user's typical sign-off (default: "Best regards," followed by {user_name}) unless the style guide specifies otherwise
+- Always ends with a sign-off greeting followed by {user_name} on the next line. Use the style guide's sign-off greeting if available (e.g. "Best,"), otherwise default to "Best regards,"
 - Uses [PLACEHOLDER] for any unknown specifics (amounts, dates, details you don't have)
 - When the sender asks a direct question and the answer is not available from the email context, use [USER TO CONFIRM: brief description] so the user can fill in the correct answer before sending. NEVER fabricate or assume an answer.
 - Never asks for information the sender already provided or that is already available from the email context
