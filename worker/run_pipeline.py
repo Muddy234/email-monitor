@@ -1062,10 +1062,11 @@ def process_user_batch_enriched(db, user_id, profile, emails):
                     if fallback_usage:
                         db.record_token_usage(user_id, "sonnet", "draft", fallback_usage)
 
-                if draft_body and draft_generator._validate_output(
+                cleaned = draft_generator._validate_output(
                     draft_body, candidate["email_data"]
-                ):
-                    db.insert_draft(db_id, user_id, draft_body)
+                ) if draft_body else None
+                if cleaned:
+                    db.insert_draft(db_id, user_id, cleaned)
                     drafts_generated += 1
                     logger.info(
                         f"  Draft generated for: "
@@ -1433,10 +1434,11 @@ def process_user_batch_signals(db, user_id, profile, emails):
                     if fallback_usage:
                         db.record_token_usage(user_id, "sonnet", "draft", fallback_usage)
 
-                if draft_body and draft_generator._validate_output(
+                cleaned = draft_generator._validate_output(
                     draft_body, candidate["email_data"]
-                ):
-                    db.insert_draft(db_id, user_id, draft_body)
+                ) if draft_body else None
+                if cleaned:
+                    db.insert_draft(db_id, user_id, cleaned)
                     drafts_generated += 1
                     logger.info(
                         f"  Draft generated for: "
