@@ -28,21 +28,22 @@
             <div class="em-skeleton em-skeleton-card"></div>
         </div>
 
-        <!-- Edit modal -->
-        <div class="em-modal-overlay" id="contactModal" style="display: none;">
-            <div class="em-modal">
-                <div class="em-modal-header">
-                    <h2 class="em-modal-title" id="modalTitle">Edit Contact</h2>
-                    <button class="em-modal-close" id="modalClose">&times;</button>
-                </div>
-                <div class="em-modal-body" id="modalBody"></div>
-                <div class="em-modal-footer">
-                    <button class="em-btn em-btn-secondary" id="modalCancel">Cancel</button>
-                    <button class="em-btn em-btn-primary" id="modalSave">Save</button>
-                </div>
+    </main>
+
+    <!-- Edit modal (outside <main> to avoid stacking context from em-fade-in transform) -->
+    <div class="em-modal-overlay" id="contactModal" style="display: none;">
+        <div class="em-modal">
+            <div class="em-modal-header">
+                <h2 class="em-modal-title" id="modalTitle">Edit Contact</h2>
+                <button class="em-modal-close" id="modalClose">&times;</button>
+            </div>
+            <div class="em-modal-body" id="modalBody"></div>
+            <div class="em-modal-footer">
+                <button class="em-btn em-btn-secondary" id="modalCancel">Cancel</button>
+                <button class="em-btn em-btn-primary" id="modalSave">Save</button>
             </div>
         </div>
-    </main>
+    </div>
 
     <script type="module" src="/js/pages/contacts.js"></script>
 </body>
