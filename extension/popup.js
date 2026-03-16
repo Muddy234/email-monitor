@@ -418,6 +418,56 @@ function openDashboardTab(path) {
 // ---------------------------------------------------------------------------
 
 let isSignUpMode = false;
+let pendingUserId = null;
+let pendingPhone = null;
+
+/**
+ * Format a raw phone string to E.164.
+ * Strips non-digits, prepends +1 for 10-digit US numbers.
+ * NOTE: Hardcodes US country code. Add country selector for international users later.
+ */
+function formatPhoneE164(raw) {
+  const digits = raw.replace(/\D/g, "");
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+  if (raw.startsWith("+")) return raw.replace(/[^\d+]/g, "");
+  return `+${digits}`;
+}
+
+async function callEdgeFunction(name, body) {
+  const resp = await fetch(`${SUPABASE_URL}/functions/v1/${name}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: SUPABASE_ANON_KEY,
+    },
+    body: JSON.stringify(body),
+  });
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data.error || `Request failed (${resp.status})`);
+  return data;
+}
+
+function showPhoneVerifyFlow() {
+  document.getElementById("phoneVerifySection").style.display = "";
+  document.getElementById("loginBtn").style.display = "none";
+  document.getElementById("toggleAuth").style.display = "none";
+  document.getElementById("authEmail").parentElement.style.display = "none";
+  document.getElementById("authPassword").parentElement.style.display = "none";
+  hideError();
+}
+
+function resetPhoneVerifyState() {
+  pendingUserId = null;
+  pendingPhone = null;
+  document.getElementById("phoneVerifySection").style.display = "none";
+  document.getElementById("phoneInputGroup").style.display = "none";
+  document.getElementById("codeInputGroup").style.display = "none";
+  document.getElementById("phoneVerifyToggle").style.display = "";
+  document.getElementById("loginBtn").style.display = "";
+  document.getElementById("authEmail").parentElement.style.display = "";
+  document.getElementById("authPassword").parentElement.style.display = "";
+}
 
 // Welcome → Get Started
 document.getElementById("getStartedBtn").addEventListener("click", async () => {
@@ -447,9 +497,12 @@ document.getElementById("loginBtn").addEventListener("click", async () => {
       if (result.access_token) {
         session = sessionFromResponse(result);
       } else {
+        // No session = email confirmation pending.
+        // Store userId for phone verify fallback.
+        pendingUserId = result.id || result.user?.id || null;
         btn.disabled = false;
         btn.textContent = "Sign Up";
-        showError("Check your email to confirm your account");
+        showPhoneVerifyFlow();
         return;
       }
     } else {
@@ -496,7 +549,113 @@ document.getElementById("toggleAuth").addEventListener("click", () => {
     btn.textContent = "Log In";
     link.textContent = "Don't have an account? Sign up";
   }
+  resetPhoneVerifyState();
   hideError();
+});
+
+// --- Phone OTP verify handlers ---
+
+// "Verify by phone" toggle
+document.getElementById("phoneVerifyToggle").addEventListener("click", () => {
+  document.getElementById("phoneVerifyToggle").style.display = "none";
+  document.getElementById("phoneInputGroup").style.display = "";
+});
+
+// Send code
+document.getElementById("sendCodeBtn").addEventListener("click", async () => {
+  hideError();
+  const raw = document.getElementById("phoneInput").value.trim();
+  if (!raw) {
+    showError("Please enter your phone number");
+    return;
+  }
+
+  if (!pendingUserId) {
+    showError("No pending signup found. Please sign up again.");
+    return;
+  }
+
+  const phone = formatPhoneE164(raw);
+  const btn = document.getElementById("sendCodeBtn");
+  btn.disabled = true;
+  btn.textContent = "Sending...";
+
+  try {
+    await callEdgeFunction("phone-verify-start", { userId: pendingUserId, phone });
+    pendingPhone = phone;
+    document.getElementById("phoneInputGroup").style.display = "none";
+    document.getElementById("codeInputGroup").style.display = "";
+  } catch (err) {
+    showError(err.message || "Failed to send verification code");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Send Code";
+  }
+});
+
+// Verify code
+document.getElementById("verifyCodeBtn").addEventListener("click", async () => {
+  hideError();
+  const code = document.getElementById("otpInput").value.trim();
+  if (!code) {
+    showError("Please enter the verification code");
+    return;
+  }
+
+  if (!pendingUserId || !pendingPhone) {
+    showError("No pending verification. Please start over.");
+    return;
+  }
+
+  const btn = document.getElementById("verifyCodeBtn");
+  btn.disabled = true;
+  btn.textContent = "Verifying...";
+
+  try {
+    const data = await callEdgeFunction("phone-verify-confirm", {
+      userId: pendingUserId,
+      phone: pendingPhone,
+      code,
+    });
+
+    if (data.access_token) {
+      const session = sessionFromResponse(data);
+      await chrome.storage.local.set({ supabaseSession: session });
+      await setWorkerActive(session.access_token, session.user.id, true);
+
+      // Set timezone
+      try {
+        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Chicago";
+        await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${session.user.id}`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ timezone: tz }),
+        });
+      } catch (_) {}
+
+      chrome.runtime.sendMessage({ type: "supabaseSessionChanged" });
+      await setState("setup");
+      showSetupView(session);
+    } else {
+      showError("Verification succeeded but no session returned. Please try logging in.");
+    }
+  } catch (err) {
+    showError(err.message || "Verification failed");
+    btn.disabled = false;
+    btn.textContent = "Verify";
+  }
+});
+
+// Enter key handlers for phone verify inputs
+document.getElementById("phoneInput")?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") document.getElementById("sendCodeBtn").click();
+});
+document.getElementById("otpInput")?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") document.getElementById("verifyCodeBtn").click();
 });
 
 // Logout — two-step confirmation

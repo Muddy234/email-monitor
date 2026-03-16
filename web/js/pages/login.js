@@ -1,8 +1,13 @@
 /**
  * Login page logic — login/signup toggle, auth calls, redirect on success.
+ * Includes phone OTP fallback for users whose email verification is blocked
+ * by corporate gateways (Mimecast, Proofpoint, etc.).
  */
 import { supabase } from "../supabase-client.js";
 import { signIn, signUp } from "../auth.js";
+
+const SUPABASE_URL = "https://frbvdoszenrrlswegsxq.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZyYnZkb3N6ZW5ycmxzd2Vnc3hxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI2NjA0OTUsImV4cCI6MjA4ODIzNjQ5NX0.OCYTv_B823u_9o_Q9S-qPpUea9DQt_xpsWuNnolJT7M";
 
 // If already logged in, redirect to dashboard
 const { data: { session } } = await supabase.auth.getSession();
@@ -18,7 +23,19 @@ const loginBtn = document.getElementById("loginBtn");
 const toggleBtn = document.getElementById("toggleAuth");
 const errorEl = document.getElementById("authError");
 
+// Phone verify elements
+const phoneVerifySection = document.getElementById("phoneVerifySection");
+const phoneVerifyToggle = document.getElementById("phoneVerifyToggle");
+const phoneInputGroup = document.getElementById("phoneInputGroup");
+const phoneInput = document.getElementById("phoneInput");
+const sendCodeBtn = document.getElementById("sendCodeBtn");
+const codeInputGroup = document.getElementById("codeInputGroup");
+const otpInput = document.getElementById("otpInput");
+const verifyCodeBtn = document.getElementById("verifyCodeBtn");
+
 let isSignUp = false;
+let pendingUserId = null;
+let pendingPhone = null;
 
 function showErr(msg) {
     errorEl.textContent = msg;
@@ -27,6 +44,44 @@ function showErr(msg) {
 
 function hideErr() {
     errorEl.classList.remove("visible");
+}
+
+/**
+ * Format a raw phone string to E.164.
+ * Strips non-digits, prepends +1 for 10-digit US numbers.
+ * NOTE: Hardcodes US country code. Add country selector for international users later.
+ */
+function formatPhoneE164(raw) {
+    const digits = raw.replace(/\D/g, "");
+    if (digits.length === 10) return `+1${digits}`;
+    if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+    if (raw.startsWith("+")) return raw.replace(/[^\d+]/g, "");
+    return `+${digits}`;
+}
+
+/** Show the phone verify section and hide the signup form fields. */
+function showPhoneVerifyFlow() {
+    phoneVerifySection.style.display = "";
+    nameGroup.style.display = "none";
+    loginBtn.style.display = "none";
+    toggleBtn.style.display = "none";
+    document.querySelector(".em-form-group:has(#authEmail)")?.style.setProperty("display", "none");
+    document.querySelector(".em-form-group:has(#authPassword)")?.style.setProperty("display", "none");
+    hideErr();
+}
+
+async function callEdgeFunction(name, body) {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/${name}`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            apikey: SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+    return data;
 }
 
 loginBtn.addEventListener("click", async () => {
@@ -55,9 +110,14 @@ loginBtn.addEventListener("click", async () => {
             if (result.session) {
                 window.location.replace("/app/dashboard.html");
             } else {
+                // No session = email confirmation pending.
+                // Store userId for phone verify fallback.
+                // If user.identities is empty, this is a re-signup for an existing
+                // unconfirmed account — Supabase re-sends the confirmation email.
+                pendingUserId = result.user?.id || null;
                 loginBtn.disabled = false;
                 loginBtn.textContent = "Sign Up";
-                showErr("Check your email to confirm your account");
+                showPhoneVerifyFlow();
             }
         } else {
             await signIn(email, password);
@@ -70,6 +130,84 @@ loginBtn.addEventListener("click", async () => {
     }
 });
 
+// "Verify by phone" toggle
+phoneVerifyToggle.addEventListener("click", () => {
+    phoneVerifyToggle.style.display = "none";
+    phoneInputGroup.style.display = "";
+});
+
+// Send code
+sendCodeBtn.addEventListener("click", async () => {
+    hideErr();
+    const raw = phoneInput.value.trim();
+    if (!raw) {
+        showErr("Please enter your phone number");
+        return;
+    }
+
+    if (!pendingUserId) {
+        showErr("No pending signup found. Please sign up again.");
+        return;
+    }
+
+    const phone = formatPhoneE164(raw);
+    sendCodeBtn.disabled = true;
+    sendCodeBtn.textContent = "Sending...";
+
+    try {
+        await callEdgeFunction("phone-verify-start", { userId: pendingUserId, phone });
+        pendingPhone = phone;
+        phoneInputGroup.style.display = "none";
+        codeInputGroup.style.display = "";
+    } catch (err) {
+        showErr(err.message || "Failed to send verification code");
+    } finally {
+        sendCodeBtn.disabled = false;
+        sendCodeBtn.textContent = "Send Code";
+    }
+});
+
+// Verify code
+verifyCodeBtn.addEventListener("click", async () => {
+    hideErr();
+    const code = otpInput.value.trim();
+    if (!code) {
+        showErr("Please enter the verification code");
+        return;
+    }
+
+    if (!pendingUserId || !pendingPhone) {
+        showErr("No pending verification. Please start over.");
+        return;
+    }
+
+    verifyCodeBtn.disabled = true;
+    verifyCodeBtn.textContent = "Verifying...";
+
+    try {
+        const data = await callEdgeFunction("phone-verify-confirm", {
+            userId: pendingUserId,
+            phone: pendingPhone,
+            code,
+        });
+
+        if (data.access_token) {
+            // Set the session and redirect
+            await supabase.auth.setSession({
+                access_token: data.access_token,
+                refresh_token: data.refresh_token,
+            });
+            window.location.replace("/app/dashboard.html");
+        } else {
+            showErr("Verification succeeded but no session returned. Please try logging in.");
+        }
+    } catch (err) {
+        showErr(err.message || "Verification failed");
+        verifyCodeBtn.disabled = false;
+        verifyCodeBtn.textContent = "Verify";
+    }
+});
+
 toggleBtn.addEventListener("click", () => {
     isSignUp = !isSignUp;
     loginBtn.textContent = isSignUp ? "Sign Up" : "Log In";
@@ -77,9 +215,23 @@ toggleBtn.addEventListener("click", () => {
         ? "Already have an account? Log in"
         : "Don't have an account? Sign up";
     nameGroup.style.display = isSignUp ? "" : "none";
+
+    // Reset phone verify state when toggling
+    phoneVerifySection.style.display = "none";
+    phoneInputGroup.style.display = "none";
+    codeInputGroup.style.display = "none";
+    loginBtn.style.display = "";
+    document.querySelector(".em-form-group:has(#authEmail)")?.style.setProperty("display", "");
+    document.querySelector(".em-form-group:has(#authPassword)")?.style.setProperty("display", "");
+    pendingUserId = null;
+    pendingPhone = null;
     hideErr();
 });
 
 passwordInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") loginBtn.click();
+});
+
+otpInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") verifyCodeBtn.click();
 });

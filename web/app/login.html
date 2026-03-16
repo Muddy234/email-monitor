@@ -35,6 +35,26 @@
 
             <button class="em-btn em-btn-primary" id="loginBtn" style="width: 100%; justify-content: center;">Log In</button>
 
+            <!-- Phone OTP fallback verification (shown after signup when email may be blocked) -->
+            <div id="phoneVerifySection" style="display: none;">
+                <p class="em-form-info" style="text-align: center; color: #78716C; font-size: 14px; margin: 12px 0 8px;">Check your email to confirm your account</p>
+                <button class="em-login-toggle" id="phoneVerifyToggle">Didn't receive the email? Verify by phone instead</button>
+                <div id="phoneInputGroup" style="display: none;">
+                    <div class="em-form-group">
+                        <label class="em-form-label" for="phoneInput">Phone number</label>
+                        <input class="em-form-input" type="tel" id="phoneInput" placeholder="+1 (555) 123-4567">
+                    </div>
+                    <button class="em-btn em-btn-primary" id="sendCodeBtn" style="width: 100%; justify-content: center;">Send Code</button>
+                </div>
+                <div id="codeInputGroup" style="display: none;">
+                    <div class="em-form-group">
+                        <label class="em-form-label" for="otpInput">Verification code</label>
+                        <input class="em-form-input" type="text" id="otpInput" placeholder="123456" maxlength="6" inputmode="numeric">
+                    </div>
+                    <button class="em-btn em-btn-primary" id="verifyCodeBtn" style="width: 100%; justify-content: center;">Verify</button>
+                </div>
+            </div>
+
             <button class="em-login-toggle" id="toggleAuth">Don't have an account? Sign up</button>
         </div>
     </div>

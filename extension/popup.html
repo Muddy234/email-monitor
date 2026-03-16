@@ -311,6 +311,25 @@
     <button class="btn btn-primary" id="loginBtn">Log In</button>
     <div class="auth-link" id="toggleAuth">Don't have an account? Sign up</div>
     <div class="error-msg" id="authError"></div>
+    <!-- Phone OTP fallback (shown after signup when email may be blocked) -->
+    <div id="phoneVerifySection" style="display: none;">
+      <div style="font-size: 12px; color: #78716C; margin-bottom: 8px; text-align: center;">Check your email to confirm your account</div>
+      <div class="auth-link" id="phoneVerifyToggle">Didn't receive the email? Verify by phone</div>
+      <div id="phoneInputGroup" style="display: none; margin-top: 8px;">
+        <div class="form-group">
+          <label for="phoneInput">Phone number</label>
+          <input type="tel" id="phoneInput" placeholder="+1 (555) 123-4567">
+        </div>
+        <button class="btn btn-primary" id="sendCodeBtn">Send Code</button>
+      </div>
+      <div id="codeInputGroup" style="display: none; margin-top: 8px;">
+        <div class="form-group">
+          <label for="otpInput">Verification code</label>
+          <input type="text" id="otpInput" placeholder="123456" maxlength="6" inputmode="numeric">
+        </div>
+        <button class="btn btn-primary" id="verifyCodeBtn">Verify</button>
+      </div>
+    </div>
   </div>
 
   <!-- Setup checklist (post-login, pre-ready) -->
