@@ -122,17 +122,29 @@ async function fetchCounts(session) {
     // Fetch drafts, notable signals, and weekly stats in parallel
     const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
 
-    const [drafts, events, runs] = await Promise.all([
+    const [drafts, emails, events, runs] = await Promise.all([
       supabaseQuery(`drafts?select=id&user_id=eq.${uid}&status=eq.pending`, session),
+      supabaseQuery(`emails?select=id,status,classifications(needs_response),drafts(id)&user_id=eq.${uid}&status=not.in.(completed,dismissed)&order=received_time.desc`, session),
       supabaseQuery(`response_events?select=email_id,pri,mc,sender_tier,rt&user_id=eq.${uid}`, session),
       supabaseQuery(`pipeline_runs?select=emails_processed,drafts_generated&user_id=eq.${uid}&started_at=gte.${weekAgo}`, session),
     ]);
 
     const draftCount = drafts.length;
 
-    // Count notable: high/med priority, financial, critical/internal sender, or has response type
+    // Index response events by email_id
+    const evMap = {};
+    for (const ev of events) evMap[ev.email_id] = ev;
+
+    // Count notable using same logic as web dashboard:
+    // exclude completed/dismissed, emails with drafts, missing classifications, needs_response=true
     let notableCount = 0;
-    for (const ev of events) {
+    for (const email of emails) {
+      const hasDraft = email.drafts && email.drafts.length > 0;
+      if (hasDraft) continue;
+      const cls = email.classifications?.[0];
+      if (!cls || cls.needs_response) continue;
+      const ev = evMap[email.id];
+      if (!ev) continue;
       if (ev.pri === "high" || ev.pri === "med" || ev.mc === true ||
           ev.sender_tier === "C" || ev.sender_tier === "I" || ev.rt !== "none") {
         notableCount++;

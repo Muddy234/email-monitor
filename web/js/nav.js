@@ -5,14 +5,10 @@
 import { signOut, getUserEmail } from "./auth.js";
 import { escapeHtml } from "./ui.js";
 
-const DEV_MODE_KEY = "clarion_dev_mode";
+const DEV_EMAILS = ["natemcbride23@gmail.com"];
 
-export function isDevMode() {
-    return localStorage.getItem(DEV_MODE_KEY) === "true";
-}
-
-export function setDevMode(enabled) {
-    localStorage.setItem(DEV_MODE_KEY, enabled ? "true" : "false");
+export function isDeveloper(email) {
+    return DEV_EMAILS.includes(email?.toLowerCase());
 }
 
 const NAV_ITEMS = [
@@ -66,7 +62,7 @@ export async function renderNav() {
     const currentPath = window.location.pathname;
     const email = await getUserEmail();
     const initial = (email || "?")[0].toUpperCase();
-    const devMode = isDevMode();
+    const devMode = isDeveloper(email);
 
     const visibleItems = NAV_ITEMS.filter(item => !item.devOnly || devMode);
 
@@ -86,10 +82,6 @@ export async function renderNav() {
             <div class="em-sidebar-user-info">
                 <div class="em-sidebar-email">${escapeHtml(email || "\u2014")}</div>
                 <div class="em-sidebar-actions">
-                    <label class="em-dev-toggle" title="Show developer tools">
-                        <input type="checkbox" id="em-dev-mode-toggle" ${devMode ? "checked" : ""}>
-                        <span>Dev</span>
-                    </label>
                     <button class="em-sidebar-logout" id="em-logout-btn">Log out</button>
                 </div>
             </div>
@@ -97,9 +89,4 @@ export async function renderNav() {
     `;
 
     document.getElementById("em-logout-btn").addEventListener("click", signOut);
-
-    document.getElementById("em-dev-mode-toggle").addEventListener("change", (e) => {
-        setDevMode(e.target.checked);
-        renderNav();
-    });
 }
