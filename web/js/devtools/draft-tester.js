@@ -10,6 +10,7 @@ import { buildSystemPrompt, buildUserPrompt } from "./prompt-builder.js";
 let styleGuide = null;
 let userName = "";
 let userTitle = "";
+let userAliases = [];
 
 export async function initDraftTester() {
     const panel = document.getElementById("panel-draft-tester");
@@ -20,13 +21,14 @@ export async function initDraftTester() {
 
     const { data: profile } = await supabase
         .from("profiles")
-        .select("writing_style_guide, style_sample_count")
+        .select("writing_style_guide, style_sample_count, display_name, user_email_aliases")
         .eq("id", user.id)
         .single();
 
     styleGuide = profile?.writing_style_guide || null;
-    userName = user.user_metadata?.full_name || user.email?.split("@")[0] || "";
+    userName = profile?.display_name || user.user_metadata?.full_name || user.email?.split("@")[0] || "";
     userTitle = user.user_metadata?.title || "professional";
+    userAliases = (profile?.user_email_aliases || []).map(a => a.toLowerCase());
 
     panel.innerHTML = `
         <div class="em-detail-grid">
@@ -70,8 +72,36 @@ async function renderDraftDetail(email, userId) {
         contact = data;
     }
 
+    // Fetch conversation messages for thread context
+    let conversationMessages = [];
+    if (email.conversation_id) {
+        const { data } = await supabase
+            .from("conversations")
+            .select("messages")
+            .eq("user_id", userId)
+            .eq("conversation_id", email.conversation_id)
+            .single();
+        conversationMessages = data?.messages || [];
+    }
+
+    // Fetch thread stats for briefing
+    let threadStats = null;
+    if (email.conversation_id) {
+        const { data } = await supabase
+            .from("threads")
+            .select("*")
+            .eq("user_id", userId)
+            .eq("conversation_id", email.conversation_id)
+            .single();
+        threadStats = data;
+    }
+
     const systemPrompt = buildSystemPrompt(userName, userTitle);
-    const userPrompt = buildUserPrompt(email, cls, contact, styleGuide);
+    const userPrompt = buildUserPrompt(email, cls, contact, styleGuide, {
+        conversationMessages,
+        userAliases,
+        threadStats,
+    });
 
     detail.innerHTML = `
         <div class="em-detail-grid" style="margin-top:24px">

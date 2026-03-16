@@ -49,7 +49,167 @@ export function buildSystemPrompt(userName, userTitle) {
         .replace(/\{user_title\}/g, userTitle || "professional");
 }
 
-export function buildUserPrompt(email, classification, contact, styleGuide) {
+/**
+ * Build a sender briefing summary from contact data.
+ * Port of worker/pipeline/enrichment.py _build_sender_briefing().
+ */
+export function buildSenderBriefing(contact, email) {
+    if (!contact) return "";
+
+    const senderName = contact.name || (email?.sender_email || "").split("@")[0] || "Unknown";
+
+    // Use pre-computed summary if available
+    if (contact.relationship_summary) return contact.relationship_summary;
+
+    const rate = contact.response_rate;
+    if (rate == null) return `${senderName} — New sender, no prior history`;
+
+    const epm = contact.emails_per_month || 0;
+    const isInternal = contact.contact_type === "internal";
+    const typeStr = isInternal ? "internal" : "external";
+    const freqLabel = epm >= 20 ? "very frequent" : epm >= 5 ? "regular" : epm >= 1 ? "occasional" : "rare";
+
+    let summary = `${senderName} is a ${freqLabel} ${typeStr} contact. User responds to ${(rate * 100).toFixed(0)}% of their emails`;
+
+    const latency = contact.avg_response_time_hours;
+    if (latency != null) {
+        const latencyLabel = latency < 1 ? "under an hour" : latency < 24 ? `${Math.round(latency)} hours` : `${Math.round(latency / 24)} days`;
+        summary += `, typically within ${latencyLabel}`;
+    }
+
+    const avgBody = contact.avg_response_body_length || contact.user_avg_body_length;
+    if (avgBody != null && latency != null) {
+        const lengthLabel = avgBody > 500 ? "detailed" : avgBody > 150 ? "moderate-length" : "brief";
+        // Insert length label before latency (match Python format)
+        summary = summary.replace(`, typically within`, `, typically ${lengthLabel} replies within`);
+    }
+
+    summary += ".";
+    return summary;
+}
+
+/**
+ * Build a thread briefing summary from conversation messages + user aliases.
+ * Port of worker/pipeline/enrichment.py _build_thread_briefing().
+ */
+export function buildThreadBriefing(conversationMessages, userAliases, emailReceivedTime) {
+    if (!conversationMessages || !conversationMessages.length) return "New conversation";
+
+    const aliases = (userAliases || []).map(a => a.toLowerCase());
+    const sorted = [...conversationMessages].sort(
+        (a, b) => (a.received_time || "").localeCompare(b.received_time || "")
+    );
+
+    const total = sorted.length;
+    const userMsgs = sorted.filter(m => aliases.includes((m.sender_email || "").toLowerCase()));
+    const userCount = userMsgs.length;
+    const participation = total > 0 ? userCount / total : 0;
+
+    // Thread duration
+    let durationDays = 0;
+    if (sorted.length >= 2) {
+        const first = new Date(sorted[0].received_time);
+        const last = new Date(sorted[sorted.length - 1].received_time);
+        if (!isNaN(first) && !isNaN(last)) {
+            durationDays = Math.max(0, Math.round((last - first) / (1000 * 60 * 60 * 24)));
+        }
+    }
+
+    const ageLabel = durationDays === 0 ? "new (started today)" :
+                     durationDays <= 1 ? "recent (1 day old)" :
+                     durationDays <= 7 ? `active (${durationDays} days old)` :
+                     `long-running (${durationDays} days old)`;
+
+    // Other replies since user's last message
+    let otherSince = 0;
+    const otherSenders = new Set();
+    if (userMsgs.length) {
+        const lastUserTime = userMsgs.reduce((max, m) => {
+            const t = new Date(m.received_time);
+            return t > max ? t : max;
+        }, new Date(0));
+
+        for (const m of conversationMessages) {
+            const sender = (m.sender_email || "").toLowerCase();
+            if (aliases.includes(sender)) continue;
+            const mt = new Date(m.received_time);
+            if (!isNaN(mt) && mt > lastUserTime) {
+                otherSince++;
+                otherSenders.add(sender);
+            }
+        }
+    }
+
+    const otherDesc = otherSince > 0
+        ? `${otherSince} replies from ${[...otherSenders].slice(0, 3).join(", ")} since user's last message`
+        : "No new replies since user's last message";
+
+    return `Thread is ${ageLabel} with ${total} messages. User has contributed ${userCount} (${(participation * 100).toFixed(0)}% participation). ${otherDesc}.`;
+}
+
+/**
+ * Build THREAD CONTEXT block from conversation messages.
+ * Port of worker/pipeline/drafts.py _build_thread_block().
+ */
+export function buildThreadBlock(conversationMessages, userAliases, emailReceivedTime) {
+    if (!conversationMessages || !conversationMessages.length) return "";
+
+    const aliases = (userAliases || []).map(a => a.toLowerCase());
+    const sorted = [...conversationMessages].sort(
+        (a, b) => (a.received_time || "").localeCompare(b.received_time || "")
+    );
+
+    // User's last reply
+    let userLast = null;
+    const userMsgs = sorted.filter(m => aliases.includes((m.sender_email || "").toLowerCase()));
+    if (userMsgs.length) {
+        const last = userMsgs[userMsgs.length - 1];
+        const body = (last.body || "").substring(0, 1000);
+        if (body) {
+            userLast = {
+                sender: "User",
+                received_time: last.received_time || "",
+                body,
+            };
+        }
+    }
+
+    // Thread opener (first message if different from inbound email)
+    let threadOpener = null;
+    if (sorted.length) {
+        const opener = sorted[0];
+        if (opener.received_time !== emailReceivedTime) {
+            const body = (opener.body || "").substring(0, 500);
+            if (body) {
+                threadOpener = {
+                    sender: opener.sender_name || opener.sender_email || "Unknown",
+                    received_time: opener.received_time || "",
+                    body,
+                };
+            }
+        }
+    }
+
+    if (!userLast && !threadOpener) return "";
+
+    const parts = ["\n\nTHREAD CONTEXT (prior messages in this conversation):"];
+    if (threadOpener) {
+        parts.push(`--- Thread opener (${threadOpener.sender}, ${threadOpener.received_time}) ---`);
+        parts.push(threadOpener.body);
+    }
+    if (userLast) {
+        parts.push(`\n--- Your last reply (${userLast.received_time}) ---`);
+        parts.push(userLast.body);
+    }
+
+    return parts.join("\n");
+}
+
+export function buildUserPrompt(email, classification, contact, styleGuide, {
+    conversationMessages = [],
+    userAliases = [],
+    threadStats = null,
+} = {}) {
     const subject = email.subject || "(no subject)";
     const senderName = email.sender_name || "Unknown";
     const sender = email.sender_email || "";
@@ -73,6 +233,18 @@ export function buildUserPrompt(email, classification, contact, styleGuide) {
         contextLines.push(`Expected response type: ${cls.archetype}`);
     }
 
+    // Sender briefing from contact data
+    const senderSummary = buildSenderBriefing(contact, email);
+    if (senderSummary) {
+        contextLines.push(`Sender context: ${senderSummary}`);
+    }
+
+    // Thread briefing from conversation messages
+    const threadSummary = buildThreadBriefing(conversationMessages, userAliases, email.received_time);
+    if (threadSummary) {
+        contextLines.push(`Thread context: ${threadSummary}`);
+    }
+
     // Tone guidance from contact
     const toneLines = [];
     if (contact) {
@@ -92,6 +264,9 @@ export function buildUserPrompt(email, classification, contact, styleGuide) {
         styleBlock = `\n\nWRITING STYLE GUIDE:\n${styleGuide}\n`;
     }
 
+    // Thread context block (prior messages)
+    const threadBlock = buildThreadBlock(conversationMessages, userAliases, email.received_time);
+
     const contextBlock = contextLines.join("\n");
 
     return `Draft a reply to the following email:
@@ -102,7 +277,7 @@ SUBJECT: ${subject}
 EMAIL BODY:
 ${body}
 
-${contextBlock}${toneBlock}${styleBlock}
+${contextBlock}${toneBlock}${styleBlock}${threadBlock}
 
 Generate the reply body text only (no subject, no headers).`;
 }
