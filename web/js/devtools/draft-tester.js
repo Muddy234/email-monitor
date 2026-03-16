@@ -188,8 +188,11 @@ async function renderDraftDetail(email, userId) {
             const data = await resp.json();
             if (data?.error) throw new Error(data.error);
 
-            const draftText = data?.draft || "";
+            let draftText = data?.draft || "";
             if (!draftText) throw new Error("Empty response from API");
+
+            // Strip chain-of-thought <thinking> block from model output
+            draftText = draftText.replace(/<thinking>[\s\S]*?<\/thinking>/g, "").trim();
 
             statusEl.textContent = "";
             resultEl.innerHTML = `
