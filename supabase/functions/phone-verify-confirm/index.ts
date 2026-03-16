@@ -9,6 +9,7 @@ const corsHeaders = {
 
 const E164_REGEX = /^\+[1-9]\d{1,14}$/;
 const CODE_REGEX = /^\d{6}$/;
+const MAX_ATTEMPTS = 5;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -25,7 +26,6 @@ Deno.serve(async (req) => {
 
     const { userId, phone, code } = await req.json();
 
-    // --- Validation ---
     if (!userId || !phone || !code) {
       return new Response(
         JSON.stringify({ error: "userId, phone, and code are required" }),
@@ -47,6 +47,55 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Look up the verification record
+    const { data: verifyRow, error: lookupError } = await supabase
+      .from("phone_verifications")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("phone", phone)
+      .gt("expires_at", new Date().toISOString())
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
+
+    if (lookupError || !verifyRow) {
+      return new Response(
+        JSON.stringify({ error: "No valid verification found. Please request a new code." }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    if (verifyRow.attempts >= MAX_ATTEMPTS) {
+      await supabase.from("phone_verifications").delete().eq("id", verifyRow.id);
+      return new Response(
+        JSON.stringify({ error: "Too many attempts. Please request a new code." }),
+        { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    // Hash the submitted code and compare
+    const encoder = new TextEncoder();
+    const hashBuffer = await crypto.subtle.digest("SHA-256", encoder.encode(code));
+    const submittedHash = Array.from(new Uint8Array(hashBuffer))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+
+    if (submittedHash !== verifyRow.code_hash) {
+      // Increment attempts
+      await supabase
+        .from("phone_verifications")
+        .update({ attempts: verifyRow.attempts + 1 })
+        .eq("id", verifyRow.id);
+
+      return new Response(
+        JSON.stringify({ error: "Invalid verification code" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    // Code is correct — clean up verification record
+    await supabase.from("phone_verifications").delete().eq("id", verifyRow.id);
+
     // Verify user exists and is still unconfirmed
     const { data: userData, error: userError } = await supabase.auth.admin.getUserById(userId);
     if (userError || !userData?.user) {
@@ -63,31 +112,9 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Verify the OTP code via Supabase's built-in phone auth
-    const { data: verifyData, error: verifyError } = await supabase.auth.verifyOtp({
-      phone,
-      token: code,
-      type: "sms",
-    });
-
-    if (verifyError) {
-      console.error("OTP verification failed:", verifyError);
-      return new Response(
-        JSON.stringify({ error: verifyError.message || "Invalid or expired verification code" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-
-    // Phone OTP verified successfully.
-    // Side-door: mark the user's email as confirmed and clear the phone number.
-    // This is intentional — phone verification serves as an alternative identity
-    // proof for users whose email confirmation was blocked by corporate gateways
-    // (e.g. Mimecast, Proofpoint). The phone number is cleared after verification
-    // to minimize stored PII since it's only used for this one-time verification,
-    // not for ongoing notifications or account recovery.
+    // Mark email as confirmed (phone is the alternative proof of identity)
     const { error: confirmError } = await supabase.auth.admin.updateUserById(userId, {
       email_confirm: true,
-      phone: "",
     });
 
     if (confirmError) {
@@ -98,12 +125,57 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Return the session from verifyOtp so the client can log in
+    // Generate a session for the now-confirmed user
+    const { data: sessionData, error: sessionError } =
+      await supabase.auth.admin.generateLink({
+        type: "magiclink",
+        email: userData.user.email!,
+      });
+
+    if (sessionError || !sessionData) {
+      console.error("Failed to generate login link:", sessionError);
+      return new Response(
+        JSON.stringify({ error: "Account confirmed but session creation failed. Please log in manually." }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    // Extract the token from the magic link and use it to get a session
+    const linkUrl = new URL(sessionData.properties.action_link);
+    const tokenHash = linkUrl.searchParams.get("token") ||
+      linkUrl.hash.replace("#", "").split("&").find((p: string) => p.startsWith("token="))?.split("=")[1];
+
+    // Use the OTP verification endpoint to exchange the magic link token for a session
+    const verifyRes = await fetch(`${supabaseUrl}/auth/v1/verify`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: serviceRoleKey,
+      },
+      body: JSON.stringify({
+        type: "magiclink",
+        token_hash: tokenHash,
+      }),
+    });
+
+    if (verifyRes.ok) {
+      const session = await verifyRes.json();
+      return new Response(
+        JSON.stringify({
+          access_token: session.access_token,
+          refresh_token: session.refresh_token,
+          user: session.user,
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    // If verify endpoint didn't work, try direct token exchange via GoTrue
+    // Fallback: tell client to log in with their credentials
     return new Response(
       JSON.stringify({
-        access_token: verifyData.session?.access_token,
-        refresh_token: verifyData.session?.refresh_token,
-        user: verifyData.user,
+        confirmed: true,
+        message: "Account confirmed. Please log in with your email and password.",
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );

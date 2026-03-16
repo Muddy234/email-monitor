@@ -17,6 +17,9 @@ Deno.serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const twilioAccountSid = Deno.env.get("TWILIO_ACCOUNT_SID")!;
+    const twilioAuthToken = Deno.env.get("TWILIO_AUTH_TOKEN")!;
+    const twilioMsgServiceSid = Deno.env.get("TWILIO_MESSAGING_SERVICE_SID")!;
 
     const supabase = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
@@ -24,7 +27,6 @@ Deno.serve(async (req) => {
 
     const { userId, phone } = await req.json();
 
-    // --- Validation ---
     if (!userId || !phone) {
       return new Response(
         JSON.stringify({ error: "userId and phone are required" }),
@@ -55,36 +57,72 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Check phone isn't already claimed by a different confirmed user
-    const { data: existingUsers } = await supabase.auth.admin.listUsers();
-    const phoneClaimed = existingUsers?.users?.some(
-      (u) => u.phone === phone && u.id !== userId && u.email_confirmed_at,
-    );
-    if (phoneClaimed) {
+    // Rate limit: max 1 code per user per 60 seconds
+    const { data: recentCodes } = await supabase
+      .from("phone_verifications")
+      .select("created_at")
+      .eq("user_id", userId)
+      .gte("created_at", new Date(Date.now() - 60_000).toISOString())
+      .limit(1);
+
+    if (recentCodes && recentCodes.length > 0) {
       return new Response(
-        JSON.stringify({ error: "This phone number is already associated with another account" }),
-        { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        JSON.stringify({ error: "Please wait 60 seconds before requesting a new code" }),
+        { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
-    // Store phone on user record so OTP can be sent
-    const { error: updateError } = await supabase.auth.admin.updateUserById(userId, { phone });
-    if (updateError) {
-      console.error("Failed to update user phone:", updateError);
+    // Generate 6-digit OTP and hash it
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    const encoder = new TextEncoder();
+    const hashBuffer = await crypto.subtle.digest("SHA-256", encoder.encode(code));
+    const codeHash = Array.from(new Uint8Array(hashBuffer))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+
+    // Delete any existing codes for this user, then insert new one
+    await supabase.from("phone_verifications").delete().eq("user_id", userId);
+
+    const { error: insertError } = await supabase.from("phone_verifications").insert({
+      user_id: userId,
+      phone,
+      code_hash: codeHash,
+      expires_at: new Date(Date.now() + 10 * 60_000).toISOString(), // 10 min expiry
+    });
+
+    if (insertError) {
+      console.error("Failed to store verification code:", insertError);
       return new Response(
-        JSON.stringify({ error: "Failed to set phone number" }),
+        JSON.stringify({ error: "Failed to create verification" }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
-    // Send OTP via Supabase's built-in phone auth (uses configured Twilio provider)
-    // Rate limiting (default 60s between sends) is enforced by Supabase.
-    const { error: otpError } = await supabase.auth.signInWithOtp({ phone });
-    if (otpError) {
-      console.error("OTP send failed:", otpError);
+    // Send SMS via Twilio REST API
+    const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioAccountSid}/Messages.json`;
+    const twilioAuth = btoa(`${twilioAccountSid}:${twilioAuthToken}`);
+
+    const smsRes = await fetch(twilioUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${twilioAuth}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        To: phone,
+        MessagingServiceSid: twilioMsgServiceSid,
+        Body: `Your Clarion AI verification code is: ${code}`,
+      }),
+    });
+
+    if (!smsRes.ok) {
+      const smsErr = await smsRes.json();
+      console.error("Twilio SMS failed:", smsErr);
+      // Clean up the verification record
+      await supabase.from("phone_verifications").delete().eq("user_id", userId);
       return new Response(
-        JSON.stringify({ error: otpError.message || "Failed to send verification code" }),
-        { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        JSON.stringify({ error: smsErr.message || "Failed to send SMS" }),
+        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 

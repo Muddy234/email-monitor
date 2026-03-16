@@ -198,6 +198,16 @@ verifyCodeBtn.addEventListener("click", async () => {
                 refresh_token: data.refresh_token,
             });
             window.location.replace("/app/dashboard.html");
+        } else if (data.confirmed) {
+            // Account confirmed but no auto-session — sign in with stored credentials
+            const email = emailInput.value.trim();
+            const password = passwordInput.value;
+            if (email && password) {
+                await signIn(email, password);
+                window.location.replace("/app/dashboard.html");
+            } else {
+                window.location.replace("/app/login.html");
+            }
         } else {
             showErr("Verification succeeded but no session returned. Please try logging in.");
         }

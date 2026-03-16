@@ -640,6 +640,22 @@ document.getElementById("verifyCodeBtn").addEventListener("click", async () => {
       chrome.runtime.sendMessage({ type: "supabaseSessionChanged" });
       await setState("setup");
       showSetupView(session);
+    } else if (data.confirmed) {
+      // Account confirmed but no auto-session — sign in with stored credentials
+      const email = document.getElementById("authEmail").value.trim();
+      const password = document.getElementById("authPassword").value;
+      if (email && password) {
+        const loginResult = await authRequest("/token?grant_type=password", { email, password });
+        const session = sessionFromResponse(loginResult);
+        await chrome.storage.local.set({ supabaseSession: session });
+        await setWorkerActive(session.access_token, session.user.id, true);
+        chrome.runtime.sendMessage({ type: "supabaseSessionChanged" });
+        await setState("setup");
+        showSetupView(session);
+      } else {
+        showError("Account confirmed. Please log in with your email and password.");
+        resetPhoneVerifyState();
+      }
     } else {
       showError("Verification succeeded but no session returned. Please try logging in.");
     }
