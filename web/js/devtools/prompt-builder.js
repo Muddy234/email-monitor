@@ -92,7 +92,27 @@ export function buildSenderBriefing(contact, email) {
  * Build a thread briefing summary from conversation messages + user aliases.
  * Port of worker/pipeline/enrichment.py _build_thread_briefing().
  */
-export function buildThreadBriefing(conversationMessages, userAliases, emailReceivedTime) {
+export function buildThreadBriefing(conversationMessages, userAliases, emailReceivedTime, threadStats) {
+    // Fallback to pre-computed thread stats when conversation messages aren't available
+    if ((!conversationMessages || !conversationMessages.length) && threadStats) {
+        const total = threadStats.total_messages || 0;
+        const userCount = threadStats.user_messages || 0;
+        const participation = threadStats.participation_rate ?? (total > 0 ? userCount / total : 0);
+        const durationDays = Math.round(threadStats.duration_days || 0);
+
+        const ageLabel = durationDays === 0 ? "new (started today)" :
+                         durationDays <= 1 ? "recent (1 day old)" :
+                         durationDays <= 7 ? `active (${durationDays} days old)` :
+                         `long-running (${durationDays} days old)`;
+
+        const others = threadStats.other_responders || [];
+        const otherDesc = others.length > 0
+            ? `Other participants: ${others.slice(0, 3).join(", ")}`
+            : "No other participants";
+
+        return `Thread is ${ageLabel} with ${total} messages. User has contributed ${userCount} (${(participation * 100).toFixed(0)}% participation). ${otherDesc}.`;
+    }
+
     if (!conversationMessages || !conversationMessages.length) return "New conversation";
 
     const aliases = (userAliases || []).map(a => a.toLowerCase());
@@ -239,8 +259,8 @@ export function buildUserPrompt(email, classification, contact, styleGuide, {
         contextLines.push(`Sender context: ${senderSummary}`);
     }
 
-    // Thread briefing from conversation messages
-    const threadSummary = buildThreadBriefing(conversationMessages, userAliases, email.received_time);
+    // Thread briefing from conversation messages (falls back to threadStats)
+    const threadSummary = buildThreadBriefing(conversationMessages, userAliases, email.received_time, threadStats);
     if (threadSummary) {
         contextLines.push(`Thread context: ${threadSummary}`);
     }
