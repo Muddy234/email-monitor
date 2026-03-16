@@ -6,14 +6,13 @@ import { requireAuth, listenAuthChanges } from "../auth.js";
 import { renderNav } from "../nav.js";
 import { supabase } from "../supabase-client.js";
 import { showError, showEmpty, getParam, setParam, relativeTime, escapeHtml } from "../ui.js";
-import { requireSubscription, isGrandfathered, openPortal } from "../subscription.js";
+import { getSubscription, isSubscriptionActive, isGrandfathered, openPortal } from "../subscription.js";
 
 await requireAuth();
 listenAuthChanges();
 await renderNav();
 
-const subscription = await requireSubscription();
-if (!subscription) throw new Error("subscription_required");
+const subscription = await getSubscription();
 
 // -------------------------------------------------------------------------
 // State
@@ -291,6 +290,20 @@ function renderWeeklySummary(emailCount, draftsGenerated, actionableCount) {
 function renderBillingCard() {
     const container = document.getElementById("billingSection");
     if (!container) return;
+
+    if (!subscription || !isSubscriptionActive(subscription)) {
+        container.innerHTML = `
+            <div class="em-card em-billing-card">
+                <div class="em-billing-info">
+                    <div class="em-billing-label">Subscription</div>
+                    <div class="em-billing-plan">No active subscription</div>
+                    <div class="em-billing-detail">Subscribe to unlock AI-powered email drafts</div>
+                </div>
+                <a href="/app/account.html" class="em-btn em-btn-primary">Subscribe</a>
+            </div>
+        `;
+        return;
+    }
 
     if (isGrandfathered(subscription)) {
         container.innerHTML = `

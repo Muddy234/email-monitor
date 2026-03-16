@@ -8,13 +8,11 @@ import { requireAuth, listenAuthChanges } from "../auth.js";
 import { renderNav } from "../nav.js";
 import { supabase } from "../supabase-client.js";
 import { showError, showEmpty, showToast, getParam, setParam, formatDate, relativeTime, escapeHtml } from "../ui.js";
-import { requireSubscription } from "../subscription.js";
 import { renderFeedbackControls, bindFeedbackEvents } from "../components/feedback.js";
 
 await requireAuth();
 listenAuthChanges();
 await renderNav();
-if (!(await requireSubscription())) throw new Error("subscription_required");
 
 // -------------------------------------------------------------------------
 // State

@@ -2609,3 +2609,117 @@
     color: var(--em-slate-500);
     line-height: 1.5;
 }
+
+/* --- 50. Account Page --- */
+.em-account-card {
+    background: var(--em-white);
+    border: 1px solid var(--em-slate-200);
+    border-radius: var(--em-radius);
+    padding: 32px;
+}
+
+.em-account-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.em-account-avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: var(--em-blue-600);
+    color: var(--em-white);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.em-account-email {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--em-slate-900);
+}
+
+.em-account-plan {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+.em-account-plan-name {
+    font-size: 13px;
+    color: var(--em-slate-500);
+}
+
+.em-account-renewal {
+    font-size: 13px;
+    color: var(--em-slate-500);
+    padding: 12px 0;
+    border-top: 1px solid var(--em-slate-200);
+    margin-bottom: 4px;
+}
+
+.em-account-actions {
+    padding-top: 16px;
+    border-top: 1px solid var(--em-slate-200);
+}
+
+.em-account-subscribe {
+    text-align: center;
+    padding: 16px 0;
+}
+
+.em-account-offer h3 {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--em-slate-900);
+    margin-bottom: 6px;
+}
+
+.em-account-offer p {
+    font-size: 13px;
+    color: var(--em-slate-500);
+    line-height: 1.5;
+    margin-bottom: 16px;
+}
+
+.em-account-price {
+    font-size: 36px;
+    font-weight: 700;
+    color: var(--em-slate-900);
+    margin-bottom: 24px;
+}
+
+.em-account-price span {
+    font-size: 16px;
+    font-weight: 400;
+    color: var(--em-slate-500);
+}
+
+.em-account-hint {
+    font-size: 12px;
+    color: var(--em-slate-400);
+    margin-top: 12px;
+    min-height: 18px;
+}
+
+.em-badge-green {
+    background: var(--em-emerald-100);
+    color: var(--em-emerald-600);
+}
+
+.em-badge-amber {
+    background: var(--em-amber-100);
+    color: var(--em-amber-600);
+}
+
+.em-badge-red {
+    background: var(--em-red-100);
+    color: var(--em-red-600);
+}

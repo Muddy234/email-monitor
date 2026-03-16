@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://esm.sh; connect-src https://*.supabase.co wss://*.supabase.co https://esm.sh; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:;">
+    <title>Account — Clarion AI</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/app.css">
+</head>
+<body class="em-app">
+    <nav id="em-sidebar" class="em-sidebar"></nav>
+    <main class="em-main em-fade-in">
+        <div class="em-page-header">
+            <div>
+                <h1 class="em-page-title">Account</h1>
+                <p class="em-page-subtitle" id="pageSubtitle">Manage your subscription and account settings</p>
+            </div>
+        </div>
+
+        <div id="accountContainer">
+            <div class="em-skeleton em-skeleton-card"></div>
+        </div>
+    </main>
+
+    <script type="module" src="/js/pages/account.js"></script>
+</body>
+</html>
