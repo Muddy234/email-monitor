@@ -1,6 +1,7 @@
 """Draft email reply generation via Anthropic API."""
 
 import logging
+import re
 
 from .analyzer import _strip_quoted_content
 from .prompts import DEFAULT_DRAFT_PROMPT_TEMPLATE
@@ -157,21 +158,39 @@ Generate the reply body text only (no subject, no headers)."""
         return result, usage
 
     def _validate_output(self, raw_output, email_data):
-        """Validate draft output. Returns cleaned text or None."""
+        """Validate draft output. Returns cleaned text or None.
+
+        Strips <thinking> tags from model output before validation.
+        The thinking block is used for chain-of-thought reasoning during
+        generation but must not appear in stored drafts or the extension UI.
+        """
         if not raw_output:
             subject = email_data.get("subject", "unknown")
             logger.warning(f"  Empty output for '{subject}'")
             return None
 
-        if len(raw_output) < 20:
+        # Strip chain-of-thought <thinking> block (non-greedy to avoid
+        # eating the draft body if the model emits malformed tags).
+        cleaned = re.sub(r"<thinking>.*?</thinking>", "", raw_output, flags=re.DOTALL)
+
+        # Fallback: if a lone <thinking> tag remains (unclosed), strip
+        # everything from the start through the tag.
+        if "<thinking>" in cleaned:
             subject = email_data.get("subject", "unknown")
-            logger.warning(f"  Draft too short for '{subject}' ({len(raw_output)} chars)")
+            logger.warning(f"  Malformed <thinking> tag in draft for '{subject}', stripping prefix")
+            cleaned = re.sub(r"^.*<thinking>", "", cleaned, flags=re.DOTALL)
+
+        cleaned = cleaned.strip()
+
+        if len(cleaned) < 20:
+            subject = email_data.get("subject", "unknown")
+            logger.warning(f"  Draft too short for '{subject}' ({len(cleaned)} chars)")
             return None
 
         error_prefixes = ["Error", "Usage:", "claude:", "CRITICAL:", "WARNING:"]
-        if any(raw_output.startswith(prefix) for prefix in error_prefixes):
+        if any(cleaned.startswith(prefix) for prefix in error_prefixes):
             subject = email_data.get("subject", "unknown")
             logger.warning(f"  Draft appears to be an error message for '{subject}'")
             return None
 
-        return raw_output
+        return cleaned
