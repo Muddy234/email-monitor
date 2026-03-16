@@ -182,8 +182,21 @@ async function checkSessionAndRender() {
   if (state === "complete") {
     showStatusView(session);
   } else {
-    await setState("setup");
-    showSetupView(session);
+    // Check if user already has sync history — if so, skip setup
+    const statusReady = await new Promise((resolve) => {
+      chrome.runtime.sendMessage({ type: "getStatus" }, (status) => {
+        if (chrome.runtime.lastError || !status) return resolve(false);
+        resolve(status.has_token && !status.token_expired && !!status.last_sync);
+      });
+    });
+
+    if (statusReady) {
+      await setState("complete");
+      showStatusView(session);
+    } else {
+      await setState("setup");
+      showSetupView(session);
+    }
   }
 }
 
