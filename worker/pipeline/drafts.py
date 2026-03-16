@@ -91,6 +91,9 @@ class DraftGenerator:
         if style_guide:
             style_block = f"\n\nWRITING STYLE GUIDE:\n{style_guide}\n"
 
+        # Build thread context from enrichment messages or conversation_history
+        thread_block = self._build_thread_block(action_context, email_data)
+
         prompt = f"""Draft a reply to the following email:
 
 FROM: {sender_name} <{sender}>
@@ -99,11 +102,74 @@ SUBJECT: {subject}
 EMAIL BODY:
 {body}
 
-{context_block}{tone_block}{style_block}
+{context_block}{tone_block}{style_block}{thread_block}
 
 Generate the reply body text only (no subject, no headers)."""
 
         return prompt
+
+    def _build_thread_block(self, action_context, email_data):
+        """Build a THREAD CONTEXT block from enrichment messages or conversation_history.
+
+        Prefers curated enrichment messages (user_last, thread_opener) when
+        available. Falls back to extracting the same from raw conversation_history
+        for the signal pipeline which lacks enrichment data.
+        """
+        enrichment = action_context.get("enrichment")
+        messages = enrichment.get("messages", {}) if enrichment else {}
+
+        user_last = messages.get("user_last")
+        thread_opener = messages.get("thread_opener")
+
+        # Fallback: build from raw conversation_history (signal pipeline)
+        if not user_last and not thread_opener:
+            conv_history = action_context.get("conversation_history", [])
+            if conv_history:
+                sorted_msgs = sorted(
+                    conv_history, key=lambda m: m.get("received_time") or ""
+                )
+                # User's most recent message
+                user_email = (email_data.get("to_email") or "").lower()
+                user_msgs = [
+                    m for m in sorted_msgs
+                    if (m.get("sender_email") or "").lower() == user_email
+                ]
+                if user_msgs:
+                    last = user_msgs[-1]
+                    body = (last.get("body") or "")[:1000]
+                    if body:
+                        user_last = {
+                            "sender": "User",
+                            "received_time": last.get("received_time"),
+                            "body": body,
+                        }
+                # Thread opener (first message if different from inbound)
+                if sorted_msgs:
+                    opener = sorted_msgs[0]
+                    if opener.get("received_time") != email_data.get("received_time"):
+                        body = (opener.get("body") or "")[:500]
+                        if body:
+                            thread_opener = {
+                                "sender": opener.get("sender_name") or opener.get("sender_email", ""),
+                                "received_time": opener.get("received_time"),
+                                "body": body,
+                            }
+
+        if not user_last and not thread_opener:
+            return ""
+
+        parts = ["\n\nTHREAD CONTEXT (prior messages in this conversation):"]
+        if thread_opener:
+            sender = thread_opener.get("sender", "Unknown")
+            date = thread_opener.get("received_time", "")
+            parts.append(f"--- Thread opener ({sender}, {date}) ---")
+            parts.append(thread_opener["body"])
+        if user_last:
+            date = user_last.get("received_time", "")
+            parts.append(f"\n--- Your last reply ({date}) ---")
+            parts.append(user_last["body"])
+
+        return "\n".join(parts)
 
     def build_batch_params(self, email_data, action_context, custom_id):
         """Build a Batches API request dict for a single draft.
