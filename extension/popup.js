@@ -182,15 +182,30 @@ async function checkSessionAndRender() {
   if (state === "complete") {
     showStatusView(session);
   } else {
-    // Check if user already has sync history — if so, skip setup
-    const statusReady = await new Promise((resolve) => {
-      chrome.runtime.sendMessage({ type: "getStatus" }, (status) => {
-        if (chrome.runtime.lastError || !status) return resolve(false);
-        resolve(status.has_token && !status.token_expired && !!status.last_sync);
-      });
-    });
+    // Check if user already has emails in Supabase — if so, skip setup.
+    // This avoids relying on ephemeral background state (lastSyncTime)
+    // which may be null after a service worker restart.
+    let hasEmails = false;
+    try {
+      const uid = session.user?.id;
+      if (uid) {
+        const resp = await fetch(
+          `${SUPABASE_URL}/rest/v1/emails?user_id=eq.${uid}&select=id&limit=1`,
+          {
+            headers: {
+              apikey: SUPABASE_ANON_KEY,
+              Authorization: `Bearer ${session.access_token}`,
+            },
+          }
+        );
+        if (resp.ok) {
+          const rows = await resp.json();
+          hasEmails = rows.length > 0;
+        }
+      }
+    } catch (_) {}
 
-    if (statusReady) {
+    if (hasEmails) {
       await setState("complete");
       showStatusView(session);
     } else {
