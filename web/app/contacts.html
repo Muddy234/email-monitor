@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://esm.sh; connect-src https://*.supabase.co wss://*.supabase.co https://esm.sh; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:;">
+    <title>Contacts — Clarion AI</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/app.css">
+</head>
+<body class="em-app">
+    <nav id="em-sidebar" class="em-sidebar"></nav>
+    <main class="em-main em-fade-in">
+        <div class="em-page-header">
+            <div>
+                <h1 class="em-page-title">Contacts</h1>
+                <p class="em-page-subtitle" id="pageSubtitle">Manage sender preferences</p>
+            </div>
+            <div class="em-filter-bar">
+                <input type="text" class="em-search-input" id="searchInput" placeholder="Search contacts...">
+            </div>
+        </div>
+
+        <div id="contactsContainer">
+            <div class="em-skeleton em-skeleton-card"></div>
+            <div class="em-skeleton em-skeleton-card"></div>
+        </div>
+
+        <!-- Edit modal -->
+        <div class="em-modal-overlay" id="contactModal" style="display: none;">
+            <div class="em-modal">
+                <div class="em-modal-header">
+                    <h2 class="em-modal-title" id="modalTitle">Edit Contact</h2>
+                    <button class="em-modal-close" id="modalClose">&times;</button>
+                </div>
+                <div class="em-modal-body" id="modalBody"></div>
+                <div class="em-modal-footer">
+                    <button class="em-btn em-btn-secondary" id="modalCancel">Cancel</button>
+                    <button class="em-btn em-btn-primary" id="modalSave">Save</button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script type="module" src="/js/pages/contacts.js"></script>
+</body>
+</html>

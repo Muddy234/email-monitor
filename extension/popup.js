@@ -1,23 +1,16 @@
-/** Popup script — auth flow + status dashboard.
+/** Popup script — auth flow + headline stat dashboard.
  *  Depends on: supabase-config.js (loaded via <script> in popup.html)
  *
  *  Onboarding state machine (stored in chrome.storage.local as onboardingState):
- *    "welcome" → first install, show value prop + Get Started
- *    "login"   → show login/signup form
- *    "setup"   → post-login checklist (auth ✓, token ?, sync ?)
- *    "complete" → full status dashboard
+ *    "welcome"  → first install, show value prop + Get Started
+ *    "login"    → show login/signup form
+ *    "setup"    → post-login checklist (auth ✓, token ?, sync ?)
+ *    "complete" → headline stat dashboard
  */
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function setDraftCount(value) {
-  const el = document.getElementById("draftCount");
-  if (!el) return;
-  el.classList.remove("skeleton-text");
-  el.textContent = value !== null && value !== undefined ? value : "—";
-}
 
 function showError(msg) {
   const el = document.getElementById("authError");
@@ -49,6 +42,11 @@ function showView(viewId) {
   for (const id of ALL_VIEWS) {
     document.getElementById(id).style.display = id === viewId ? "block" : "none";
   }
+}
+
+function removeSkeleton(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.remove("skeleton-text");
 }
 
 // ---------------------------------------------------------------------------
@@ -116,25 +114,42 @@ async function supabaseQuery(path, session) {
   return resp.json();
 }
 
-async function fetchDraftCount(session) {
+async function fetchCounts(session) {
   const uid = session.user?.id;
-  if (!uid) return null;
+  if (!uid) return { drafts: 0, notable: 0, processed: 0, draftsGenerated: 0 };
 
   try {
-    const drafts = await supabaseQuery(
-      `drafts?select=id&user_id=eq.${uid}&status=eq.pending`,
-      session
-    );
-    return drafts.length;
-  } catch (_) {
-    return null;
-  }
-}
+    // Fetch drafts, notable signals, and weekly stats in parallel
+    const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
 
-async function refreshDraftCount(session) {
-  if (!session || !session.access_token) return;
-  const count = await fetchDraftCount(session);
-  setDraftCount(count);
+    const [drafts, events, runs] = await Promise.all([
+      supabaseQuery(`drafts?select=id&user_id=eq.${uid}&status=eq.pending`, session),
+      supabaseQuery(`response_events?select=email_id,pri,mc,sender_tier,rt&user_id=eq.${uid}`, session),
+      supabaseQuery(`pipeline_runs?select=emails_processed,drafts_generated&user_id=eq.${uid}&started_at=gte.${weekAgo}`, session),
+    ]);
+
+    const draftCount = drafts.length;
+
+    // Count notable: high/med priority, financial, critical/internal sender, or has response type
+    let notableCount = 0;
+    for (const ev of events) {
+      if (ev.pri === "high" || ev.pri === "med" || ev.mc === true ||
+          ev.sender_tier === "C" || ev.sender_tier === "I" || ev.rt !== "none") {
+        notableCount++;
+      }
+    }
+
+    // Aggregate weekly stats
+    let processed = 0, draftsGenerated = 0;
+    for (const run of runs) {
+      processed += run.emails_processed || 0;
+      draftsGenerated += run.drafts_generated || 0;
+    }
+
+    return { drafts: draftCount, notable: notableCount, processed, draftsGenerated };
+  } catch (_) {
+    return { drafts: 0, notable: 0, processed: 0, draftsGenerated: 0 };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -156,7 +171,6 @@ async function checkSessionAndRender() {
   const state = await getState();
 
   if (!session || !session.access_token) {
-    // No session — show welcome or login depending on state
     if (state === "welcome") {
       showView("welcomeView");
     } else {
@@ -165,11 +179,9 @@ async function checkSessionAndRender() {
     return;
   }
 
-  // Has session — determine if setup or complete
   if (state === "complete") {
     showStatusView(session);
   } else {
-    // Any non-complete state with a valid session → setup
     await setState("setup");
     showSetupView(session);
   }
@@ -182,12 +194,10 @@ async function checkSessionAndRender() {
 function showSetupView(session) {
   showView("setupView");
 
-  // Dynamic greeting
   const name = session.user?.name;
   const greeting = document.getElementById("setupGreeting");
   greeting.textContent = name ? `Welcome, ${name}! Almost there.` : "Almost there!";
 
-  // Update checklist
   updateSetupChecklist(session);
 }
 
@@ -203,10 +213,8 @@ function updateSetupChecklist(session) {
     }
   };
 
-  // Auth — always done if we're on this view
   setCheck("checkAuth", true);
 
-  // Token + sync — ask background
   chrome.runtime.sendMessage({ type: "getStatus" }, async (status) => {
     if (chrome.runtime.lastError || !status) return;
 
@@ -214,7 +222,6 @@ function updateSetupChecklist(session) {
     setCheck("checkOutlook", hasToken);
     setCheck("checkSync", !!status.last_sync);
 
-    // All three done → transition to complete
     if (hasToken && status.last_sync) {
       await setState("complete");
       const result = await chrome.storage.local.get("supabaseSession");
@@ -231,7 +238,7 @@ function showStatusView(session) {
   refreshStatus(session);
 }
 
-function refreshStatus(session) {
+async function refreshStatus(session) {
   // Connection indicator
   chrome.runtime.sendMessage({ type: "getStatus" }, (status) => {
     if (chrome.runtime.lastError || !status) return;
@@ -261,13 +268,109 @@ function refreshStatus(session) {
       else if (status.token_expired) hintMsg = "Reopen Outlook to refresh your session";
       hint.textContent = hintMsg;
       hint.style.display = hintMsg ? "block" : "none";
+
+      // Error state headline
+      if (hintMsg) {
+        const el = document.getElementById("statusError");
+        el.textContent = hintMsg;
+        el.style.display = "block";
+      }
     } else {
       hint.style.display = "none";
+      const el = document.getElementById("statusError");
+      el.style.display = "none";
     }
   });
 
-  // Draft count
-  refreshDraftCount(session);
+  // Fetch counts and render headline
+  const counts = await fetchCounts(session);
+  renderHeadline(counts);
+  renderQuickStats(counts);
+  renderDeepLinks(counts);
+}
+
+// ---------------------------------------------------------------------------
+// Headline stat rendering
+// ---------------------------------------------------------------------------
+
+function renderHeadline(counts) {
+  const numEl = document.getElementById("headlineNumber");
+  const textEl = document.getElementById("headlineText");
+  const ctaEl = document.getElementById("headlineCta");
+  const card = document.getElementById("headlineCard");
+
+  removeSkeleton("headlineNumber");
+
+  if (counts.drafts > 0) {
+    numEl.textContent = counts.drafts;
+    textEl.textContent = `draft${counts.drafts === 1 ? "" : "s"} ready to review`;
+    ctaEl.textContent = "Click to view in Outlook";
+    card.onclick = () => navigateToOutlookDrafts();
+  } else if (counts.notable > 0) {
+    numEl.textContent = counts.notable;
+    textEl.textContent = `email${counts.notable === 1 ? "" : "s"} need your attention`;
+    ctaEl.textContent = "View on dashboard";
+    card.onclick = () => openDashboardTab("/app/emails.html?tab=notable");
+  } else {
+    numEl.textContent = counts.processed || "0";
+    textEl.textContent = "emails handled this week";
+    ctaEl.textContent = "All caught up";
+    card.onclick = () => openDashboardTab("/app/dashboard.html");
+  }
+}
+
+function renderQuickStats(counts) {
+  const processedEl = document.getElementById("statProcessed");
+  const draftsEl = document.getElementById("statDrafts");
+  removeSkeleton("statProcessed");
+  removeSkeleton("statDrafts");
+  processedEl.textContent = counts.processed;
+  draftsEl.textContent = counts.draftsGenerated;
+}
+
+function renderDeepLinks(counts) {
+  const container = document.getElementById("deepLinks");
+  let html = "";
+
+  if (counts.drafts > 0) {
+    html += `<button class="deep-link" id="linkDrafts">View Drafts (${counts.drafts}) <span class="deep-link-arrow">→</span></button>`;
+  }
+  if (counts.notable > 0) {
+    html += `<button class="deep-link" id="linkNotable">View Notable (${counts.notable}) <span class="deep-link-arrow">→</span></button>`;
+  }
+  html += `<button class="deep-link" id="linkFeedback">Give Feedback <span class="deep-link-arrow">→</span></button>`;
+  html += `<button class="deep-link deep-link-primary" id="linkDashboard">Open Dashboard <span class="deep-link-arrow">→</span></button>`;
+
+  container.innerHTML = html;
+
+  // Bind events
+  document.getElementById("linkDrafts")?.addEventListener("click", () => navigateToOutlookDrafts());
+  document.getElementById("linkNotable")?.addEventListener("click", () => openDashboardTab("/app/emails.html?tab=notable"));
+  document.getElementById("linkFeedback")?.addEventListener("click", () => openDashboardTab("/app/emails.html"));
+  document.getElementById("linkDashboard")?.addEventListener("click", () => openDashboardTab("/app/dashboard.html"));
+}
+
+// ---------------------------------------------------------------------------
+// Navigation helpers
+// ---------------------------------------------------------------------------
+
+function navigateToOutlookDrafts() {
+  chrome.tabs.query({}, (tabs) => {
+    const outlookTab = tabs.find(t =>
+      t.url && /^https:\/\/outlook\.(office\.com|office365\.com|live\.com|cloud\.microsoft)(\/|$)/.test(t.url)
+    );
+    if (outlookTab) {
+      const origin = new URL(outlookTab.url).origin;
+      chrome.tabs.update(outlookTab.id, { url: `${origin}/mail/drafts`, active: true });
+      chrome.windows.update(outlookTab.windowId, { focused: true });
+    } else {
+      chrome.tabs.create({ url: "https://outlook.office.com/mail/drafts" });
+    }
+  });
+}
+
+function openDashboardTab(path) {
+  chrome.tabs.create({ url: `https://clarion-ai.app${path}` });
 }
 
 // ---------------------------------------------------------------------------
@@ -315,11 +418,9 @@ document.getElementById("loginBtn").addEventListener("click", async () => {
     }
 
     await chrome.storage.local.set({ supabaseSession: session });
-
-    // Activate worker processing
     await setWorkerActive(session.access_token, session.user.id, true);
 
-    // Set timezone on profile so the worker knows business hours
+    // Set timezone
     try {
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Chicago";
       await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${session.user.id}`, {
@@ -333,10 +434,7 @@ document.getElementById("loginBtn").addEventListener("click", async () => {
       });
     } catch (_) {}
 
-    // Notify background to initialize Supabase features
     chrome.runtime.sendMessage({ type: "supabaseSessionChanged" });
-
-    // Transition to setup checklist
     await setState("setup");
     showSetupView(session);
   } catch (err) {
@@ -371,9 +469,9 @@ function initLogoutBtn() {
 function showLogoutConfirm() {
   const container = document.getElementById("logoutContainer");
   container.innerHTML = `<span class="logout-confirm">
-    <span>Are you sure?</span>
+    <span>Sure?</span>
     <button class="btn btn-sm btn-danger" id="logoutYes">Yes</button>
-    <button class="btn btn-sm btn-outline" id="logoutCancel">Cancel</button>
+    <button class="btn btn-sm btn-outline" id="logoutCancel">No</button>
   </span>`;
 
   document.getElementById("logoutYes").addEventListener("click", async () => {
@@ -395,7 +493,7 @@ function showLogoutConfirm() {
 
 document.getElementById("logoutBtn").addEventListener("click", showLogoutConfirm);
 
-// Sync buttons (status view + setup view)
+// Sync (setup view only)
 function friendlySyncError(raw) {
   if (!raw) return null;
   if (raw === "No valid Outlook token") return "Outlook not connected — open Outlook in this browser";
@@ -406,44 +504,20 @@ function friendlySyncError(raw) {
   return "Sync failed — try again later";
 }
 
-function handleSyncClick(btn, errorFn) {
+document.getElementById("setupSyncBtn").addEventListener("click", () => {
+  hideError();
+  const btn = document.getElementById("setupSyncBtn");
   btn.disabled = true;
   btn.textContent = "Syncing...";
   chrome.runtime.sendMessage({ type: "syncNow" }, (resp) => {
     btn.disabled = false;
     btn.textContent = "Sync Now";
     if (resp && resp.error) {
-      errorFn(friendlySyncError(resp.error));
+      showError(friendlySyncError(resp.error));
     } else {
-      // Refresh stats after successful sync
       chrome.storage.local.get("supabaseSession", (result) => {
-        if (result.supabaseSession) refreshStatus(result.supabaseSession);
+        if (result.supabaseSession) updateSetupChecklist(result.supabaseSession);
       });
-    }
-  });
-}
-
-document.getElementById("setupSyncBtn").addEventListener("click", () => {
-  hideError();
-  handleSyncClick(document.getElementById("setupSyncBtn"), showError);
-});
-
-document.getElementById("visitWebBtn").addEventListener("click", () => {
-  chrome.tabs.create({ url: "https://clarion-ai.app/app/dashboard.html" });
-});
-
-// Draft card → navigate existing Outlook tab to drafts, or open new tab
-document.getElementById("draftCard").addEventListener("click", () => {
-  chrome.tabs.query({}, (tabs) => {
-    const outlookTab = tabs.find(t =>
-      t.url && /^https:\/\/outlook\.(office\.com|office365\.com|live\.com|cloud\.microsoft)(\/|$)/.test(t.url)
-    );
-    if (outlookTab) {
-      const origin = new URL(outlookTab.url).origin;
-      chrome.tabs.update(outlookTab.id, { url: `${origin}/mail/drafts`, active: true });
-      chrome.windows.update(outlookTab.windowId, { focused: true });
-    } else {
-      chrome.tabs.create({ url: "https://outlook.office.com/mail/drafts" });
     }
   });
 });
@@ -459,7 +533,7 @@ document.getElementById("authPassword").addEventListener("keydown", (e) => {
 
 checkSessionAndRender();
 
-// Periodic refresh — draft count + connection status
+// Periodic refresh (every 15s)
 setInterval(() => {
   const statusVisible = document.getElementById("statusView").style.display !== "none";
   const setupVisible = document.getElementById("setupView").style.display !== "none";

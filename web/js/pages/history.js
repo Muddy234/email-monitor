@@ -5,10 +5,13 @@ import { requireAuth, listenAuthChanges } from "../auth.js";
 import { renderNav } from "../nav.js";
 import { supabase } from "../supabase-client.js";
 import { showError, showEmpty, formatDate, formatDuration } from "../ui.js";
+import { requireSubscription } from "../subscription.js";
 
 await requireAuth();
 listenAuthChanges();
 await renderNav();
+
+if (!(await requireSubscription())) throw new Error("subscription_required");
 
 // -------------------------------------------------------------------------
 // DOM refs

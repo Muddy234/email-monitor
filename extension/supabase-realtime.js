@@ -245,3 +245,42 @@ function disconnectRealtime() {
 function isRealtimeConnected() {
   return realtimeWs && realtimeWs.readyState === WebSocket.OPEN;
 }
+
+// ---------------------------------------------------------------------------
+// Pending-draft sweep — polling fallback for missed Realtime events
+// ---------------------------------------------------------------------------
+
+/**
+ * Query Supabase for drafts stuck at "pending" with no outlook_draft_id
+ * and process each through the normal handleNewDraft flow.
+ * Called on every alarm tick to recover drafts missed while the
+ * MV3 service worker was suspended (WebSocket dead).
+ */
+async function sweepPendingDrafts(userId) {
+  try {
+    const drafts = await supabaseRequest(
+      `/drafts?user_id=eq.${userId}&status=eq.pending&outlook_draft_id=is.null&select=id,email_id,draft_body,status&order=created_at.asc`
+    );
+    if (!drafts || drafts.length === 0) return 0;
+
+    if (DEBUG) console.log(`Sweep: found ${drafts.length} pending draft(s)`);
+
+    // Ensure realtimeUserId is set so handleNewDraft can fetch aliases
+    realtimeUserId = userId;
+
+    let delivered = 0;
+    for (const draft of drafts) {
+      try {
+        await handleNewDraft(draft);
+        delivered++;
+      } catch (err) {
+        if (DEBUG) console.warn(`Sweep: failed to deliver draft ${draft.id}:`, err.message);
+      }
+    }
+    if (DEBUG) console.log(`Sweep: delivered ${delivered}/${drafts.length} draft(s)`);
+    return delivered;
+  } catch (err) {
+    if (DEBUG) console.warn("Sweep: query failed:", err.message);
+    return 0;
+  }
+}

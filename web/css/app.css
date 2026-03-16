@@ -196,6 +196,28 @@
     color: var(--em-red-600);
 }
 
+.em-sidebar-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 2px;
+}
+
+.em-dev-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--em-slate-400);
+    cursor: pointer;
+}
+
+.em-dev-toggle input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
+}
+
 .em-main {
     margin-left: var(--em-sidebar-width);
     flex: 1;
@@ -1428,23 +1450,134 @@
     margin-bottom: 6px;
 }
 
-/* --- 29. Responsive (desktop-only, minimal mobile fallback) --- */
+/* --- 29. Responsive --- */
+
+/* Tablet (1024px) */
+@media (max-width: 1024px) {
+    :root {
+        --em-sidebar-width: 200px;
+    }
+
+    .em-card-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+/* Small tablet / large phone (768px) */
 @media (max-width: 768px) {
     .em-sidebar {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        top: auto;
+        width: 100%;
+        height: auto;
+        flex-direction: row;
+        padding: 0;
+        border-right: none;
+        border-top: 1px solid var(--em-slate-200);
+        z-index: 100;
+    }
+
+    .em-sidebar-brand,
+    .em-sidebar-footer {
         display: none;
+    }
+
+    .em-sidebar-nav {
+        display: flex;
+        flex-direction: row;
+        justify-content: space-around;
+        width: 100%;
+        padding: 8px 0;
+        gap: 0;
+    }
+
+    .em-sidebar-link {
+        flex-direction: column;
+        gap: 2px;
+        padding: 6px 8px;
+        font-size: 10px;
+        border-radius: 0;
+    }
+
+    .em-sidebar-link svg {
+        width: 20px;
+        height: 20px;
     }
 
     .em-main {
         margin-left: 0;
-        padding: 20px;
+        padding: 20px 16px 80px;
+        max-width: 100vw;
     }
 
     .em-card-grid {
         grid-template-columns: 1fr;
     }
 
+    .em-page-header {
+        flex-direction: column;
+        gap: 12px;
+        align-items: flex-start;
+    }
+
+    .em-filter-bar {
+        width: 100%;
+    }
+
     .em-search {
         width: 100%;
+    }
+
+    .em-search-input {
+        width: 100%;
+    }
+
+    .em-status-banner {
+        padding: 12px 16px;
+    }
+
+    .em-email-tabs {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .em-email-header-content {
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .em-email-header-badges {
+        align-self: flex-start;
+    }
+
+    .em-contact-row {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+
+    .em-contact-meta {
+        width: 100%;
+        flex-wrap: wrap;
+    }
+
+    .em-actionable-card-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+    }
+
+    .em-detail-footer {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+
+    .em-feedback {
+        margin-left: 0;
     }
 
     .em-pipeline {
@@ -1463,4 +1596,1016 @@
     .em-cta-row {
         flex-direction: column;
     }
+
+    .em-billing-card {
+        flex-direction: column;
+        gap: 12px;
+        align-items: flex-start;
+    }
+
+    .em-modal {
+        max-width: 95%;
+        margin: 16px;
+    }
+
+    .em-table {
+        font-size: 12px;
+    }
+
+    .em-table th,
+    .em-table td {
+        padding: 8px;
+    }
+}
+
+/* Phone (375px) */
+@media (max-width: 375px) {
+    .em-main {
+        padding: 12px 10px 80px;
+    }
+
+    .em-page-title {
+        font-size: 20px;
+    }
+
+    .em-metric-value {
+        font-size: 22px;
+    }
+
+    .em-quick-stats {
+        flex-direction: column;
+    }
+
+    .em-generate-section {
+        flex-direction: column;
+    }
+
+    .em-tone-selector {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+}
+
+/* --- Paywall Overlay --- */
+.em-paywall-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(28, 25, 23, 0.6);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+}
+
+.em-paywall-card {
+    background: var(--em-white);
+    border-radius: 16px;
+    padding: 48px 40px;
+    max-width: 420px;
+    width: 90%;
+    text-align: center;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+}
+
+.em-paywall-card h2 {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--em-slate-900);
+    margin-bottom: 8px;
+}
+
+.em-paywall-card p {
+    font-size: 14px;
+    color: var(--em-slate-500);
+    line-height: 1.5;
+    margin-bottom: 20px;
+}
+
+.em-paywall-price {
+    font-size: 36px;
+    font-weight: 700;
+    color: var(--em-slate-900);
+    margin-bottom: 24px;
+}
+
+.em-paywall-price span {
+    font-size: 16px;
+    font-weight: 400;
+    color: var(--em-slate-500);
+}
+
+.em-paywall-cta {
+    width: 100%;
+    padding: 12px 24px;
+    font-size: 15px;
+}
+
+.em-paywall-hint {
+    font-size: 12px;
+    color: var(--em-slate-400);
+    margin-top: 12px;
+    min-height: 18px;
+}
+
+/* --- Checkout Spinner --- */
+.em-spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid var(--em-slate-200);
+    border-top-color: var(--em-blue-600);
+    border-radius: 50%;
+    animation: em-spin 0.8s linear infinite;
+    margin: 0 auto 16px;
+}
+
+@keyframes em-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* --- Past-due Warning Banner --- */
+.em-past-due-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 16px;
+    background: #FEF3C7;
+    border: 1px solid #F59E0B;
+    border-radius: 8px;
+    margin-bottom: 16px;
+    font-size: 13px;
+    color: #92400E;
+}
+
+.em-past-due-banner .em-btn-sm {
+    flex-shrink: 0;
+    padding: 5px 12px;
+    font-size: 12px;
+    background: #F59E0B;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.em-past-due-banner .em-btn-sm:hover {
+    background: #D97706;
+}
+
+/* --- Billing Card --- */
+.em-billing-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 24px;
+    margin-top: 16px;
+}
+
+.em-billing-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.em-billing-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--em-slate-400);
+    font-weight: 600;
+}
+
+.em-billing-plan {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--em-slate-900);
+}
+
+.em-billing-detail {
+    font-size: 13px;
+    color: var(--em-slate-500);
+}
+
+.em-billing-grandfathered {
+    font-size: 12px;
+    color: var(--em-green-600, #16A34A);
+    font-weight: 500;
+}
+
+/* --- 30. Email Tabs --- */
+.em-email-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 20px;
+    border-bottom: 1px solid var(--em-slate-200);
+}
+
+.em-email-tab {
+    padding: 10px 18px;
+    font-size: 14px;
+    font-weight: 500;
+    border: none;
+    background: none;
+    cursor: pointer;
+    color: var(--em-slate-500);
+    border-bottom: 2px solid transparent;
+    font-family: var(--em-font);
+    transition: color var(--em-transition), border-color var(--em-transition);
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.em-email-tab:hover {
+    color: var(--em-slate-700);
+}
+
+.em-email-tab.active {
+    color: var(--em-blue-700);
+    border-bottom-color: var(--em-blue-600);
+}
+
+.em-tab-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 9999px;
+    font-size: 11px;
+    font-weight: 600;
+    background: var(--em-slate-100);
+    color: var(--em-slate-500);
+}
+
+.em-email-tab.active .em-tab-count {
+    background: var(--em-blue-100);
+    color: var(--em-blue-700);
+}
+
+/* --- 31. Bulk Action Bar --- */
+.em-bulk-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    background: var(--em-slate-50);
+    border: 1px solid var(--em-slate-200);
+    border-radius: var(--em-radius-sm);
+    margin-bottom: 12px;
+}
+
+/* --- 32. Contact Badge --- */
+.em-contact-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    margin-left: 8px;
+    border-radius: 9999px;
+    font-size: 11px;
+    font-weight: 500;
+    background: var(--em-slate-100);
+    color: var(--em-slate-500);
+    vertical-align: middle;
+}
+
+/* --- 33. Action Hint --- */
+.em-email-action-hint {
+    margin-top: 8px;
+    padding: 8px 12px;
+    background: var(--em-blue-50);
+    border-left: 3px solid var(--em-blue-500);
+    border-radius: 0 var(--em-radius-xs) var(--em-radius-xs) 0;
+    font-size: 13px;
+    color: var(--em-slate-700);
+    line-height: 1.5;
+}
+
+.em-action-label {
+    font-weight: 600;
+    color: var(--em-slate-500);
+    margin-right: 4px;
+}
+
+/* --- 34. Signal Tags --- */
+.em-signal-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+.em-signal-tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    border-radius: 9999px;
+    font-size: 11px;
+    font-weight: 500;
+    background: var(--em-amber-100);
+    color: var(--em-amber-600);
+}
+
+/* --- 35. Classification Reasoning --- */
+.em-classification-reasoning {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--em-slate-100);
+}
+
+/* --- 36. Generate Draft Controls --- */
+.em-generate-section {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--em-slate-100);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.em-generate-advanced {
+    width: 100%;
+    margin-top: 10px;
+    padding: 12px;
+    background: var(--em-slate-50);
+    border: 1px solid var(--em-slate-200);
+    border-radius: var(--em-radius-sm);
+}
+
+.em-generate-instructions {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--em-slate-200);
+    border-radius: var(--em-radius-sm);
+    font-size: 13px;
+    font-family: var(--em-font);
+    color: var(--em-slate-800);
+    resize: vertical;
+    outline: none;
+    box-sizing: border-box;
+    transition: border-color var(--em-transition), box-shadow var(--em-transition);
+}
+
+.em-generate-instructions:focus {
+    border-color: var(--em-blue-500);
+    box-shadow: 0 0 0 3px var(--em-blue-50);
+}
+
+.em-generate-instructions::placeholder {
+    color: var(--em-slate-400);
+}
+
+/* --- 37. Tone Selector --- */
+.em-tone-selector {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+}
+
+.em-tone-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--em-slate-500);
+    margin-right: 4px;
+}
+
+.em-tone-pill {
+    padding: 4px 12px;
+    border-radius: 9999px;
+    font-size: 12px;
+    font-weight: 500;
+    font-family: var(--em-font);
+    border: 1px solid var(--em-slate-200);
+    background: var(--em-white);
+    color: var(--em-slate-500);
+    cursor: pointer;
+    transition: all var(--em-transition);
+}
+
+.em-tone-pill:hover {
+    border-color: var(--em-blue-500);
+    color: var(--em-blue-600);
+}
+
+.em-tone-pill.active {
+    background: var(--em-blue-600);
+    border-color: var(--em-blue-600);
+    color: var(--em-white);
+}
+
+/* --- 38. Detail Footer --- */
+.em-detail-footer {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--em-slate-100);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* --- 39. Status Banner (Dashboard) --- */
+.em-status-banner {
+    padding: 16px 24px;
+    background: var(--em-blue-50);
+    border: 1px solid var(--em-blue-100);
+    border-left: 4px solid var(--em-blue-600);
+    border-radius: var(--em-radius);
+    margin-bottom: 24px;
+}
+
+.em-status-banner-text {
+    font-size: 15px;
+    color: var(--em-slate-800);
+    line-height: 1.5;
+}
+
+.em-status-link {
+    color: var(--em-blue-600);
+    text-decoration: none;
+    transition: color var(--em-transition);
+}
+
+.em-status-link:hover {
+    color: var(--em-blue-700);
+    text-decoration: underline;
+}
+
+/* --- 40. Actionable Cards (Dashboard) --- */
+.em-actionable-section {
+    margin-bottom: 24px;
+}
+
+.em-actionable-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.em-actionable-card {
+    display: block;
+    padding: 14px 18px;
+    background: var(--em-white);
+    border: 1px solid var(--em-slate-200);
+    border-radius: var(--em-radius);
+    text-decoration: none;
+    color: inherit;
+    transition: box-shadow var(--em-transition), border-color var(--em-transition), transform var(--em-transition);
+}
+
+.em-actionable-card:hover {
+    box-shadow: var(--em-shadow-md);
+    border-color: var(--em-blue-500);
+    transform: translateY(-1px);
+}
+
+.em-actionable-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.em-actionable-sender {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--em-slate-900);
+}
+
+.em-actionable-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.em-actionable-time {
+    font-size: 12px;
+    color: var(--em-slate-400);
+}
+
+.em-actionable-subject {
+    font-size: 13px;
+    color: var(--em-slate-500);
+    margin-top: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.em-actionable-action {
+    font-size: 12px;
+    color: var(--em-slate-400);
+    margin-top: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.em-actionable-more {
+    display: inline-block;
+    margin-top: 10px;
+    font-size: 13px;
+    color: var(--em-blue-600);
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.em-actionable-more:hover {
+    text-decoration: underline;
+}
+
+/* --- 41. Weekly Summary Card --- */
+.em-weekly-summary {
+    padding: 18px 24px;
+    margin-top: 16px;
+    margin-bottom: 16px;
+}
+
+.em-weekly-summary-text {
+    font-size: 14px;
+    color: var(--em-slate-600, var(--em-slate-500));
+    line-height: 1.5;
+}
+
+/* --- 42. Feedback Controls --- */
+.em-feedback {
+    display: inline-flex;
+    flex-direction: column;
+    margin-left: auto;
+}
+
+.em-feedback-buttons {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.em-feedback-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border: 1px solid var(--em-slate-200);
+    border-radius: var(--em-radius-sm);
+    background: var(--em-white);
+    color: var(--em-slate-400);
+    cursor: pointer;
+    transition: all var(--em-transition);
+}
+
+.em-feedback-btn:hover {
+    border-color: var(--em-slate-300);
+    color: var(--em-slate-600);
+}
+
+.em-feedback-up:hover {
+    border-color: var(--em-green-600, #16A34A);
+    color: var(--em-green-600, #16A34A);
+    background: #F0FDF4;
+}
+
+.em-feedback-down:hover {
+    border-color: var(--em-red-600, #DC2626);
+    color: var(--em-red-600, #DC2626);
+    background: #FEF2F2;
+}
+
+.em-feedback-dropdown {
+    margin-top: 8px;
+    padding: 12px;
+    background: var(--em-slate-50);
+    border: 1px solid var(--em-slate-200);
+    border-radius: var(--em-radius-sm);
+    min-width: 240px;
+}
+
+.em-feedback-dropdown-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--em-slate-500);
+    margin-bottom: 8px;
+}
+
+.em-feedback-options {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.em-feedback-option {
+    padding: 8px 12px;
+    border: 1px solid var(--em-slate-200);
+    border-radius: var(--em-radius-sm);
+    background: var(--em-white);
+    color: var(--em-slate-700);
+    font-size: 13px;
+    font-family: var(--em-font);
+    cursor: pointer;
+    text-align: left;
+    transition: all var(--em-transition);
+}
+
+.em-feedback-option:hover {
+    border-color: var(--em-blue-500);
+    background: var(--em-blue-50);
+}
+
+.em-feedback-option.selected {
+    border-color: var(--em-blue-500);
+    background: var(--em-blue-50);
+    color: var(--em-blue-700);
+    font-weight: 500;
+}
+
+.em-feedback-priority {
+    margin-top: 8px;
+}
+
+.em-feedback-priority-options {
+    display: flex;
+    gap: 6px;
+}
+
+.em-feedback-priority-btn {
+    flex: 1;
+    padding: 6px 12px;
+    border: 1px solid var(--em-slate-200);
+    border-radius: var(--em-radius-sm);
+    background: var(--em-white);
+    color: var(--em-slate-600);
+    font-size: 12px;
+    font-weight: 500;
+    font-family: var(--em-font);
+    cursor: pointer;
+    transition: all var(--em-transition);
+}
+
+.em-feedback-priority-btn:hover {
+    border-color: var(--em-blue-500);
+    background: var(--em-blue-50);
+}
+
+.em-feedback-other {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.em-feedback-text {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--em-slate-200);
+    border-radius: var(--em-radius-sm);
+    font-size: 13px;
+    font-family: var(--em-font);
+    color: var(--em-slate-800);
+    resize: vertical;
+    outline: none;
+    box-sizing: border-box;
+    transition: border-color var(--em-transition);
+}
+
+.em-feedback-text:focus {
+    border-color: var(--em-blue-500);
+    box-shadow: 0 0 0 3px var(--em-blue-50);
+}
+
+.em-feedback-text::placeholder {
+    color: var(--em-slate-400);
+}
+
+.em-feedback-done {
+    font-size: 12px;
+    color: var(--em-slate-500);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+/* --- 43. Contacts List --- */
+.em-contacts-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.em-contact-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    background: var(--em-white);
+    border: 1px solid var(--em-slate-200);
+    border-radius: var(--em-radius);
+    transition: box-shadow var(--em-transition);
+}
+
+.em-contact-row:hover {
+    box-shadow: var(--em-shadow-sm);
+}
+
+.em-contact-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.em-contact-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--em-slate-900);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.em-contact-type {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--em-slate-400);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.em-contact-email {
+    font-size: 12px;
+    color: var(--em-slate-400);
+    margin-top: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.em-contact-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.em-contact-freq {
+    font-size: 12px;
+    color: var(--em-slate-400);
+}
+
+/* --- 44. Modal --- */
+.em-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.em-modal {
+    background: var(--em-white);
+    border-radius: var(--em-radius-lg, 12px);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+    width: 100%;
+    max-width: 440px;
+    max-height: 90vh;
+    overflow-y: auto;
+}
+
+.em-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 24px 0;
+}
+
+.em-modal-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--em-slate-900);
+}
+
+.em-modal-close {
+    border: none;
+    background: none;
+    font-size: 22px;
+    color: var(--em-slate-400);
+    cursor: pointer;
+    padding: 4px;
+    line-height: 1;
+}
+
+.em-modal-close:hover {
+    color: var(--em-slate-600);
+}
+
+.em-modal-body {
+    padding: 20px 24px;
+}
+
+.em-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 0 24px 20px;
+}
+
+/* --- 45. Form Controls --- */
+.em-form-group {
+    margin-bottom: 16px;
+}
+
+.em-form-group:last-child {
+    margin-bottom: 0;
+}
+
+.em-form-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--em-slate-700);
+    margin-bottom: 4px;
+}
+
+.em-form-hint {
+    font-size: 12px;
+    color: var(--em-slate-400);
+    margin-bottom: 6px;
+    line-height: 1.4;
+}
+
+.em-form-select {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--em-slate-200);
+    border-radius: var(--em-radius-sm);
+    font-size: 13px;
+    font-family: var(--em-font);
+    color: var(--em-slate-800);
+    background: var(--em-white);
+    outline: none;
+    cursor: pointer;
+    transition: border-color var(--em-transition);
+}
+
+.em-form-select:focus {
+    border-color: var(--em-blue-500);
+    box-shadow: 0 0 0 3px var(--em-blue-50);
+}
+
+/* --- 46. Badge variants --- */
+.em-badge-slate {
+    background: var(--em-slate-100);
+    color: var(--em-slate-600);
+}
+
+/* --- 47. Charts --- */
+.em-chart-container {
+    min-height: 160px;
+    padding: 12px 0;
+}
+
+.em-chart-svg {
+    width: 100%;
+    height: auto;
+}
+
+.em-chart-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 120px;
+    font-size: 13px;
+    color: var(--em-slate-400);
+}
+
+/* --- 48. Data Table --- */
+.em-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.em-table th {
+    text-align: left;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    color: var(--em-slate-400);
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--em-slate-200);
+}
+
+.em-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--em-slate-100);
+    color: var(--em-slate-700);
+}
+
+.em-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.em-table tbody tr:hover {
+    background: var(--em-slate-50);
+}
+
+.em-table-num {
+    text-align: right;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.em-sender-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.em-sender-name {
+    font-weight: 500;
+    color: var(--em-slate-800);
+}
+
+.em-sender-email {
+    font-size: 11px;
+    color: var(--em-slate-400);
+}
+
+/* --- 49. Email Thread View --- */
+.em-thread-section {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--em-slate-100);
+}
+
+.em-thread-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    border: none;
+    background: none;
+    cursor: pointer;
+    padding: 4px 0;
+    font-family: var(--em-font);
+}
+
+.em-thread-toggle-icon {
+    font-size: 10px;
+    color: var(--em-slate-400);
+    transition: transform var(--em-transition);
+}
+
+.em-thread-list {
+    margin-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    border-left: 2px solid var(--em-slate-200);
+    padding-left: 14px;
+}
+
+.em-thread-message {
+    padding: 10px 12px;
+    background: var(--em-slate-50);
+    border-radius: var(--em-radius-sm);
+}
+
+.em-thread-message.em-thread-current {
+    background: var(--em-blue-50);
+    border-left: 3px solid var(--em-blue-500);
+}
+
+.em-thread-message-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 4px;
+}
+
+.em-thread-sender {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--em-slate-700);
+}
+
+.em-thread-time {
+    font-size: 11px;
+    color: var(--em-slate-400);
+}
+
+.em-thread-snippet {
+    font-size: 12px;
+    color: var(--em-slate-500);
+    line-height: 1.5;
 }

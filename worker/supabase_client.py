@@ -22,6 +22,31 @@ class SupabaseWorkerClient:
         self.client: Client = create_client(url, key)
 
     # ------------------------------------------------------------------
+    # Subscription check
+    # ------------------------------------------------------------------
+
+    def is_subscription_active(self, user_id):
+        """Check if a user has an active subscription.
+
+        Fail-open: returns True on query errors so paid users aren't blocked.
+        Treats active, trialing, and past_due as active.
+        """
+        try:
+            result = (
+                self.client.table("subscriptions")
+                .select("status")
+                .eq("user_id", user_id)
+                .maybe_single()
+                .execute()
+            )
+            if not result.data:
+                return False
+            return result.data["status"] in ("active", "trialing", "past_due")
+        except Exception as e:
+            logger.warning(f"Subscription check failed for {user_id[:8]}..., fail-open: {e}")
+            return True
+
+    # ------------------------------------------------------------------
     # User discovery
     # ------------------------------------------------------------------
 

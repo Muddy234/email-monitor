@@ -1,22 +1,32 @@
 /**
- * Emails page — grouped list with inline detail, draft preview/editing, mark done.
+ * Emails page — three-tab layout: Drafts, Notable, All Emails.
+ * Drafts: emails with AI-generated drafts ready in Outlook.
+ * Notable: emails worth reading but no response needed.
+ * All Emails: full list for last 30 days, searchable.
  */
 import { requireAuth, listenAuthChanges } from "../auth.js";
 import { renderNav } from "../nav.js";
 import { supabase } from "../supabase-client.js";
-import { showError, showEmpty, showToast, getParam, setParam, formatDate } from "../ui.js";
+import { showError, showEmpty, showToast, getParam, setParam, formatDate, relativeTime, escapeHtml } from "../ui.js";
+import { requireSubscription } from "../subscription.js";
+import { renderFeedbackControls, bindFeedbackEvents } from "../components/feedback.js";
 
 await requireAuth();
 listenAuthChanges();
 await renderNav();
+if (!(await requireSubscription())) throw new Error("subscription_required");
 
 // -------------------------------------------------------------------------
 // State
 // -------------------------------------------------------------------------
 
 let allEmails = [];
+let responseEvents = {};   // email_id → response_event row
+let contacts = {};         // sender_email → contact row
+let conversations = {};    // conversation_id → messages[]
+let threadCounts = {};     // conversation_id → count of emails in thread
 let searchQuery = getParam("q", "");
-let activeSection = getParam("section", ""); // from dashboard links
+let activeTab = getParam("tab", "drafts");
 
 // -------------------------------------------------------------------------
 // DOM refs
@@ -25,8 +35,31 @@ let activeSection = getParam("section", ""); // from dashboard links
 const container = document.getElementById("emailsContainer");
 const searchInput = document.getElementById("searchInput");
 const refreshBtn = document.getElementById("refreshBtn");
+const pageSubtitle = document.getElementById("pageSubtitle");
+const tabs = document.querySelectorAll(".em-email-tab");
 
 searchInput.value = searchQuery;
+
+// -------------------------------------------------------------------------
+// Tab switching
+// -------------------------------------------------------------------------
+
+tabs.forEach(tab => {
+    tab.addEventListener("click", () => {
+        tabs.forEach(t => t.classList.remove("active"));
+        tab.classList.add("active");
+        activeTab = tab.dataset.tab;
+        setParam("tab", activeTab === "drafts" ? "" : activeTab);
+        renderEmails();
+    });
+});
+
+// Set initial active tab from URL
+if (activeTab !== "drafts") {
+    tabs.forEach(t => {
+        t.classList.toggle("active", t.dataset.tab === activeTab);
+    });
+}
 
 // -------------------------------------------------------------------------
 // Search
@@ -45,19 +78,66 @@ searchInput.addEventListener("input", () => {
 refreshBtn.addEventListener("click", () => loadEmails());
 
 // -------------------------------------------------------------------------
-// Load emails from Supabase
+// Load data from Supabase
 // -------------------------------------------------------------------------
 
 async function loadEmails() {
     try {
-        const { data, error } = await supabase
-            .from("emails")
-            .select("*, classifications(*), drafts(*)")
-            .order("received_time", { ascending: false });
+        // Fetch emails with classifications and drafts
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString();
+        const [emailsRes, eventsRes, contactsRes, convosRes] = await Promise.all([
+            supabase
+                .from("emails")
+                .select("*, classifications(*), drafts(*)")
+                .gte("received_time", thirtyDaysAgo)
+                .order("received_time", { ascending: false }),
+            supabase
+                .from("response_events")
+                .select("email_id, mc, ar, ub, dl, rt, target, pri, draft, reason, sender_tier"),
+            supabase
+                .from("contacts")
+                .select("email, name, organization, contact_type, emails_per_month, is_vip"),
+            supabase
+                .from("conversations")
+                .select("conversation_id, messages"),
+        ]);
 
-        if (error) throw error;
+        if (emailsRes.error) throw emailsRes.error;
 
-        allEmails = data || [];
+        allEmails = emailsRes.data || [];
+
+        // Index response events by email_id
+        responseEvents = {};
+        if (eventsRes.data) {
+            for (const ev of eventsRes.data) {
+                responseEvents[ev.email_id] = ev;
+            }
+        }
+
+        // Index contacts by email
+        contacts = {};
+        if (contactsRes.data) {
+            for (const c of contactsRes.data) {
+                contacts[c.email.toLowerCase()] = c;
+            }
+        }
+
+        // Index conversations by conversation_id
+        conversations = {};
+        if (convosRes.data) {
+            for (const c of convosRes.data) {
+                conversations[c.conversation_id] = c.messages || [];
+            }
+        }
+
+        // Count emails per conversation thread
+        threadCounts = {};
+        for (const email of allEmails) {
+            if (email.conversation_id) {
+                threadCounts[email.conversation_id] = (threadCounts[email.conversation_id] || 0) + 1;
+            }
+        }
+
         renderEmails();
     } catch (err) {
         showError(`Failed to load emails: ${err.message}`);
@@ -65,180 +145,256 @@ async function loadEmails() {
 }
 
 // -------------------------------------------------------------------------
-// Group and render emails
+// Grouping logic
 // -------------------------------------------------------------------------
 
-function filterEmails() {
-    if (!searchQuery) return allEmails;
-    return allEmails.filter(e =>
+function filterBySearch(emails) {
+    if (!searchQuery) return emails;
+    return emails.filter(e =>
         (e.sender || "").toLowerCase().includes(searchQuery) ||
         (e.sender_name || "").toLowerCase().includes(searchQuery) ||
         (e.subject || "").toLowerCase().includes(searchQuery)
     );
 }
 
+function hasDraft(email) {
+    return email.drafts && email.drafts.length > 0;
+}
+
+function isNotable(email) {
+    if (hasDraft(email)) return false;
+    if (email.status === "completed" || email.status === "dismissed") return false;
+
+    const cls = email.classifications?.[0];
+    if (!cls) return false;
+    if (cls.needs_response) return false; // needs response without draft = should be in drafts queue
+
+    const ev = responseEvents[email.id];
+    if (!ev) return false;
+
+    // Notable if any of these signals are present
+    return (
+        ev.pri === "high" || ev.pri === "med" ||
+        ev.mc === true ||
+        ev.sender_tier === "C" || ev.sender_tier === "I" ||
+        ev.rt !== "none"
+    );
+}
+
 function groupEmails(emails) {
-    const groups = {
-        "Drafts Ready": [],
-        "Needs Response": [],
-        "Other": [],
-        "Completed": [],
-    };
+    const drafts = [];
+    const notable = [];
 
     for (const email of emails) {
-        const hasDraft = email.drafts && email.drafts.length > 0;
-        const needsResponse = email.classifications?.some(c => c.needs_response);
+        if (email.status === "completed" || email.status === "dismissed") continue;
 
-        if (email.status === "completed") {
-            groups["Completed"].push(email);
-        } else if (hasDraft) {
-            groups["Drafts Ready"].push(email);
-        } else if (needsResponse) {
-            groups["Needs Response"].push(email);
-        } else {
-            groups["Other"].push(email);
+        if (hasDraft(email)) {
+            drafts.push(email);
+        } else if (isNotable(email)) {
+            notable.push(email);
         }
     }
 
-    return groups;
+    return { drafts, notable };
 }
 
-// Map section param to group name
-const SECTION_MAP = {
-    "drafts": "Drafts Ready",
-    "needs-response": "Needs Response",
-    "other": "Other",
-    "completed": "Completed",
-};
-
-// How many cards to show per group before "Show more"
-const GROUP_LIMITS = {
-    "Drafts Ready": Infinity,
-    "Needs Response": Infinity,
-    "Other": 20,
-    "Completed": 10,
-};
-
-// Track which groups have been expanded by the user
-const expandedGroups = new Set();
+// -------------------------------------------------------------------------
+// Render
+// -------------------------------------------------------------------------
 
 function renderEmails() {
-    const filtered = filterEmails();
+    const filtered = filterBySearch(allEmails);
+    const groups = groupEmails(filtered);
 
-    if (filtered.length === 0) {
-        showEmpty(container, allEmails.length === 0
+    // Update tab counts
+    document.getElementById("draftsCount").textContent = groups.drafts.length;
+    document.getElementById("notableCount").textContent = groups.notable.length;
+    document.getElementById("allCount").textContent = filtered.length;
+
+    // Update subtitle
+    const totalActionable = groups.drafts.length + groups.notable.length;
+    pageSubtitle.textContent = totalActionable > 0
+        ? `${totalActionable} email${totalActionable === 1 ? "" : "s"} need your attention`
+        : "All caught up";
+
+    let emails;
+    let emptyMsg;
+
+    if (activeTab === "drafts") {
+        emails = groups.drafts;
+        emptyMsg = "No drafts waiting — you're all caught up.";
+    } else if (activeTab === "notable") {
+        emails = groups.notable;
+        emptyMsg = "Nothing notable right now.";
+    } else {
+        emails = filtered;
+        emptyMsg = allEmails.length === 0
             ? "No emails synced yet."
-            : "No emails match your search.");
+            : "No emails match your search.";
+    }
+
+    if (emails.length === 0) {
+        showEmpty(container, emptyMsg);
         return;
     }
 
-    const groups = groupEmails(filtered);
     let html = "";
 
-    const groupOrder = ["Drafts Ready", "Needs Response", "Other", "Completed"];
-    const targetGroup = SECTION_MAP[activeSection];
-
-    for (const groupName of groupOrder) {
-        const emails = groups[groupName];
-        if (!emails || emails.length === 0) continue;
-
-        const sectionId = Object.entries(SECTION_MAP).find(([, v]) => v === groupName)?.[0] || "";
-        const limit = GROUP_LIMITS[groupName] || Infinity;
-        const isExpanded = expandedGroups.has(groupName);
-        const visibleEmails = isExpanded ? emails : emails.slice(0, limit);
-        const hasMore = emails.length > limit && !isExpanded;
-
-        html += `<div class="em-group em-fade-in" id="section-${sectionId}">`;
-        html += `<div class="em-group-title">${groupName}<span class="em-group-count">${emails.length}</span></div>`;
-        html += `<div class="em-email-list">`;
-
-        for (const email of visibleEmails) {
-            html += renderEmailCard(email);
-        }
-
-        html += `</div>`;
-
-        if (hasMore) {
-            html += `<button class="em-btn em-btn-secondary em-btn-sm em-show-more-btn" data-group="${groupName}" style="margin: 12px auto; display: block;">Show all ${emails.length} ${groupName.toLowerCase()} emails</button>`;
-        }
-
-        html += `</div>`;
+    // Bulk action bar for drafts and notable tabs
+    if (activeTab !== "all" && emails.length > 1) {
+        html += `<div class="em-bulk-bar">
+            <button class="em-btn em-btn-secondary em-btn-sm" id="markAllDoneBtn">Mark all done (${emails.length})</button>
+        </div>`;
     }
+
+    html += `<div class="em-email-list">`;
+    for (const email of emails) {
+        html += renderEmailCard(email);
+    }
+    html += `</div>`;
 
     container.innerHTML = html;
     bindCardEvents();
-    bindShowMoreButtons();
-
-    // Scroll to target section if linked from dashboard
-    if (targetGroup) {
-        const el = document.getElementById(`section-${activeSection}`);
-        if (el) {
-            el.scrollIntoView({ behavior: "smooth", block: "start" });
-            activeSection = "";
-            setParam("section", "");
-        }
-    }
 }
 
-function bindShowMoreButtons() {
-    document.querySelectorAll(".em-show-more-btn").forEach(btn => {
-        btn.addEventListener("click", () => {
-            expandedGroups.add(btn.dataset.group);
-            renderEmails();
-        });
-    });
-}
+// -------------------------------------------------------------------------
+// Email card rendering
+// -------------------------------------------------------------------------
 
 function renderEmailCard(email) {
     const cls = email.classifications?.[0];
     const draft = email.drafts?.[0];
-    const priorityBadge = cls?.priority >= 3
-        ? `<span class="em-badge em-badge-red">P${cls.priority}</span>`
-        : cls?.priority >= 2
-        ? `<span class="em-badge em-badge-amber">P${cls.priority}</span>`
-        : "";
+    const ev = responseEvents[email.id];
+    const isCompleted = email.status === "completed" || email.status === "dismissed";
 
-    const isCompleted = email.status === "completed";
+    // Priority badge
+    let priorityBadge = "";
+    if (ev?.pri === "high") {
+        priorityBadge = `<span class="em-badge em-badge-red">High</span>`;
+    } else if (ev?.pri === "med") {
+        priorityBadge = `<span class="em-badge em-badge-amber">Med</span>`;
+    }
 
-    // Build summary for any email with classification context
-    let summaryHtml = "";
+    // Contact context
+    const senderEmail = (email.sender_email || email.sender || "").toLowerCase();
+    const contact = contacts[senderEmail];
+    let contactBadge = "";
+    if (contact) {
+        const parts = [];
+        if (contact.contact_type && contact.contact_type !== "unknown") {
+            const typeLabels = {
+                internal: "Internal",
+                external_legal: "Legal",
+                external_lender: "Lender",
+                external_vendor: "Vendor",
+                investor: "Investor",
+            };
+            parts.push(typeLabels[contact.contact_type] || contact.contact_type);
+        }
+        if (contact.emails_per_month) {
+            parts.push(`~${contact.emails_per_month}/mo`);
+        }
+        if (contact.is_vip) {
+            parts.unshift("VIP");
+        }
+        if (parts.length > 0) {
+            contactBadge = `<span class="em-contact-badge">${escapeHtml(parts.join(" · "))}</span>`;
+        }
+    }
+
+    // Suggested action
+    let actionHtml = "";
     if (cls && !isCompleted) {
-        const context = cls.context || "";
-        const action = cls.action || "";
-        if (context || action) {
-            summaryHtml = `
-                <div class="em-email-summary">
-                    <div class="em-email-summary-text">${escapeHtml(context || "No summary available.")}</div>
-                    ${action ? `
-                        <div class="em-email-response-needed">
-                            <span class="em-response-needed-label">Response needed:</span>
-                            ${escapeHtml(action)}
-                        </div>
-                    ` : ""}
+        const reason = ev?.reason || cls.action || cls.context || "";
+        if (reason) {
+            actionHtml = `
+                <div class="em-email-action-hint">
+                    <span class="em-action-label">Suggested action:</span> ${escapeHtml(reason)}
                 </div>
             `;
         }
     }
 
-    // Draft section — preview mode by default, edit mode on click
+    // Draft preview (read-only)
     let draftHtml = "";
     if (draft) {
         draftHtml = `
             <div class="em-email-section-label">Draft Response</div>
-            <div class="em-draft-preview" data-draft-id="${draft.id}">
+            <div class="em-draft-preview">
                 <div class="em-draft-preview-header">
-                    <span>To: ${escapeHtml(email.sender || "Unknown")}</span>
+                    <span>To: ${escapeHtml(email.sender_name || email.sender || "Unknown")}</span>
                 </div>
                 <div class="em-draft-preview-body">${escapeHtml(draft.draft_body || "")}</div>
             </div>
-            <div class="em-draft-editor" data-draft-id="${draft.id}" style="display: none;">
-                <textarea class="em-draft-textarea" data-draft-id="${draft.id}">${escapeHtml(draft.draft_body || "")}</textarea>
+        `;
+    }
+
+    // Classification reasoning (expandable)
+    let reasoningHtml = "";
+    if (ev && !isCompleted) {
+        const signals = [];
+        if (ev.mc) signals.push("Financial/legal");
+        if (ev.ar) signals.push("Action requested");
+        if (ev.ub) signals.push("Unblocking");
+        if (ev.dl) signals.push("Deadline");
+        if (ev.rt && ev.rt !== "none") signals.push(`Response type: ${ev.rt}`);
+        if (signals.length > 0) {
+            reasoningHtml = `
+                <div class="em-classification-reasoning">
+                    <div class="em-email-section-label">Why Clarion flagged this</div>
+                    <div class="em-signal-tags">${signals.map(s => `<span class="em-signal-tag">${escapeHtml(s)}</span>`).join("")}</div>
+                </div>
+            `;
+        }
+    }
+
+    // Thread view (conversation context)
+    let threadHtml = "";
+    if (email.conversation_id && conversations[email.conversation_id]?.length > 1) {
+        const msgs = conversations[email.conversation_id];
+        const threadItems = msgs.map(msg => {
+            const isCurrentEmail = (msg.internet_message_id === email.message_id) || (msg.subject === email.subject && msg.from === email.sender);
+            return `
+                <div class="em-thread-message${isCurrentEmail ? " em-thread-current" : ""}">
+                    <div class="em-thread-message-header">
+                        <span class="em-thread-sender">${escapeHtml(msg.from || "Unknown")}</span>
+                        <span class="em-thread-time">${msg.received ? relativeTime(msg.received) : ""}</span>
+                    </div>
+                    <div class="em-thread-snippet">${escapeHtml((msg.body || msg.snippet || "").substring(0, 150))}${(msg.body || msg.snippet || "").length > 150 ? "..." : ""}</div>
+                </div>
+            `;
+        }).join("");
+
+        threadHtml = `
+            <div class="em-thread-section">
+                <button class="em-thread-toggle" data-email-id="${email.id}">
+                    <span class="em-email-section-label">Conversation (${msgs.length} messages)</span>
+                    <span class="em-thread-toggle-icon">&#9660;</span>
+                </button>
+                <div class="em-thread-list" data-email-id="${email.id}" style="display: none;">
+                    ${threadItems}
+                </div>
             </div>
-            <div class="em-draft-actions">
-                <button class="em-btn em-btn-secondary em-btn-sm draft-edit-btn" data-draft-id="${draft.id}">Edit</button>
-                <button class="em-btn em-btn-primary em-btn-sm draft-save-btn" data-draft-id="${draft.id}" style="display: none;">Save</button>
-                <button class="em-btn em-btn-secondary em-btn-sm draft-cancel-btn" data-draft-id="${draft.id}" style="display: none;">Cancel</button>
-                <button class="em-btn em-btn-danger em-btn-sm draft-delete-btn" data-draft-id="${draft.id}">Delete</button>
+        `;
+    }
+
+    // Generate draft controls (for Notable emails or emails without drafts)
+    let generateHtml = "";
+    if (!draft && !isCompleted && activeTab !== "all") {
+        generateHtml = `
+            <div class="em-generate-section">
+                <button class="em-btn em-btn-primary em-btn-sm generate-draft-btn" data-email-id="${email.id}">Draft a Reply</button>
+                <button class="em-btn em-btn-secondary em-btn-sm generate-advanced-toggle" data-email-id="${email.id}">Options</button>
+                <div class="em-generate-advanced" data-email-id="${email.id}" style="display: none;">
+                    <textarea class="em-generate-instructions" data-email-id="${email.id}" placeholder="Any instructions? (e.g., 'Decline politely', 'Mention Tuesday call')" rows="2"></textarea>
+                    <div class="em-tone-selector">
+                        <span class="em-tone-label">Tone:</span>
+                        <button class="em-tone-pill active" data-tone="professional" data-email-id="${email.id}">Professional</button>
+                        <button class="em-tone-pill" data-tone="casual" data-email-id="${email.id}">Casual</button>
+                        <button class="em-tone-pill" data-tone="brief" data-email-id="${email.id}">Brief</button>
+                        <button class="em-tone-pill" data-tone="detailed" data-email-id="${email.id}">Detailed</button>
+                    </div>
+                </div>
             </div>
         `;
     }
@@ -251,33 +407,35 @@ function renderEmailCard(email) {
                 </button>
                 <div class="em-email-header-content">
                     <div>
-                        <div class="em-email-sender">${escapeHtml(email.sender_name || email.sender || "Unknown")}</div>
+                        <div class="em-email-sender">
+                            ${escapeHtml(email.sender_name || email.sender || "Unknown")}
+                            ${contactBadge}
+                        </div>
                         <div class="em-email-subject">${escapeHtml(email.subject || "(no subject)")}</div>
                     </div>
                     <div class="em-email-header-badges">
-                        <div class="em-email-meta">${formatDate(email.received_time)} ${priorityBadge}</div>
+                        <div class="em-email-meta">${relativeTime(email.received_time)} ${priorityBadge}</div>
                         ${draft ? `<span class="em-badge em-badge-blue">Draft</span>` : ""}
+                        ${email.conversation_id && threadCounts[email.conversation_id] > 1 ? `<span class="em-badge em-badge-slate">${threadCounts[email.conversation_id]} msgs</span>` : ""}
                     </div>
                 </div>
             </div>
 
-            ${summaryHtml}
+            ${actionHtml}
 
             <div class="em-email-detail">
                 <div class="em-email-section-label">Email Body</div>
                 <div class="em-email-body">${escapeHtml(email.body || "No body available.")}</div>
 
                 ${draftHtml}
-
-                ${!draft && !isCompleted ? `
-                    <div style="margin-top: 12px;">
-                        <button class="em-btn em-btn-primary em-btn-sm generate-draft-btn" data-email-id="${email.id}">Generate Draft</button>
-                    </div>
-                ` : ""}
+                ${reasoningHtml}
+                ${threadHtml}
+                ${generateHtml}
 
                 ${!isCompleted ? `
-                    <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--em-slate-200);">
+                    <div class="em-detail-footer">
                         <button class="em-btn em-btn-secondary em-btn-sm mark-done-btn" data-email-id="${email.id}">Mark as done</button>
+                        ${renderFeedbackControls(email.id, activeTab)}
                     </div>
                 ` : ""}
             </div>
@@ -298,188 +456,60 @@ function bindCardEvents() {
         });
     });
 
-    // Check button — quick mark done from card header
+    // Check button — quick mark done
     document.querySelectorAll(".em-check-btn:not(.em-check-done)").forEach(btn => {
         btn.addEventListener("click", async (e) => {
             e.stopPropagation();
-            const emailId = btn.dataset.emailId;
-            btn.disabled = true;
-            btn.classList.add("em-check-saving");
+            await markEmailDone(btn.dataset.emailId, btn);
+        });
+    });
+
+    // Mark done (detail footer)
+    document.querySelectorAll(".mark-done-btn").forEach(btn => {
+        btn.addEventListener("click", async (e) => {
+            e.stopPropagation();
+            await markEmailDone(btn.dataset.emailId, btn);
+        });
+    });
+
+    // Mark all done
+    const markAllBtn = document.getElementById("markAllDoneBtn");
+    if (markAllBtn) {
+        markAllBtn.addEventListener("click", async () => {
+            const groups = groupEmails(filterBySearch(allEmails));
+            const emailsToMark = activeTab === "drafts" ? groups.drafts : groups.notable;
+            if (emailsToMark.length === 0) return;
+
+            markAllBtn.disabled = true;
+            markAllBtn.textContent = "Marking...";
 
             try {
+                const ids = emailsToMark.map(e => e.id);
+                const newStatus = activeTab === "notable" ? "dismissed" : "completed";
                 const { error } = await supabase
                     .from("emails")
-                    .update({ status: "completed" })
-                    .eq("id", emailId);
+                    .update({ status: newStatus })
+                    .in("id", ids);
 
                 if (error) throw error;
 
-                const email = allEmails.find(em => em.id === emailId);
-                if (email) email.status = "completed";
-                renderEmails();
-                showToast("Marked as done");
-            } catch (err) {
-                btn.disabled = false;
-                btn.classList.remove("em-check-saving");
-                showError(`Failed to mark completed: ${err.message}`);
-            }
-        });
-    });
-
-    // Auto-resize textareas
-    document.querySelectorAll(".em-draft-textarea").forEach(ta => {
-        ta.addEventListener("input", () => {
-            ta.style.height = "auto";
-            ta.style.height = ta.scrollHeight + "px";
-        });
-    });
-
-    // Edit draft — switch to textarea mode
-    document.querySelectorAll(".draft-edit-btn").forEach(btn => {
-        btn.addEventListener("click", () => {
-            const draftId = btn.dataset.draftId;
-            const preview = document.querySelector(`.em-draft-preview[data-draft-id="${draftId}"]`);
-            const editor = document.querySelector(`.em-draft-editor[data-draft-id="${draftId}"]`);
-            const saveBtn = document.querySelector(`.draft-save-btn[data-draft-id="${draftId}"]`);
-            const cancelBtn = document.querySelector(`.draft-cancel-btn[data-draft-id="${draftId}"]`);
-
-            if (preview) preview.style.display = "none";
-            if (editor) editor.style.display = "block";
-            btn.style.display = "none";
-            if (saveBtn) saveBtn.style.display = "";
-            if (cancelBtn) cancelBtn.style.display = "";
-
-            // Auto-resize textarea
-            const ta = editor?.querySelector("textarea");
-            if (ta) {
-                ta.style.height = "auto";
-                ta.style.height = ta.scrollHeight + "px";
-                ta.focus();
-            }
-        });
-    });
-
-    // Cancel draft edit — switch back to preview
-    document.querySelectorAll(".draft-cancel-btn").forEach(btn => {
-        btn.addEventListener("click", () => {
-            const draftId = btn.dataset.draftId;
-            const preview = document.querySelector(`.em-draft-preview[data-draft-id="${draftId}"]`);
-            const editor = document.querySelector(`.em-draft-editor[data-draft-id="${draftId}"]`);
-            const editBtn = document.querySelector(`.draft-edit-btn[data-draft-id="${draftId}"]`);
-            const saveBtn = document.querySelector(`.draft-save-btn[data-draft-id="${draftId}"]`);
-
-            if (preview) preview.style.display = "";
-            if (editor) editor.style.display = "none";
-            if (editBtn) editBtn.style.display = "";
-            if (saveBtn) saveBtn.style.display = "none";
-            btn.style.display = "none";
-        });
-    });
-
-    // Save draft
-    document.querySelectorAll(".draft-save-btn").forEach(btn => {
-        btn.addEventListener("click", async () => {
-            const draftId = btn.dataset.draftId;
-            const textarea = document.querySelector(`.em-draft-textarea[data-draft-id="${draftId}"]`);
-
-            btn.disabled = true;
-            btn.textContent = "Saving...";
-
-            try {
-                const { error } = await supabase
-                    .from("drafts")
-                    .update({ draft_body: textarea.value, user_edited: true })
-                    .eq("id", draftId);
-
-                if (error) throw error;
-
-                // Update preview body
-                const previewBody = document.querySelector(`.em-draft-preview[data-draft-id="${draftId}"] .em-draft-preview-body`);
-                if (previewBody) previewBody.textContent = textarea.value;
-
-                // Switch back to preview mode
-                const preview = document.querySelector(`.em-draft-preview[data-draft-id="${draftId}"]`);
-                const editor = document.querySelector(`.em-draft-editor[data-draft-id="${draftId}"]`);
-                const editBtn = document.querySelector(`.draft-edit-btn[data-draft-id="${draftId}"]`);
-                const cancelBtn = document.querySelector(`.draft-cancel-btn[data-draft-id="${draftId}"]`);
-
-                if (preview) preview.style.display = "";
-                if (editor) editor.style.display = "none";
-                if (editBtn) editBtn.style.display = "";
-                if (cancelBtn) cancelBtn.style.display = "none";
-
-                showToast("Draft saved");
-            } catch (err) {
-                showError(`Failed to save draft: ${err.message}`);
-            } finally {
-                btn.disabled = false;
-                btn.textContent = "Save";
-                btn.style.display = "none";
-            }
-        });
-    });
-
-    // Delete draft
-    document.querySelectorAll(".draft-delete-btn").forEach(btn => {
-        btn.addEventListener("click", async () => {
-            const draftId = btn.dataset.draftId;
-            btn.disabled = true;
-            btn.textContent = "Deleting...";
-
-            try {
-                const { error } = await supabase
-                    .from("drafts")
-                    .delete()
-                    .eq("id", draftId);
-
-                if (error) throw error;
-
-                // Remove draft from local state and re-render
-                for (const email of allEmails) {
-                    if (email.drafts) {
-                        email.drafts = email.drafts.filter(d => d.id !== draftId);
-                    }
+                for (const email of emailsToMark) {
+                    email.status = newStatus;
                 }
                 renderEmails();
-                showToast("Draft deleted");
+                showToast(`Marked ${ids.length} emails as done`);
             } catch (err) {
-                btn.disabled = false;
-                btn.textContent = "Delete";
-                showError(`Failed to delete draft: ${err.message}`);
+                markAllBtn.disabled = false;
+                markAllBtn.textContent = `Mark all done (${emailsToMark.length})`;
+                showError(`Failed to mark all: ${err.message}`);
             }
         });
-    });
-
-    // Mark done
-    document.querySelectorAll(".mark-done-btn").forEach(btn => {
-        btn.addEventListener("click", async () => {
-            const emailId = btn.dataset.emailId;
-            btn.disabled = true;
-            btn.textContent = "Marking...";
-
-            try {
-                const { error } = await supabase
-                    .from("emails")
-                    .update({ status: "completed" })
-                    .eq("id", emailId);
-
-                if (error) throw error;
-
-                const email = allEmails.find(e => e.id === emailId);
-                if (email) email.status = "completed";
-                renderEmails();
-                showToast("Marked as done");
-            } catch (err) {
-                btn.disabled = false;
-                btn.textContent = "Mark done";
-                showError(`Failed to mark completed: ${err.message}`);
-            }
-        });
-    });
+    }
 
     // Generate draft
     document.querySelectorAll(".generate-draft-btn").forEach(btn => {
-        btn.addEventListener("click", async () => {
+        btn.addEventListener("click", async (e) => {
+            e.stopPropagation();
             const emailId = btn.dataset.emailId;
             btn.disabled = true;
             btn.textContent = "Generating...";
@@ -502,21 +532,90 @@ function bindCardEvents() {
                 showToast("Draft generation queued");
             } catch (err) {
                 btn.disabled = false;
-                btn.textContent = "Generate Draft";
+                btn.textContent = "Draft a Reply";
                 showError(`Failed to queue draft: ${err.message}`);
             }
         });
     });
+
+    // Advanced options toggle
+    document.querySelectorAll(".generate-advanced-toggle").forEach(btn => {
+        btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const emailId = btn.dataset.emailId;
+            const panel = document.querySelector(`.em-generate-advanced[data-email-id="${emailId}"]`);
+            if (panel) {
+                const isHidden = panel.style.display === "none";
+                panel.style.display = isHidden ? "block" : "none";
+                btn.textContent = isHidden ? "Hide Options" : "Options";
+            }
+        });
+    });
+
+    // Tone pill selection
+    document.querySelectorAll(".em-tone-pill").forEach(pill => {
+        pill.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const emailId = pill.dataset.emailId;
+            document.querySelectorAll(`.em-tone-pill[data-email-id="${emailId}"]`).forEach(p => p.classList.remove("active"));
+            pill.classList.add("active");
+        });
+    });
+
+    // Thread toggle
+    document.querySelectorAll(".em-thread-toggle").forEach(btn => {
+        btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const emailId = btn.dataset.emailId;
+            const list = document.querySelector(`.em-thread-list[data-email-id="${emailId}"]`);
+            const icon = btn.querySelector(".em-thread-toggle-icon");
+            if (list) {
+                const visible = list.style.display !== "none";
+                list.style.display = visible ? "none" : "block";
+                if (icon) icon.style.transform = visible ? "" : "rotate(180deg)";
+            }
+        });
+    });
+
+    // Feedback controls
+    bindFeedbackEvents();
 }
 
 // -------------------------------------------------------------------------
-// Helpers
+// Actions
 // -------------------------------------------------------------------------
 
-function escapeHtml(str) {
-    const div = document.createElement("div");
-    div.textContent = str;
-    return div.innerHTML;
+async function markEmailDone(emailId, btn) {
+    btn.disabled = true;
+    if (btn.classList.contains("em-check-btn")) {
+        btn.classList.add("em-check-saving");
+    } else {
+        btn.textContent = "Marking...";
+    }
+
+    try {
+        const email = allEmails.find(e => e.id === emailId);
+        const newStatus = (activeTab === "notable" && !hasDraft(email)) ? "dismissed" : "completed";
+
+        const { error } = await supabase
+            .from("emails")
+            .update({ status: newStatus })
+            .eq("id", emailId);
+
+        if (error) throw error;
+
+        if (email) email.status = newStatus;
+        renderEmails();
+        showToast("Marked as done");
+    } catch (err) {
+        btn.disabled = false;
+        if (btn.classList.contains("em-check-btn")) {
+            btn.classList.remove("em-check-saving");
+        } else {
+            btn.textContent = "Mark as done";
+        }
+        showError(`Failed to mark completed: ${err.message}`);
+    }
 }
 
 // -------------------------------------------------------------------------

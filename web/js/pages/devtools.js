@@ -9,10 +9,13 @@ import { initOnboarding } from "../devtools/onboarding.js";
 import { initDraftTester } from "../devtools/draft-tester.js";
 import { initScorerInspector } from "../devtools/scorer-inspector.js";
 import { initPipelineTrace } from "../devtools/pipeline-trace.js";
+import { requireSubscription } from "../subscription.js";
 
 await requireAuth();
 listenAuthChanges();
 await renderNav();
+
+if (!(await requireSubscription())) throw new Error("subscription_required");
 
 // -------------------------------------------------------------------------
 // Tab switching with lazy init

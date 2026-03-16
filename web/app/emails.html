@@ -14,11 +14,21 @@
     <nav id="em-sidebar" class="em-sidebar"></nav>
     <main class="em-main em-fade-in">
         <div class="em-page-header">
-            <h1 class="em-page-title">Emails</h1>
+            <div>
+                <h1 class="em-page-title">Emails</h1>
+                <p class="em-page-subtitle" id="pageSubtitle"></p>
+            </div>
             <div class="em-filter-bar">
                 <input class="em-search" type="text" id="searchInput" placeholder="Search by sender or subject...">
                 <button class="em-btn em-btn-secondary em-btn-sm" id="refreshBtn">Refresh</button>
             </div>
+        </div>
+
+        <!-- Tab navigation: Drafts / Notable / All Emails -->
+        <div class="em-email-tabs" id="emailTabs">
+            <button class="em-email-tab active" data-tab="drafts">Drafts <span class="em-tab-count" id="draftsCount">0</span></button>
+            <button class="em-email-tab" data-tab="notable">Notable <span class="em-tab-count" id="notableCount">0</span></button>
+            <button class="em-email-tab" data-tab="all">All Emails <span class="em-tab-count" id="allCount">0</span></button>
         </div>
 
         <div id="emailsContainer">
