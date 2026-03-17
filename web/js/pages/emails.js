@@ -9,7 +9,7 @@ import { renderNav } from "../nav.js";
 import { supabase } from "../supabase-client.js";
 import { showError, showEmpty, showToast, getParam, setParam, formatDate, relativeTime, escapeHtml } from "../ui.js";
 import { renderFeedbackControls, bindFeedbackEvents } from "../components/feedback.js";
-import { renderStage2, renderStage3_signals, renderStage4_context, renderStage5_draft, renderStage6_delivery } from "../components/trace-renderers.js";
+import { traceStage, renderStage5_draft } from "../components/trace-renderers.js";
 
 import { ensureAccess } from "../subscription.js";
 
@@ -259,7 +259,7 @@ function renderEmails() {
 }
 
 // -------------------------------------------------------------------------
-// Pipeline trace (inline, Stages 2–6)
+// Pipeline trace (inline, compact)
 // -------------------------------------------------------------------------
 
 function renderEmailTrace(email) {
@@ -276,12 +276,51 @@ function renderEmailTrace(email) {
         cls.action?.startsWith("Auto-skipped")
     );
 
+    // Stage 3 — signals only (compact)
+    let stage3 = "";
+    if (wasFiltered) {
+        stage3 = traceStage("Signals", "skipped", `<div class="em-trace-note">Skipped — email was filtered.</div>`);
+    } else if (ev && (ev.pri != null || ev.mc != null)) {
+        const signalDefs = [
+            { key: "mc", label: "Material" },
+            { key: "ar", label: "Action Req" },
+            { key: "ub", label: "Blocker" },
+            { key: "dl", label: "Deadline" },
+        ];
+        const pills = signalDefs.map(s => {
+            const on = ev[s.key] === true;
+            const color = on ? "var(--em-amber-100)" : "var(--em-slate-50)";
+            const textColor = on ? "var(--em-amber-700)" : "var(--em-slate-400)";
+            return `<span style="display:inline-block;padding:3px 10px;margin:2px 4px 2px 0;background:${color};border-radius:var(--em-radius-sm);font-size:12px;color:${textColor};font-weight:${on ? 600 : 400}">${s.label}${on ? " ✓" : ""}</span>`;
+        }).join("");
+        stage3 = traceStage("Signals", "active", `<div style="display:flex;flex-wrap:wrap">${pills}</div>`);
+    } else {
+        stage3 = traceStage("Signals", "empty", `<div class="em-trace-note">No signal data.</div>`);
+    }
+
+    // Stage 4 — contact type, org, role only (compact)
+    let stage4 = "";
+    if (wasFiltered) {
+        stage4 = traceStage("Context", "skipped", `<div class="em-trace-note">Skipped — email was filtered.</div>`);
+    } else if (contact) {
+        stage4 = traceStage("Context", "active", `
+            <div class="em-kv-grid">
+                <div class="em-kv-label">Contact Type</div>
+                <div class="em-kv-value"><span class="em-badge em-badge-blue">${escapeHtml(contact.contact_type || "unknown")}</span></div>
+                <div class="em-kv-label">Organization</div>
+                <div class="em-kv-value">${escapeHtml(contact.organization || "—")}</div>
+                <div class="em-kv-label">Role</div>
+                <div class="em-kv-value">${escapeHtml(contact.role || "—")}</div>
+            </div>
+        `);
+    } else {
+        stage4 = traceStage("Context", "empty", `<div class="em-trace-note">No contact record found.</div>`);
+    }
+
     return `
-        ${renderStage2(email, cls, wasFiltered)}
-        ${renderStage3_signals(ev, email, wasFiltered)}
-        ${renderStage4_context(contact, ev, email, wasFiltered)}
+        ${stage3}
+        ${stage4}
         ${renderStage5_draft(draft, ev, cls, wasFiltered)}
-        ${renderStage6_delivery(draft)}
     `;
 }
 
@@ -357,24 +396,6 @@ function renderEmailCard(email) {
         `;
     }
 
-    // Classification reasoning (expandable)
-    let reasoningHtml = "";
-    if (ev && !isCompleted) {
-        const signals = [];
-        if (ev.mc) signals.push("Financial/legal");
-        if (ev.ar) signals.push("Action requested");
-        if (ev.ub) signals.push("Unblocking");
-        if (ev.dl) signals.push("Deadline");
-        if (ev.rt && ev.rt !== "none") signals.push(`Response type: ${ev.rt}`);
-        if (signals.length > 0) {
-            reasoningHtml = `
-                <div class="em-classification-reasoning">
-                    <div class="em-email-section-label">Why Clarion flagged this</div>
-                    <div class="em-signal-tags">${signals.map(s => `<span class="em-signal-tag">${escapeHtml(s)}</span>`).join("")}</div>
-                </div>
-            `;
-        }
-    }
 
     // Pipeline trace (collapsible, shown for all emails)
     const traceHtml = `
@@ -468,20 +489,12 @@ function renderEmailCard(email) {
                 ${ev?.summary ? `
                     <div class="em-email-section-label">Summary</div>
                     <div class="em-email-body em-email-summary">${escapeHtml(ev.summary)}</div>
-                    <button class="em-body-toggle" data-email-id="${email.id}">
-                        <span class="em-email-section-label">Show Original</span>
-                        <span class="em-body-toggle-icon">&#9660;</span>
-                    </button>
-                    <div class="em-body-original" data-email-id="${email.id}" style="display: none;">
-                        <div class="em-email-body">${escapeHtml(email.body || "No body available.")}</div>
-                    </div>
                 ` : `
                     <div class="em-email-section-label">Email Body</div>
                     <div class="em-email-body">${escapeHtml(email.body || "No body available.")}</div>
                 `}
 
                 ${draftHtml}
-                ${reasoningHtml}
                 ${traceHtml}
                 ${threadHtml}
                 ${generateHtml}
@@ -642,22 +655,6 @@ function bindCardEvents() {
                 const visible = content.style.display !== "none";
                 content.style.display = visible ? "none" : "block";
                 if (icon) icon.style.transform = visible ? "" : "rotate(180deg)";
-            }
-        });
-    });
-
-    // Body toggle (show/hide original when summary is displayed)
-    document.querySelectorAll(".em-body-toggle").forEach(btn => {
-        btn.addEventListener("click", (e) => {
-            e.stopPropagation();
-            const emailId = btn.dataset.emailId;
-            const content = document.querySelector(`.em-body-original[data-email-id="${emailId}"]`);
-            const icon = btn.querySelector(".em-body-toggle-icon");
-            if (content) {
-                const visible = content.style.display !== "none";
-                content.style.display = visible ? "none" : "block";
-                if (icon) icon.style.transform = visible ? "" : "rotate(180deg)";
-                btn.querySelector(".em-email-section-label").textContent = visible ? "Show Original" : "Hide Original";
             }
         });
     });

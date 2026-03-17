@@ -678,13 +678,13 @@
 
 /* --- 11. Email Summary --- */
 .em-email-summary {
-    margin-top: 10px;
-    padding: 10px 14px;
+    margin-top: 6px;
+    padding: 6px 12px;
     background: var(--em-blue-50);
     border-left: 3px solid var(--em-blue-500);
     border-radius: 0 var(--em-radius-sm) var(--em-radius-sm) 0;
     font-size: 13px;
-    line-height: 1.5;
+    line-height: 1.4;
 }
 
 .em-email-summary-text {
