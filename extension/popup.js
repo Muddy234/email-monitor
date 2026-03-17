@@ -23,19 +23,6 @@ function hideError() {
   el.style.display = "none";
 }
 
-function showStatusError(msg) {
-  const el = document.getElementById("statusError");
-  if (!el) return;
-  el.textContent = msg;
-  el.style.display = "block";
-}
-
-function hideStatusError() {
-  const el = document.getElementById("statusError");
-  if (!el) return;
-  el.style.display = "none";
-}
-
 const ALL_VIEWS = ["welcomeView", "loginView", "setupView", "statusView"];
 
 function showView(viewId) {
@@ -452,6 +439,7 @@ function showPhoneVerifyFlow() {
   document.getElementById("phoneVerifySection").style.display = "";
   document.getElementById("loginBtn").style.display = "none";
   document.getElementById("toggleAuth").style.display = "none";
+  document.getElementById("nameGroup").style.display = "none";
   document.getElementById("authEmail").parentElement.style.display = "none";
   document.getElementById("authPassword").parentElement.style.display = "none";
   hideError();
@@ -465,6 +453,7 @@ function resetPhoneVerifyState() {
   document.getElementById("codeInputGroup").style.display = "none";
   document.getElementById("phoneVerifyToggle").style.display = "";
   document.getElementById("loginBtn").style.display = "";
+  document.getElementById("nameGroup").style.display = isSignUpMode ? "" : "none";
   document.getElementById("authEmail").parentElement.style.display = "";
   document.getElementById("authPassword").parentElement.style.display = "";
 }
@@ -493,13 +482,36 @@ document.getElementById("loginBtn").addEventListener("click", async () => {
   try {
     let session;
     if (isSignUpMode) {
+      const displayName = document.getElementById("authName").value.trim();
+      if (!displayName) {
+        showError("Please enter the name you'd like used in email sign-offs");
+        btn.disabled = false;
+        btn.textContent = "Sign Up";
+        return;
+      }
       const result = await authRequest("/signup", { email, password });
+      const signupUserId = result.user?.id || result.id || null;
+      // Write display_name to the profile row created by the DB trigger
+      if (signupUserId && displayName) {
+        try {
+          const token = result.access_token || SUPABASE_ANON_KEY;
+          await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${signupUserId}`, {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              apikey: SUPABASE_ANON_KEY,
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ display_name: displayName }),
+          });
+        } catch (_) {}
+      }
       if (result.access_token) {
         session = sessionFromResponse(result);
       } else {
         // No session = email confirmation pending.
         // Store userId for phone verify fallback.
-        pendingUserId = result.id || result.user?.id || null;
+        pendingUserId = signupUserId;
         btn.disabled = false;
         btn.textContent = "Sign Up";
         showPhoneVerifyFlow();
@@ -549,6 +561,7 @@ document.getElementById("toggleAuth").addEventListener("click", () => {
     btn.textContent = "Log In";
     link.textContent = "Don't have an account? Sign up";
   }
+  document.getElementById("nameGroup").style.display = isSignUpMode ? "" : "none";
   resetPhoneVerifyState();
   hideError();
 });
