@@ -8,8 +8,7 @@ const corsHeaders = {
 };
 
 const E164_REGEX = /^\+[1-9]\d{1,14}$/;
-const CODE_REGEX = /^\d{6}$/;
-const MAX_ATTEMPTS = 5;
+const CODE_REGEX = /^\d{4,10}$/;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -19,6 +18,9 @@ Deno.serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const twilioAccountSid = Deno.env.get("TWILIO_ACCOUNT_SID")!;
+    const twilioAuthToken = Deno.env.get("TWILIO_AUTH_TOKEN")!;
+    const verifyServiceSid = Deno.env.get("TWILIO_VERIFY_SERVICE_SID")!;
 
     const supabase = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
@@ -42,61 +44,38 @@ Deno.serve(async (req) => {
 
     if (!CODE_REGEX.test(code)) {
       return new Response(
-        JSON.stringify({ error: "Code must be a 6-digit number" }),
+        JSON.stringify({ error: "Code must be a numeric verification code" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
-    // Look up the verification record
-    const { data: verifyRow, error: lookupError } = await supabase
-      .from("phone_verifications")
-      .select("*")
-      .eq("user_id", userId)
-      .eq("phone", phone)
-      .gt("expires_at", new Date().toISOString())
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .single();
+    // Check code via Twilio Verify API
+    const twilioAuth = btoa(`${twilioAccountSid}:${twilioAuthToken}`);
+    const checkRes = await fetch(
+      `https://verify.twilio.com/v2/Services/${verifyServiceSid}/VerificationCheck`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Basic ${twilioAuth}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({
+          To: phone,
+          Code: code,
+        }),
+      },
+    );
 
-    if (lookupError || !verifyRow) {
-      return new Response(
-        JSON.stringify({ error: "No valid verification found. Please request a new code." }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
+    const checkData = await checkRes.json();
 
-    if (verifyRow.attempts >= MAX_ATTEMPTS) {
-      await supabase.from("phone_verifications").delete().eq("id", verifyRow.id);
-      return new Response(
-        JSON.stringify({ error: "Too many attempts. Please request a new code." }),
-        { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-
-    // Hash the submitted code and compare
-    const encoder = new TextEncoder();
-    const hashBuffer = await crypto.subtle.digest("SHA-256", encoder.encode(code));
-    const submittedHash = Array.from(new Uint8Array(hashBuffer))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
-
-    if (submittedHash !== verifyRow.code_hash) {
-      // Increment attempts
-      await supabase
-        .from("phone_verifications")
-        .update({ attempts: verifyRow.attempts + 1 })
-        .eq("id", verifyRow.id);
-
+    if (!checkRes.ok || checkData.status !== "approved") {
       return new Response(
         JSON.stringify({ error: "Invalid verification code" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
-    // Code is correct — clean up verification record
-    await supabase.from("phone_verifications").delete().eq("id", verifyRow.id);
-
-    // Verify user exists and is still unconfirmed
+    // Code verified — now confirm the user's email in Supabase
     const { data: userData, error: userError } = await supabase.auth.admin.getUserById(userId);
     if (userError || !userData?.user) {
       return new Response(
@@ -135,17 +114,16 @@ Deno.serve(async (req) => {
     if (sessionError || !sessionData) {
       console.error("Failed to generate login link:", sessionError);
       return new Response(
-        JSON.stringify({ error: "Account confirmed but session creation failed. Please log in manually." }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        JSON.stringify({ confirmed: true, message: "Account confirmed. Please log in with your email and password." }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
-    // Extract the token from the magic link and use it to get a session
+    // Extract the token from the magic link and exchange for a session
     const linkUrl = new URL(sessionData.properties.action_link);
     const tokenHash = linkUrl.searchParams.get("token") ||
       linkUrl.hash.replace("#", "").split("&").find((p: string) => p.startsWith("token="))?.split("=")[1];
 
-    // Use the OTP verification endpoint to exchange the magic link token for a session
     const verifyRes = await fetch(`${supabaseUrl}/auth/v1/verify`, {
       method: "POST",
       headers: {
@@ -170,7 +148,6 @@ Deno.serve(async (req) => {
       );
     }
 
-    // If verify endpoint didn't work, try direct token exchange via GoTrue
     // Fallback: tell client to log in with their credentials
     return new Response(
       JSON.stringify({
