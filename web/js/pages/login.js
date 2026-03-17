@@ -87,7 +87,8 @@ async function callEdgeFunction(name, body) {
     return data;
 }
 
-loginBtn.addEventListener("click", async () => {
+document.getElementById("authForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
     hideErr();
     const email = emailInput.value.trim();
     const password = passwordInput.value;
@@ -137,6 +138,7 @@ loginBtn.addEventListener("click", async () => {
 phoneVerifyToggle.addEventListener("click", () => {
     phoneVerifyToggle.style.display = "none";
     phoneInputGroup.style.display = "";
+    document.getElementById("verifyHint").textContent = "Enter your phone number to verify your account";
 });
 
 // Send code
@@ -162,6 +164,7 @@ sendCodeBtn.addEventListener("click", async () => {
         pendingPhone = phone;
         phoneInputGroup.style.display = "none";
         codeInputGroup.style.display = "";
+        document.getElementById("verifyHint").textContent = "Enter the code sent to your phone";
     } catch (err) {
         showErr(err.message || "Failed to send verification code");
     } finally {
@@ -239,10 +242,6 @@ toggleBtn.addEventListener("click", () => {
     pendingUserId = null;
     pendingPhone = null;
     hideErr();
-});
-
-passwordInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") loginBtn.click();
 });
 
 otpInput.addEventListener("keydown", (e) => {

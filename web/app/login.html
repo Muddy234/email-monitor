@@ -18,26 +18,28 @@
 
             <div id="authError" class="em-form-error"></div>
 
-            <div class="em-form-group" id="nameGroup" style="display: none;">
-                <label class="em-form-label" for="authName">Name (used in email sign-offs)</label>
-                <input class="em-form-input" type="text" id="authName" placeholder="e.g. Nate McBride" autocomplete="name">
-            </div>
+            <form id="authForm" autocomplete="on">
+                <div class="em-form-group" id="nameGroup" style="display: none;">
+                    <label class="em-form-label" for="authName">Name (used in email sign-offs)</label>
+                    <input class="em-form-input" type="text" id="authName" placeholder="e.g. Nate McBride" autocomplete="name">
+                </div>
 
-            <div class="em-form-group">
-                <label class="em-form-label" for="authEmail">Email</label>
-                <input class="em-form-input" type="email" id="authEmail" placeholder="you@company.com" autocomplete="email">
-            </div>
+                <div class="em-form-group">
+                    <label class="em-form-label" for="authEmail">Email</label>
+                    <input class="em-form-input" type="email" id="authEmail" placeholder="you@company.com" autocomplete="email">
+                </div>
 
-            <div class="em-form-group">
-                <label class="em-form-label" for="authPassword">Password</label>
-                <input class="em-form-input" type="password" id="authPassword" placeholder="Password" autocomplete="current-password">
-            </div>
+                <div class="em-form-group">
+                    <label class="em-form-label" for="authPassword">Password</label>
+                    <input class="em-form-input" type="password" id="authPassword" placeholder="Password" autocomplete="current-password">
+                </div>
 
-            <button class="em-btn em-btn-primary" id="loginBtn" style="width: 100%; justify-content: center;">Log In</button>
+                <button type="submit" class="em-btn em-btn-primary" id="loginBtn" style="width: 100%; justify-content: center;">Log In</button>
+            </form>
 
             <!-- Phone OTP fallback verification (shown after signup when email may be blocked) -->
             <div id="phoneVerifySection" style="display: none;">
-                <p class="em-form-info" style="text-align: center; color: #78716C; font-size: 14px; margin: 12px 0 8px;">Check your email to confirm your account</p>
+                <p class="em-form-info" id="verifyHint" style="text-align: center; color: #78716C; font-size: 14px; margin: 12px 0 8px;">Check your email to confirm your account</p>
                 <button class="em-login-toggle" id="phoneVerifyToggle">Didn't receive the email? Verify by phone instead</button>
                 <div id="phoneInputGroup" style="display: none;">
                     <div class="em-form-group">
