@@ -62,6 +62,9 @@ function formatPhoneE164(raw) {
 /** Show the phone verify section and hide the signup form fields. */
 function showPhoneVerifyFlow() {
     phoneVerifySection.style.display = "";
+    phoneVerifyToggle.style.display = "";
+    phoneInputGroup.style.display = "none";
+    codeInputGroup.style.display = "none";
     nameGroup.style.display = "none";
     loginBtn.style.display = "none";
     toggleBtn.style.display = "none";
