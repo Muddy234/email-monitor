@@ -1,3 +1,4 @@
+-- NOTE: Columns already added in 005. This migration is a no-op due to IF NOT EXISTS.
 -- Migration 009: Add missing contacts columns required by upsert_contacts().
 --
 -- These columns are populated during onboarding synthesis and used by the

@@ -1,3 +1,4 @@
+-- NOTE: Shares 006 prefix with 006_reset_stuck_emails.sql. Both are idempotent.
 -- Add scoring output columns to response_events for pipeline trace.
 -- Also add delivered_at to drafts for delivery tracking.
 

@@ -24,8 +24,6 @@ importScripts(
 const EMAIL_SYNC_ALARM = "email-sync";
 const EMAIL_SYNC_PERIOD_MIN = 2;   // 2 min
 const MAX_CATCHUP_EMAILS = 6000;   // cap for first-time or stale syncs
-const MAX_CATCHUP_DAYS = 120;      // how far back to look on first sync
-
 // OWA endpoint templates
 const OWA_ENDPOINTS = {
   "outlook.cloud.microsoft": "/owa/service.svc",
@@ -430,50 +428,6 @@ async function enrichEmailsBatched(emails) {
     }
   }
   return enriched;
-}
-
-// --- UpdateItem — unflag email ---------------------------------------------
-
-async function handleUnflagEmail(params) {
-  const messageId = params.message_id;
-  const changeKey = params.change_key || undefined;
-  const flagStatus = params.flag_status || "NotFlagged";
-
-  const itemId = { __type: "ItemId:#Exchange", Id: messageId };
-  if (changeKey) itemId.ChangeKey = changeKey;
-
-  const body = {
-    __type: "UpdateItemRequest:#Exchange",
-    ItemChanges: [
-      {
-        __type: "ItemChange:#Exchange",
-        ItemId: itemId,
-        Updates: [
-          {
-            __type: "SetItemField:#Exchange",
-            Item: {
-              __type: "Message:#Exchange",
-              Flag: { __type: "FlagType:#Exchange", FlagStatus: flagStatus },
-            },
-            Path: { __type: "PropertyUri:#Exchange", FieldURI: "Flag" },
-          },
-        ],
-      },
-    ],
-    ConflictResolution: "AlwaysOverwrite",
-    MessageDisposition: "SaveOnly",
-  };
-
-  const data = await owaFetch("UpdateItem", body);
-  const ri = data.Body?.ResponseMessages?.Items?.[0];
-  if (!ri || ri.ResponseCode !== "NoError") {
-    throw new Error(`UpdateItem failed: ${ri?.ResponseCode || data.Body?.ErrorCode || "unknown"}`);
-  }
-
-  return {
-    success: true,
-    new_change_key: ri.Items?.[0]?.ItemId?.ChangeKey || null,
-  };
 }
 
 // --- CreateItem — save draft -----------------------------------------------

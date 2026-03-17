@@ -28,11 +28,6 @@ export function showError(msg) {
     banner.classList.add("visible");
 }
 
-export function hideError() {
-    const banner = document.getElementById("em-error-banner");
-    if (banner) banner.classList.remove("visible");
-}
-
 // -------------------------------------------------------------------------
 // Empty states
 // -------------------------------------------------------------------------

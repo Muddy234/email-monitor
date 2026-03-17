@@ -26,7 +26,7 @@ import time
 from datetime import datetime, timezone
 
 from supabase_client import SupabaseWorkerClient
-from run_pipeline import process_user_batch_enriched, process_user_batch_signals
+from run_pipeline import process_user_batch_signals
 from onboarding import run_onboarding
 from onboarding.model_trainer import check_retrain_needed, train_user_model
 

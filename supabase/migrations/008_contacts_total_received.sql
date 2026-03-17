@@ -1,3 +1,4 @@
+-- NOTE: Column total_received already added in 005. This migration is a no-op due to IF NOT EXISTS.
 -- Add total_received column to contacts table.
 --
 -- The scorer uses total_received to weight Bayesian smoothing of each
