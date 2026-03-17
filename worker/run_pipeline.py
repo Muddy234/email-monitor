@@ -200,7 +200,7 @@ def filter_emails(db_client, emails, user_id, config):
 
     # Batch-write all skipped emails in bulk
     if skip_ids:
-        db_client.bulk_update_email_status(skip_ids, "completed")
+        db_client.bulk_update_email_status(skip_ids, "processed")
         db_client.bulk_insert_classifications(skip_classifications)
         logger.info(f"  Batch-wrote {len(skip_ids)} skipped emails")
 
@@ -290,13 +290,13 @@ def process_classification_results(db_client, action_items, filtered_emails,
                 "action_context": action_context,
             })
 
-        db_client.update_email_status(db_id, "completed")
+        db_client.update_email_status(db_id, "processed")
         emails_processed += 1
 
     # Mark any remaining filtered emails that didn't get an action item
     for ed in filtered_emails:
         try:
-            db_client.update_email_status(ed["_db_id"], "completed")
+            db_client.update_email_status(ed["_db_id"], "processed")
         except Exception:
             pass
 
@@ -903,7 +903,7 @@ def process_user_batch_signals(db, user_id, profile, emails):
                 "priority": 1 if signals["pri"] == "high" else 0,
             }
             db.insert_classification(db_id, user_id, classification)
-            db.update_email_status(db_id, "completed")
+            db.update_email_status(db_id, "processed")
             emails_processed += 1
 
             # Check if draft needed

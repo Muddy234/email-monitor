@@ -510,11 +510,11 @@ function bindCardEvents() {
         });
     });
 
-    // Check button — quick mark done
-    document.querySelectorAll(".em-check-btn:not(.em-check-done)").forEach(btn => {
+    // Check button — toggle done/undone
+    document.querySelectorAll(".em-check-btn").forEach(btn => {
         btn.addEventListener("click", async (e) => {
             e.stopPropagation();
-            await markEmailDone(btn.dataset.emailId, btn);
+            await toggleEmailDone(btn.dataset.emailId, btn);
         });
     });
 
@@ -700,6 +700,33 @@ async function markEmailDone(emailId, btn) {
             btn.textContent = "Mark as done";
         }
         showError(`Failed to mark completed: ${err.message}`);
+    }
+}
+
+async function toggleEmailDone(emailId, btn) {
+    const email = allEmails.find(e => e.id === emailId);
+    const isCompleted = email && (email.status === "completed" || email.status === "dismissed");
+
+    if (isCompleted) {
+        btn.disabled = true;
+        btn.classList.add("em-check-saving");
+        try {
+            const { error } = await supabase
+                .from("emails")
+                .update({ status: "processed" })
+                .eq("id", emailId);
+            if (error) throw error;
+
+            email.status = "processed";
+            renderEmails();
+            showToast("Marked as incomplete");
+        } catch (err) {
+            btn.disabled = false;
+            btn.classList.remove("em-check-saving");
+            showError(`Failed to update: ${err.message}`);
+        }
+    } else {
+        await markEmailDone(emailId, btn);
     }
 }
 
