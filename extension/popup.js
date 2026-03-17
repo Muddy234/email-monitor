@@ -559,6 +559,7 @@ document.getElementById("toggleAuth").addEventListener("click", () => {
 document.getElementById("phoneVerifyToggle").addEventListener("click", () => {
   document.getElementById("phoneVerifyToggle").style.display = "none";
   document.getElementById("phoneInputGroup").style.display = "";
+  document.getElementById("verifyHint").textContent = "Enter your phone number to verify your account";
 });
 
 // Send code
@@ -585,6 +586,7 @@ document.getElementById("sendCodeBtn").addEventListener("click", async () => {
     pendingPhone = phone;
     document.getElementById("phoneInputGroup").style.display = "none";
     document.getElementById("codeInputGroup").style.display = "";
+    document.getElementById("verifyHint").textContent = "Enter the code sent to your phone";
   } catch (err) {
     showError(err.message || "Failed to send verification code");
   } finally {
