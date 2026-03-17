@@ -517,7 +517,7 @@ async function discoverMailFolders() {
     ParentFolderIds: [
       { __type: "DistinguishedFolderId:#Exchange", Id: "msgfolderroot" },
     ],
-    Traversal: "Shallow",
+    Traversal: "Deep",
   };
 
   const data = await owaFetch("FindFolder", body);
