@@ -9,6 +9,7 @@ import { renderNav } from "../nav.js";
 import { supabase } from "../supabase-client.js";
 import { showError, showEmpty, showToast, getParam, setParam, formatDate, relativeTime, escapeHtml } from "../ui.js";
 import { renderFeedbackControls, bindFeedbackEvents } from "../components/feedback.js";
+import { renderStage2, renderStage3_signals, renderStage4_context, renderStage5_draft, renderStage6_delivery } from "../components/trace-renderers.js";
 
 await requireAuth();
 listenAuthChanges();
@@ -91,10 +92,10 @@ async function loadEmails() {
                 .order("received_time", { ascending: false }),
             supabase
                 .from("response_events")
-                .select("email_id, mc, ar, ub, dl, rt, target, pri, draft, reason, sender_tier"),
+                .select("email_id, mc, ar, ub, dl, rt, target, pri, draft, reason, sender_tier, conversation_id, calibrated_prob, confidence_tier, gate_reason"),
             supabase
                 .from("contacts")
-                .select("email, name, organization, contact_type, emails_per_month, is_vip"),
+                .select("email, name, organization, contact_type, emails_per_month, is_vip, role, relationship_significance, total_received, avg_response_time_hours"),
             supabase
                 .from("conversations")
                 .select("conversation_id, messages"),
@@ -256,6 +257,33 @@ function renderEmails() {
 }
 
 // -------------------------------------------------------------------------
+// Pipeline trace (inline, Stages 2–6)
+// -------------------------------------------------------------------------
+
+function renderEmailTrace(email) {
+    const cls = email.classifications?.[0];
+    const draft = email.drafts?.[0];
+    const ev = responseEvents[email.id];
+    const senderEmail = (email.sender_email || email.sender || "").toLowerCase();
+    const contact = contacts[senderEmail];
+
+    const wasFiltered = cls && !cls.needs_response && (
+        cls.action === "skip" ||
+        cls.context?.startsWith("Filtered") ||
+        cls.context?.startsWith("Skipped:") ||
+        cls.action?.startsWith("Auto-skipped")
+    );
+
+    return `
+        ${renderStage2(email, cls, wasFiltered)}
+        ${renderStage3_signals(ev, email, wasFiltered)}
+        ${renderStage4_context(contact, ev, email, wasFiltered)}
+        ${renderStage5_draft(draft, ev, cls, wasFiltered)}
+        ${renderStage6_delivery(draft)}
+    `;
+}
+
+// -------------------------------------------------------------------------
 // Email card rendering
 // -------------------------------------------------------------------------
 
@@ -346,6 +374,19 @@ function renderEmailCard(email) {
         }
     }
 
+    // Pipeline trace (collapsible, shown for all emails)
+    const traceHtml = `
+        <div class="em-trace-section">
+            <button class="em-trace-toggle" data-email-id="${email.id}">
+                <span class="em-email-section-label">Pipeline Trace</span>
+                <span class="em-trace-toggle-icon">&#9660;</span>
+            </button>
+            <div class="em-trace-content" data-email-id="${email.id}" style="display: none;">
+                ${renderEmailTrace(email)}
+            </div>
+        </div>
+    `;
+
     // Thread view (conversation context)
     let threadHtml = "";
     if (email.conversation_id && conversations[email.conversation_id]?.length > 1) {
@@ -427,6 +468,7 @@ function renderEmailCard(email) {
 
                 ${draftHtml}
                 ${reasoningHtml}
+                ${traceHtml}
                 ${threadHtml}
                 ${generateHtml}
 
@@ -570,6 +612,21 @@ function bindCardEvents() {
             if (list) {
                 const visible = list.style.display !== "none";
                 list.style.display = visible ? "none" : "block";
+                if (icon) icon.style.transform = visible ? "" : "rotate(180deg)";
+            }
+        });
+    });
+
+    // Trace toggle
+    document.querySelectorAll(".em-trace-toggle").forEach(btn => {
+        btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const emailId = btn.dataset.emailId;
+            const content = document.querySelector(`.em-trace-content[data-email-id="${emailId}"]`);
+            const icon = btn.querySelector(".em-trace-toggle-icon");
+            if (content) {
+                const visible = content.style.display !== "none";
+                content.style.display = visible ? "none" : "block";
                 if (icon) icon.style.transform = visible ? "" : "rotate(180deg)";
             }
         });
