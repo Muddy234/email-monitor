@@ -37,7 +37,6 @@ let activeTab = getParam("tab", "drafts");
 const container = document.getElementById("emailsContainer");
 const searchInput = document.getElementById("searchInput");
 const refreshBtn = document.getElementById("refreshBtn");
-const pageSubtitle = document.getElementById("pageSubtitle");
 const tabs = document.querySelectorAll(".em-email-tab");
 
 searchInput.value = searchQuery;
@@ -211,12 +210,6 @@ function renderEmails() {
     document.getElementById("draftsCount").textContent = groups.drafts.length;
     document.getElementById("notableCount").textContent = groups.notable.length;
     document.getElementById("allCount").textContent = groups.other.length;
-
-    // Update subtitle
-    const totalActionable = groups.drafts.length + groups.notable.length;
-    pageSubtitle.textContent = totalActionable > 0
-        ? `${totalActionable} email${totalActionable === 1 ? "" : "s"} need your attention`
-        : "All caught up";
 
     let emails;
     let emptyMsg;
