@@ -103,31 +103,31 @@ async function supabaseQuery(path, session) {
 
 async function fetchCounts(session) {
   const uid = session.user?.id;
-  if (!uid) return { drafts: 0, notable: 0, processed: 0, draftsGenerated: 0 };
+  if (!uid) return { drafts: 0, notable: 0, processed: 0 };
 
   try {
     // Fetch drafts, notable signals, and weekly stats in parallel
     const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
 
-    const [drafts, emails, events, runs] = await Promise.all([
-      supabaseQuery(`drafts?select=id&user_id=eq.${uid}&status=eq.pending`, session),
+    const [emails, events, runs] = await Promise.all([
       supabaseQuery(`emails?select=id,status,classifications(needs_response),drafts(id)&user_id=eq.${uid}&status=not.in.(completed,dismissed)&order=received_time.desc`, session),
       supabaseQuery(`response_events?select=email_id,pri,mc,sender_tier,rt&user_id=eq.${uid}`, session),
       supabaseQuery(`pipeline_runs?select=emails_processed,drafts_generated&user_id=eq.${uid}&started_at=gte.${weekAgo}`, session),
     ]);
 
-    const draftCount = drafts.length;
-
     // Index response events by email_id
     const evMap = {};
     for (const ev of events) evMap[ev.email_id] = ev;
 
-    // Count notable using same logic as web dashboard:
-    // exclude completed/dismissed, emails with drafts, missing classifications, needs_response=true
+    // Count drafts and notable using same logic as web dashboard
+    let draftCount = 0;
     let notableCount = 0;
     for (const email of emails) {
       const hasDraft = email.drafts && email.drafts.length > 0;
-      if (hasDraft) continue;
+      if (hasDraft) {
+        draftCount++;
+        continue;
+      }
       const cls = email.classifications?.[0];
       if (!cls || cls.needs_response) continue;
       const ev = evMap[email.id];
@@ -139,15 +139,14 @@ async function fetchCounts(session) {
     }
 
     // Aggregate weekly stats
-    let processed = 0, draftsGenerated = 0;
+    let processed = 0;
     for (const run of runs) {
       processed += run.emails_processed || 0;
-      draftsGenerated += run.drafts_generated || 0;
     }
 
-    return { drafts: draftCount, notable: notableCount, processed, draftsGenerated };
+    return { drafts: draftCount, notable: notableCount, processed };
   } catch (_) {
-    return { drafts: 0, notable: 0, processed: 0, draftsGenerated: 0 };
+    return { drafts: 0, notable: 0, processed: 0 };
   }
 }
 
@@ -341,18 +340,18 @@ function renderHeadline(counts) {
   } else {
     numEl.textContent = counts.processed || "0";
     textEl.textContent = "emails handled this week";
-    ctaEl.textContent = "All caught up";
+    ctaEl.textContent = "";
     card.onclick = () => openDashboardTab("/app/dashboard.html");
   }
 }
 
 function renderQuickStats(counts) {
-  const processedEl = document.getElementById("statProcessed");
   const draftsEl = document.getElementById("statDrafts");
-  removeSkeleton("statProcessed");
+  const notableEl = document.getElementById("statNotable");
   removeSkeleton("statDrafts");
-  processedEl.textContent = counts.processed;
-  draftsEl.textContent = counts.draftsGenerated;
+  removeSkeleton("statNotable");
+  draftsEl.textContent = counts.drafts;
+  notableEl.textContent = counts.notable;
 }
 
 function renderDeepLinks(counts) {
