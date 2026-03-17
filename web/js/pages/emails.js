@@ -165,8 +165,6 @@ function hasDraft(email) {
 
 function isNotable(email) {
     if (hasDraft(email)) return false;
-    if (email.status === "completed" || email.status === "dismissed") return false;
-
     const cls = email.classifications?.[0];
     if (!cls) return false;
     if (cls.needs_response) return false; // needs response without draft = should be in drafts queue
@@ -186,18 +184,19 @@ function isNotable(email) {
 function groupEmails(emails) {
     const drafts = [];
     const notable = [];
+    const other = [];
 
     for (const email of emails) {
-        if (email.status === "completed" || email.status === "dismissed") continue;
-
         if (hasDraft(email)) {
             drafts.push(email);
         } else if (isNotable(email)) {
             notable.push(email);
+        } else {
+            other.push(email);
         }
     }
 
-    return { drafts, notable };
+    return { drafts, notable, other };
 }
 
 // -------------------------------------------------------------------------
@@ -211,7 +210,7 @@ function renderEmails() {
     // Update tab counts
     document.getElementById("draftsCount").textContent = groups.drafts.length;
     document.getElementById("notableCount").textContent = groups.notable.length;
-    document.getElementById("allCount").textContent = filtered.length;
+    document.getElementById("allCount").textContent = groups.other.length;
 
     // Update subtitle
     const totalActionable = groups.drafts.length + groups.notable.length;
@@ -229,10 +228,10 @@ function renderEmails() {
         emails = groups.notable;
         emptyMsg = "Nothing notable right now.";
     } else {
-        emails = filtered;
+        emails = groups.other;
         emptyMsg = allEmails.length === 0
             ? "No emails synced yet."
-            : "No emails match your search.";
+            : "No other emails to show.";
     }
 
     if (emails.length === 0) {
