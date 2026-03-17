@@ -10,7 +10,10 @@ import { initDraftTester } from "../devtools/draft-tester.js";
 import { initScorerInspector } from "../devtools/scorer-inspector.js";
 import { initPipelineTrace } from "../devtools/pipeline-trace.js";
 
+import { ensureAccess } from "../subscription.js";
+
 await requireAuth();
+await ensureAccess();
 listenAuthChanges();
 await renderNav();
 

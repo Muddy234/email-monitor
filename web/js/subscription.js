@@ -19,7 +19,7 @@ export async function getSubscription() {
 
     const { data, error } = await supabase
         .from("subscriptions")
-        .select("status, plan, current_period_start, current_period_end, cancel_at_period_end, stripe_customer_id")
+        .select("status, plan, current_period_start, current_period_end, cancel_at_period_end, stripe_customer_id, trial_ends_at")
         .eq("user_id", session.user.id)
         .single();
 
@@ -31,10 +31,42 @@ export async function getSubscription() {
 }
 
 /**
- * Check if a subscription grants access (active, trialing, or past_due grace).
+ * Check if a trial subscription has expired.
+ */
+export function isTrialExpired(sub) {
+    if (sub?.status !== "trialing") return false;
+    if (!sub?.trial_ends_at) return false;
+    return new Date(sub.trial_ends_at) <= new Date();
+}
+
+/**
+ * Get days remaining in trial, or null if not trialing.
+ */
+export function getTrialDaysRemaining(sub) {
+    if (sub?.status !== "trialing" || !sub?.trial_ends_at) return null;
+    const ms = new Date(sub.trial_ends_at) - Date.now();
+    if (ms <= 0) return 0;
+    return Math.ceil(ms / (1000 * 60 * 60 * 24));
+}
+
+/**
+ * Check if a subscription grants access (active, trialing w/ time left, or past_due grace).
  */
 export function isSubscriptionActive(sub) {
-    return sub?.status === "active" || sub?.status === "trialing" || sub?.status === "past_due";
+    if (sub?.status === "active" || sub?.status === "past_due") return true;
+    if (sub?.status === "trialing") return !isTrialExpired(sub);
+    return false;
+}
+
+/**
+ * Gate access: redirects to account page if subscription is not active.
+ * Returns the subscription object if access is granted.
+ */
+export async function ensureAccess() {
+    const sub = await getSubscription();
+    if (isSubscriptionActive(sub) || isGrandfathered(sub)) return sub;
+    window.location.replace("/app/account.html");
+    return new Promise(() => {});
 }
 
 /**

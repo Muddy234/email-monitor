@@ -11,7 +11,10 @@ import { showError, showEmpty, showToast, getParam, setParam, formatDate, relati
 import { renderFeedbackControls, bindFeedbackEvents } from "../components/feedback.js";
 import { renderStage2, renderStage3_signals, renderStage4_context, renderStage5_draft, renderStage6_delivery } from "../components/trace-renderers.js";
 
+import { ensureAccess } from "../subscription.js";
+
 await requireAuth();
+await ensureAccess();
 listenAuthChanges();
 await renderNav();
 

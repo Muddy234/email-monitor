@@ -6,7 +6,7 @@ All database operations for the worker go through this module.
 
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from supabase import create_client, Client
 
@@ -29,19 +29,28 @@ class SupabaseWorkerClient:
         """Check if a user has an active subscription.
 
         Fail-open: returns True on query errors so paid users aren't blocked.
-        Treats active, trialing, and past_due as active.
+        Treats active and past_due as active. Trialing is active only if
+        trial_ends_at is in the future.
         """
         try:
             result = (
                 self.client.table("subscriptions")
-                .select("status")
+                .select("status, trial_ends_at")
                 .eq("user_id", user_id)
                 .maybe_single()
                 .execute()
             )
             if not result.data:
                 return False
-            return result.data["status"] in ("active", "trialing", "past_due")
+            status = result.data["status"]
+            if status in ("active", "past_due"):
+                return True
+            if status == "trialing":
+                ends = result.data.get("trial_ends_at")
+                if not ends:
+                    return False
+                return datetime.fromisoformat(ends.replace("Z", "+00:00")) > datetime.now(timezone.utc)
+            return False
         except Exception as e:
             logger.warning(f"Subscription check failed for {user_id[:8]}..., fail-open: {e}")
             return True

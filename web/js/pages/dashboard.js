@@ -6,13 +6,12 @@ import { requireAuth, listenAuthChanges } from "../auth.js";
 import { renderNav } from "../nav.js";
 import { supabase } from "../supabase-client.js";
 import { showError, showEmpty, getParam, setParam, relativeTime, escapeHtml } from "../ui.js";
-import { getSubscription, isSubscriptionActive, isGrandfathered, openPortal } from "../subscription.js";
+import { ensureAccess, isSubscriptionActive, isGrandfathered, openPortal } from "../subscription.js";
 
 await requireAuth();
+const subscription = await ensureAccess();
 listenAuthChanges();
-await renderNav();
-
-const subscription = await getSubscription();
+await renderNav(subscription);
 
 // -------------------------------------------------------------------------
 // State

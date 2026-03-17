@@ -4,6 +4,7 @@
  */
 import { signOut, getUserEmail } from "./auth.js";
 import { escapeHtml } from "./ui.js";
+import { getSubscription, getTrialDaysRemaining } from "./subscription.js";
 
 const DEV_EMAILS = ["natemcbride23@gmail.com"];
 
@@ -55,9 +56,12 @@ const NAV_ITEMS = [
  * Render the sidebar into the page.
  * Expects a <nav id="em-sidebar"></nav> element in the HTML.
  */
-export async function renderNav() {
+export async function renderNav(sub = null) {
     const sidebar = document.getElementById("em-sidebar");
     if (!sidebar) return;
+
+    if (!sub) sub = await getSubscription();
+    const trialDays = getTrialDaysRemaining(sub);
 
     const currentPath = window.location.pathname;
     const email = await getUserEmail();
@@ -71,12 +75,26 @@ export async function renderNav() {
         return `<a href="${item.href}" class="em-sidebar-link${isActive ? " active" : ""}">${item.icon}<span>${item.label}</span></a>`;
     }).join("");
 
+    let trialBannerHtml = "";
+    if (trialDays !== null) {
+        const colorClass = trialDays >= 5 ? "em-trial-green" : trialDays >= 2 ? "em-trial-amber" : "em-trial-red";
+        const dayLabel = trialDays === 1 ? "day" : "days";
+        trialBannerHtml = `
+            <div class="em-trial-banner ${colorClass}">
+                <div class="em-trial-days">${trialDays}</div>
+                <div class="em-trial-text">${dayLabel} left in trial</div>
+                <a href="/app/account.html" class="em-trial-cta">Subscribe</a>
+            </div>
+        `;
+    }
+
     sidebar.innerHTML = `
         <div class="em-sidebar-brand">
             <div class="em-sidebar-brand-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" width="24" height="24"><rect x="2" y="6" width="28" height="20" rx="3" stroke="currentColor" stroke-width="2.2"/><path d="M2 9l13.1 8.3a1.94 1.94 0 0 0 1.8 0L30 9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="26" cy="8" r="4" fill="#10B981"/><circle cx="26" cy="8" r="6" fill="none" stroke="#10B981" stroke-width="1.2" opacity="0.5"/></svg></div>
             <span>Clarion AI</span>
         </div>
         <div class="em-sidebar-nav">${links}</div>
+        ${trialBannerHtml}
         <div class="em-sidebar-footer">
             <div class="em-sidebar-avatar">${initial}</div>
             <div class="em-sidebar-user-info">

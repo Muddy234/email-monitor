@@ -7,7 +7,10 @@ import { renderNav } from "../nav.js";
 import { supabase } from "../supabase-client.js";
 import { showError, showEmpty, showToast, getParam, setParam, escapeHtml } from "../ui.js";
 
+import { ensureAccess } from "../subscription.js";
+
 await requireAuth();
+await ensureAccess();
 listenAuthChanges();
 await renderNav();
 

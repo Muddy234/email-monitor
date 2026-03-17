@@ -7,7 +7,10 @@ import { supabase } from "../supabase-client.js";
 import { showError, getParam, setParam, escapeHtml } from "../ui.js";
 import { renderBarChart } from "../components/charts.js";
 
+import { ensureAccess } from "../subscription.js";
+
 await requireAuth();
+await ensureAccess();
 listenAuthChanges();
 await renderNav();
 

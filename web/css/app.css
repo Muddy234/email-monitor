@@ -144,6 +144,44 @@
     flex-shrink: 0;
 }
 
+/* Trial countdown banner */
+.em-trial-banner {
+    margin: 12px 12px 0;
+    padding: 12px 14px;
+    border-radius: 8px;
+    text-align: center;
+    background: var(--em-slate-800);
+    border: 1px solid var(--em-slate-700);
+}
+.em-trial-days {
+    font-size: 28px;
+    font-weight: 700;
+    line-height: 1;
+}
+.em-trial-text {
+    font-size: 12px;
+    color: var(--em-slate-400);
+    margin-top: 2px;
+}
+.em-trial-cta {
+    display: inline-block;
+    margin-top: 8px;
+    padding: 5px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 6px;
+    text-decoration: none;
+    color: #fff;
+    background: var(--em-emerald);
+    transition: opacity 0.15s;
+}
+.em-trial-cta:hover { opacity: 0.85; }
+.em-trial-green .em-trial-days { color: var(--em-emerald); }
+.em-trial-amber .em-trial-days { color: #f59e0b; }
+.em-trial-amber .em-trial-cta { background: #f59e0b; }
+.em-trial-red .em-trial-days { color: #ef4444; }
+.em-trial-red .em-trial-cta { background: #ef4444; }
+
 .em-sidebar-footer {
     padding: 16px 20px;
     border-top: 1px solid var(--em-slate-700);

@@ -9,6 +9,8 @@ import {
     getSubscription,
     isSubscriptionActive,
     isGrandfathered,
+    isTrialExpired,
+    getTrialDaysRemaining,
     startCheckout,
     openPortal,
     pollForActivation,
@@ -75,8 +77,14 @@ async function renderAccount(sub) {
     const active = isSubscriptionActive(sub);
     const grandfathered = isGrandfathered(sub);
 
+    const trialExpired = isTrialExpired(sub);
+    const trialDays = getTrialDaysRemaining(sub);
+
     let statusBadge, statusClass;
-    if (active) {
+    if (trialExpired) {
+        statusBadge = "Trial Expired";
+        statusClass = "em-badge-red";
+    } else if (active) {
         statusBadge = sub.status === "trialing" ? "Trial" : sub.status === "past_due" ? "Past Due" : "Active";
         statusClass = sub.status === "past_due" ? "em-badge-amber" : "em-badge-green";
     } else if (sub?.status === "canceled") {
@@ -88,7 +96,10 @@ async function renderAccount(sub) {
     }
 
     let renewalText = "";
-    if (active && sub.current_period_end) {
+    if (active && sub.status === "trialing" && trialDays !== null) {
+        const dayLabel = trialDays === 1 ? "day" : "days";
+        renewalText = `${trialDays} ${dayLabel} remaining in free trial`;
+    } else if (active && sub.current_period_end) {
         const endDate = new Date(sub.current_period_end).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
         renewalText = sub.cancel_at_period_end
             ? `Cancels on ${endDate}`
@@ -98,11 +109,15 @@ async function renderAccount(sub) {
     }
 
     let actionHtml;
-    if (!active && !grandfathered) {
+    if (trialExpired || (!active && !grandfathered)) {
+        const expiredMsg = trialExpired
+            ? `<p style="font-size: 13px; color: var(--em-slate-500); margin-bottom: 12px;">Your 7-day trial has ended. Subscribe to continue using Clarion AI.</p>`
+            : "";
         actionHtml = `
             <div class="em-account-subscribe">
                 <div class="em-account-offer">
                     <h3>Subscribe to Clarion AI</h3>
+                    ${expiredMsg}
                     <p>AI-powered email classification and draft generation for your Outlook inbox.</p>
                     <div class="em-account-price">$10 <span>/ month</span></div>
                 </div>
@@ -111,6 +126,12 @@ async function renderAccount(sub) {
                 </button>
                 <p class="em-account-hint" id="subscribeHint"></p>
             </div>
+        `;
+    } else if (active && sub.status === "trialing") {
+        actionHtml = `
+            <button class="em-btn em-btn-primary" id="subscribeBtn">Subscribe Now</button>
+            <p class="em-account-hint" id="subscribeHint"></p>
+            <button class="em-btn em-btn-secondary" id="manageBtn" style="display:none">Manage Billing</button>
         `;
     } else {
         actionHtml = `
