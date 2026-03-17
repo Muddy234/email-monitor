@@ -160,6 +160,61 @@ Feature checks are questions about the email. Verify each against the actual mes
 - The reason field should explain the decision concisely, referencing specific signals or content"""
 
 
+NOTABLE_SUMMARY_SYSTEM_PROMPT = """\
+You are an executive assistant analyzing an email that does not require a direct response \
+but is notable enough to warrant a brief summary for the recipient.
+
+Analyze the email and provide a concise summary. Reason through:
+1. Situation — What is happening? What is the broader context of this exchange?
+2. Sender's intent — What does the sender actually need or want?
+3. Key information — What relevant facts, details, or constraints are established?
+4. Why no response is needed — Briefly explain why this is FYI / no action required from the recipient.
+
+Output 3-5 sentences of plain text analysis. No JSON, no XML tags, no headers."""
+
+
+NOTABLE_SUMMARY_USER_TEMPLATE = """\
+FROM: {sender_name} <{sender_email}>
+SUBJECT: {subject}
+
+EMAIL BODY:
+{body}"""
+
+
+def build_notable_summary_prompt(email_data, conversation_history=None):
+    """Build the user message for a notable email summary call."""
+    from .analyzer import _strip_quoted_content
+
+    body = _strip_quoted_content(email_data.get("body", "") or "")
+    if len(body) > 4000:
+        body = body[:4000] + "\n[... truncated]"
+
+    prompt = NOTABLE_SUMMARY_USER_TEMPLATE.format(
+        sender_name=email_data.get("sender_name", "Unknown"),
+        sender_email=email_data.get("sender", ""),
+        subject=email_data.get("subject", "(no subject)"),
+        body=body,
+    )
+
+    # Append thread context if available
+    if conversation_history:
+        sorted_msgs = sorted(
+            conversation_history, key=lambda m: m.get("received_time") or ""
+        )
+        thread_parts = ["\n\nTHREAD CONTEXT (prior messages in this conversation):"]
+        for msg in sorted_msgs[:5]:  # cap at 5 messages
+            sender = msg.get("sender_name") or msg.get("sender_email", "Unknown")
+            date = msg.get("received_time", "")
+            msg_body = (msg.get("body") or "")[:500]
+            if msg_body:
+                thread_parts.append(f"--- {sender} ({date}) ---")
+                thread_parts.append(msg_body)
+        if len(thread_parts) > 1:
+            prompt += "\n".join(thread_parts)
+
+    return prompt
+
+
 def get_analysis_prompt():
     """Return the default analysis prompt."""
     return DEFAULT_ANALYSIS_PROMPT

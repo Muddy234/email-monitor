@@ -223,6 +223,17 @@ Generate the reply body text only (no subject, no headers)."""
         result = self._validate_output(raw_output, email_data)
         return result, usage
 
+    @staticmethod
+    def _extract_thinking(raw_output):
+        """Extract the <thinking> block from raw model output.
+
+        Returns the plain text inside the tags, or None if no thinking block.
+        """
+        if not raw_output:
+            return None
+        match = re.search(r"<thinking>(.*?)</thinking>", raw_output, flags=re.DOTALL)
+        return match.group(1).strip() if match else None
+
     def _validate_output(self, raw_output, email_data):
         """Validate draft output. Returns cleaned text or None.
 

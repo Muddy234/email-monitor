@@ -14,7 +14,10 @@ from datetime import datetime, timezone, timedelta
 from pipeline.filter import EmailFilter
 from pipeline.analyzer import ClaudeAnalyzer
 from pipeline.drafts import DraftGenerator
-from pipeline.prompts import get_draft_prompt_template
+from pipeline.prompts import (
+    get_draft_prompt_template, build_notable_summary_prompt,
+    NOTABLE_SUMMARY_SYSTEM_PROMPT,
+)
 from pipeline.signal_extractor import (
     extract_signals, extract_signals_batch_params, parse_signal_response,
 )
@@ -855,6 +858,7 @@ def process_user_batch_signals(db, user_id, profile, emails):
         # ── Stage 4: Post-process results ────────────────────────
         response_events = []
         draft_candidates = []
+        notable_candidates = []
         emails_processed = 0
 
         for db_id, ctx in email_context.items():
@@ -930,6 +934,20 @@ def process_user_batch_signals(db, user_id, profile, emails):
                     })
                 elif not email_age_ok:
                     logger.info(f"  Skipping draft (too old): {ed.get('subject', '?')[:60]}")
+            else:
+                # Not draft-worthy — check if notable
+                is_notable = (
+                    signals["pri"] in ("high", "med")
+                    or signals["mc"] is True
+                    or ctx["sender_tier"] in ("C", "I")
+                    or signals["rt"] != "none"
+                )
+                if is_notable:
+                    notable_candidates.append({
+                        "db_id": db_id,
+                        "email_data": ed,
+                        "conv_id": ed.get("conversation_id"),
+                    })
 
         # Persist response events
         if response_events:
@@ -937,6 +955,64 @@ def process_user_batch_signals(db, user_id, profile, emails):
                 db.upsert_response_events(user_id, response_events)
             except Exception as e:
                 logger.warning(f"  Failed to persist response_events: {e}")
+
+        # ── Stage 4b: Notable summaries (Haiku batch) ────────────
+        if notable_candidates:
+            from pipeline.api_client import resolve_model as _resolve_model
+
+            notable_requests = []
+            for candidate in notable_candidates:
+                ed = candidate["email_data"]
+                conv_id = candidate["conv_id"]
+                conv_history = None
+                if conv_id:
+                    conv_history = db.fetch_conversation_context(user_id, conv_id)
+
+                user_msg = build_notable_summary_prompt(ed, conv_history)
+                notable_requests.append({
+                    "custom_id": candidate["db_id"],
+                    "params": {
+                        "model": _resolve_model("haiku"),
+                        "max_tokens": 500,
+                        "temperature": 0,
+                        "system": [{
+                            "type": "text",
+                            "text": NOTABLE_SUMMARY_SYSTEM_PROMPT,
+                            "cache_control": {"type": "ephemeral"},
+                        }],
+                        "messages": [{"role": "user", "content": user_msg}],
+                    },
+                })
+
+            logger.info(
+                f"  User {user_id[:8]}...: submitting notable summary batch "
+                f"({len(notable_requests)} emails)"
+            )
+
+            try:
+                notable_results, notable_usage = submit_and_wait(
+                    notable_requests,
+                    api_key=api_key,
+                    poll_interval=batch_poll_interval,
+                    max_wait=batch_max_wait,
+                )
+                if notable_usage:
+                    db.record_token_usage(user_id, "haiku", "summary", notable_usage)
+            except Exception as e:
+                logger.warning(f"  Notable summary batch failed: {e}")
+                notable_results = {}
+
+            # Store summaries via targeted updates
+            for candidate in notable_candidates:
+                db_id = candidate["db_id"]
+                summary = notable_results.get(db_id)
+                if summary and summary.strip():
+                    try:
+                        db.client.table("response_events").update(
+                            {"summary": summary.strip()}
+                        ).eq("email_id", db_id).eq("user_id", user_id).execute()
+                    except Exception as e:
+                        logger.warning(f"  Failed to store notable summary for {db_id[:8]}: {e}")
 
         # ── Stage 5: Draft generation (Sonnet batch) ─────────────
         drafts_generated = 0
@@ -992,6 +1068,9 @@ def process_user_batch_signals(db, user_id, profile, emails):
                     if fallback_usage:
                         db.record_token_usage(user_id, "sonnet", "draft", fallback_usage)
 
+                # Extract thinking before validation strips it
+                thinking = DraftGenerator._extract_thinking(draft_body) if draft_body else None
+
                 cleaned = draft_generator._validate_output(
                     draft_body, candidate["email_data"]
                 ) if draft_body else None
@@ -1002,6 +1081,15 @@ def process_user_batch_signals(db, user_id, profile, emails):
                         f"  Draft generated for: "
                         f"{candidate['email_data'].get('subject', '?')[:60]}"
                     )
+
+                # Store thinking as summary on response_event
+                if thinking:
+                    try:
+                        db.client.table("response_events").update(
+                            {"summary": thinking}
+                        ).eq("email_id", db_id).eq("user_id", user_id).execute()
+                    except Exception as e:
+                        logger.warning(f"  Failed to store draft thinking for {db_id[:8]}: {e}")
 
         db.update_pipeline_run(
             run_id, status="completed",

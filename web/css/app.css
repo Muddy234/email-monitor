@@ -2532,6 +2532,35 @@
     padding-top: 16px;
 }
 
+/* Body toggle (show original when summary displayed) */
+.em-body-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    border: none;
+    background: none;
+    cursor: pointer;
+    padding: 4px 0;
+    margin-top: 8px;
+    font-family: var(--em-font);
+}
+
+.em-body-toggle-icon {
+    font-size: 10px;
+    color: var(--em-slate-400);
+    transition: transform var(--em-transition);
+}
+
+.em-body-original {
+    padding-top: 8px;
+}
+
+.em-email-summary {
+    border-left: 3px solid var(--em-blue-200, #bfdbfe);
+    padding-left: 12px;
+}
+
 /* --- 50. Account Page --- */
 .em-account-card {
     background: var(--em-white);

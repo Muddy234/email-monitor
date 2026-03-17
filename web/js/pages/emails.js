@@ -92,7 +92,7 @@ async function loadEmails() {
                 .order("received_time", { ascending: false }),
             supabase
                 .from("response_events")
-                .select("email_id, mc, ar, ub, dl, rt, target, pri, draft, reason, sender_tier, conversation_id, calibrated_prob, confidence_tier, gate_reason"),
+                .select("email_id, mc, ar, ub, dl, rt, target, pri, draft, reason, sender_tier, conversation_id, calibrated_prob, confidence_tier, gate_reason, summary"),
             supabase
                 .from("contacts")
                 .select("email, name, organization, contact_type, emails_per_month, is_vip, role, relationship_significance, total_received, avg_response_time_hours"),
@@ -463,8 +463,20 @@ function renderEmailCard(email) {
             ${actionHtml}
 
             <div class="em-email-detail">
-                <div class="em-email-section-label">Email Body</div>
-                <div class="em-email-body">${escapeHtml(email.body || "No body available.")}</div>
+                ${ev?.summary ? `
+                    <div class="em-email-section-label">Summary</div>
+                    <div class="em-email-body em-email-summary">${escapeHtml(ev.summary)}</div>
+                    <button class="em-body-toggle" data-email-id="${email.id}">
+                        <span class="em-email-section-label">Show Original</span>
+                        <span class="em-body-toggle-icon">&#9660;</span>
+                    </button>
+                    <div class="em-body-original" data-email-id="${email.id}" style="display: none;">
+                        <div class="em-email-body">${escapeHtml(email.body || "No body available.")}</div>
+                    </div>
+                ` : `
+                    <div class="em-email-section-label">Email Body</div>
+                    <div class="em-email-body">${escapeHtml(email.body || "No body available.")}</div>
+                `}
 
                 ${draftHtml}
                 ${reasoningHtml}
@@ -628,6 +640,22 @@ function bindCardEvents() {
                 const visible = content.style.display !== "none";
                 content.style.display = visible ? "none" : "block";
                 if (icon) icon.style.transform = visible ? "" : "rotate(180deg)";
+            }
+        });
+    });
+
+    // Body toggle (show/hide original when summary is displayed)
+    document.querySelectorAll(".em-body-toggle").forEach(btn => {
+        btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const emailId = btn.dataset.emailId;
+            const content = document.querySelector(`.em-body-original[data-email-id="${emailId}"]`);
+            const icon = btn.querySelector(".em-body-toggle-icon");
+            if (content) {
+                const visible = content.style.display !== "none";
+                content.style.display = visible ? "none" : "block";
+                if (icon) icon.style.transform = visible ? "" : "rotate(180deg)";
+                btn.querySelector(".em-email-section-label").textContent = visible ? "Show Original" : "Hide Original";
             }
         });
     });
