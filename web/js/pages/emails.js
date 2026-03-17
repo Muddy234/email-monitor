@@ -29,6 +29,8 @@ let conversations = {};    // conversation_id → messages[]
 let threadCounts = {};     // conversation_id → count of emails in thread
 let searchQuery = getParam("q", "");
 let activeTab = getParam("tab", "drafts");
+const PAGE_SIZE = 20;
+let showAllForTab = { drafts: false, notable: false, all: false };
 
 // -------------------------------------------------------------------------
 // DOM refs
@@ -50,6 +52,7 @@ tabs.forEach(tab => {
         tabs.forEach(t => t.classList.remove("active"));
         tab.classList.add("active");
         activeTab = tab.dataset.tab;
+        showAllForTab[activeTab] = false;
         setParam("tab", activeTab === "drafts" ? "" : activeTab);
         renderEmails();
     });
@@ -232,6 +235,11 @@ function renderEmails() {
         return;
     }
 
+    // Paginate: show first PAGE_SIZE unless "Show All" was clicked or search is active
+    const totalCount = emails.length;
+    const paginate = !showAllForTab[activeTab] && !searchQuery && totalCount > PAGE_SIZE;
+    const displayEmails = paginate ? emails.slice(0, PAGE_SIZE) : emails;
+
     let html = "";
 
     // Bulk action bar for drafts and notable tabs
@@ -242,10 +250,16 @@ function renderEmails() {
     }
 
     html += `<div class="em-email-list">`;
-    for (const email of emails) {
+    for (const email of displayEmails) {
         html += renderEmailCard(email);
     }
     html += `</div>`;
+
+    if (paginate) {
+        html += `<div style="text-align:center;padding:16px 0;">
+            <button class="em-btn em-btn-secondary" id="showAllBtn">Show All (${totalCount} total)</button>
+        </div>`;
+    }
 
     container.innerHTML = html;
     bindCardEvents();
@@ -651,6 +665,15 @@ function bindCardEvents() {
             }
         });
     });
+
+    // Show All pagination button
+    const showAllBtn = document.getElementById("showAllBtn");
+    if (showAllBtn) {
+        showAllBtn.addEventListener("click", () => {
+            showAllForTab[activeTab] = true;
+            renderEmails();
+        });
+    }
 
     // Feedback controls
     bindFeedbackEvents();
