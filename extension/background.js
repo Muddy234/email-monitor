@@ -38,6 +38,9 @@ const OWA_ENDPOINTS = {
 let token = null;        // { token, expiresOn, cachedAt, clientId, origin }
 let isSyncing = false;   // lock to prevent concurrent Supabase syncs
 let lastSyncTime = null; // ISO string of last successful sync
+let cachedFolders = null;      // Array of { id, displayName, isDistinguished }
+let folderCacheTime = null;    // ISO timestamp of last folder discovery
+const FOLDER_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 /** Persist lastSyncTime to chrome.storage.local. */
 function persistSyncTime() {
@@ -258,7 +261,9 @@ async function handleGetEmails(params) {
       AdditionalProperties: properties,
     },
     ParentFolderIds: [
-      { __type: "DistinguishedFolderId:#Exchange", Id: folder },
+      params.folderId
+        ? { __type: "FolderId:#Exchange", Id: params.folderId }
+        : { __type: "DistinguishedFolderId:#Exchange", Id: folder },
     ],
     Traversal: "Shallow",
     Paging: {
@@ -298,7 +303,7 @@ async function handleGetEmails(params) {
 
   const rootFolder = ri.RootFolder;
   const items = rootFolder?.Items || [];
-  const folderName = folder.charAt(0).toUpperCase() + folder.slice(1);
+  const folderName = params.folderDisplayName || (folder.charAt(0).toUpperCase() + folder.slice(1));
 
   return {
     emails: items.map((item) => parseFindItemMessage(item, folderName)),
@@ -487,6 +492,59 @@ async function handleGetSentItems(params) {
 }
 
 // ---------------------------------------------------------------------------
+// Folder discovery
+// ---------------------------------------------------------------------------
+
+const SKIP_FOLDER_NAMES = new Set([
+  "sent items", "drafts", "deleted items", "junk email",
+  "outbox", "conversation history", "archive",
+  "sync issues", "rss feeds", "rss subscriptions",
+]);
+
+async function discoverMailFolders() {
+  // Return cache if still fresh
+  if (cachedFolders && folderCacheTime) {
+    const age = Date.now() - new Date(folderCacheTime).getTime();
+    if (age < FOLDER_CACHE_TTL_MS) return cachedFolders;
+  }
+
+  const body = {
+    __type: "FindFolderRequest:#Exchange",
+    FolderShape: {
+      __type: "FolderResponseShape:#Exchange",
+      BaseShape: "Default",
+    },
+    ParentFolderIds: [
+      { __type: "DistinguishedFolderId:#Exchange", Id: "msgfolderroot" },
+    ],
+    Traversal: "Shallow",
+  };
+
+  const data = await owaFetch("FindFolder", body);
+  const ri = data.Body?.ResponseMessages?.Items?.[0];
+  if (!ri || ri.ResponseCode !== "NoError") {
+    throw new Error(`FindFolder failed: ${ri?.ResponseCode || "unknown"}`);
+  }
+
+  const allFolders = ri.RootFolder?.Folders || [];
+  const mailFolders = allFolders
+    .filter(f => f.FolderClass === "IPF.Note" || !f.FolderClass)
+    .filter(f => !SKIP_FOLDER_NAMES.has((f.DisplayName || "").toLowerCase()))
+    .map(f => ({
+      id: f.FolderId?.Id,
+      displayName: f.DisplayName,
+      isDistinguished: (f.DisplayName || "").toLowerCase() === "inbox",
+    }));
+
+  cachedFolders = mailFolders;
+  folderCacheTime = new Date().toISOString();
+  chrome.storage.local.set({ cachedFolders, folderCacheTime });
+
+  if (DEBUG) console.log("Discovered mail folders:", mailFolders.map(f => f.displayName));
+  return mailFolders;
+}
+
+// ---------------------------------------------------------------------------
 // Supabase email sync
 // ---------------------------------------------------------------------------
 
@@ -542,50 +600,74 @@ async function syncEmailsToSupabase() {
     // Set limit: small for incremental syncs, larger for catch-up
     const maxEmails = lastSyncTime ? 50 : MAX_CATCHUP_EMAILS;
 
-    // Fetch emails via OWA (no date filter — upsert handles duplicates)
-    const result = await handleGetEmails({
-      folder: "inbox",
-      max_scan: maxEmails,
-      flagged_only: false,
-    });
-
-    if (!result.emails || result.emails.length === 0) {
-      lastSyncTime = new Date().toISOString();
-      persistSyncTime();
-      return { synced: 0 };
+    // Discover all mail folders (cached for 1 hour)
+    let folders;
+    try {
+      folders = await discoverMailFolders();
+    } catch (err) {
+      if (DEBUG) console.warn("Folder discovery failed, falling back to inbox-only:", err.message);
+      folders = [{ id: null, displayName: "Inbox", isDistinguished: true }];
     }
 
-    // Enrich emails with body/recipients via batched GetItem
-    const enriched = await enrichEmailsBatched(result.emails);
+    // Loop through each mail folder sequentially
+    let totalSynced = 0;
+    for (const folderInfo of folders) {
+      try {
+        // Build fetch params — use raw folderId for non-distinguished folders
+        const fetchParams = {
+          max_scan: maxEmails,
+          flagged_only: false,
+        };
+        if (folderInfo.isDistinguished) {
+          fetchParams.folder = "inbox";
+        } else {
+          fetchParams.folderId = folderInfo.id;
+          fetchParams.folderDisplayName = folderInfo.displayName;
+        }
 
-    // Transform to Supabase row format
-    const rows = enriched.map((e) => ({
-      user_id: userId,
-      email_ref: e.email_ref,
-      subject: e.subject || "",
-      sender: e.sender || "",
-      sender_name: e.sender_name || "",
-      sender_email: e.sender_email || "",
-      received_time: e.received_time || null,
-      body: (e.body || "").slice(0, 50000), // cap body size
-      has_attachments: e.has_attachments || false,
-      attachment_names: e.attachment_names || [],
-      folder: e.folder || "Inbox",
-      flag_status: e.flag_status || "NotFlagged",
-      conversation_id: e.conversation_id || null,
-      conversation_topic: e.conversation_topic || null,
-      to_field: e.to_field || "",
-      cc_field: e.cc_field || "",
-      importance: ["Low", "Normal", "High"][e.importance] || "Normal",
-      recipients: e.recipients || [],
-      // NOTE: status is intentionally omitted here. The DB column defaults to
-      // "unprocessed" on INSERT, and merge-duplicates upsert must NOT overwrite
-      // status on existing rows (which may already be processing/completed).
-    }));
+        const result = await handleGetEmails(fetchParams);
 
-    // Upsert to Supabase
-    await pushEmails(rows);
-    if (DEBUG) console.log(`Synced ${rows.length} inbox emails to Supabase`);
+        if (!result.emails || result.emails.length === 0) {
+          if (DEBUG) console.log(`No emails found in folder "${folderInfo.displayName}"`);
+          continue;
+        }
+
+        // Enrich emails with body/recipients via batched GetItem
+        const enriched = await enrichEmailsBatched(result.emails);
+
+        // Transform to Supabase row format
+        const rows = enriched.map((e) => ({
+          user_id: userId,
+          email_ref: e.email_ref,
+          subject: e.subject || "",
+          sender: e.sender || "",
+          sender_name: e.sender_name || "",
+          sender_email: e.sender_email || "",
+          received_time: e.received_time || null,
+          body: (e.body || "").slice(0, 50000), // cap body size
+          has_attachments: e.has_attachments || false,
+          attachment_names: e.attachment_names || [],
+          folder: e.folder || folderInfo.displayName,
+          flag_status: e.flag_status || "NotFlagged",
+          conversation_id: e.conversation_id || null,
+          conversation_topic: e.conversation_topic || null,
+          to_field: e.to_field || "",
+          cc_field: e.cc_field || "",
+          importance: ["Low", "Normal", "High"][e.importance] || "Normal",
+          recipients: e.recipients || [],
+          // NOTE: status is intentionally omitted here. The DB column defaults to
+          // "unprocessed" on INSERT, and merge-duplicates upsert must NOT overwrite
+          // status on existing rows (which may already be processing/completed).
+        }));
+
+        await pushEmails(rows);
+        totalSynced += rows.length;
+        if (DEBUG) console.log(`Synced ${rows.length} emails from "${folderInfo.displayName}"`);
+      } catch (err) {
+        // Per-folder errors are non-blocking — log and continue to next folder
+        if (DEBUG) console.error(`Error syncing folder "${folderInfo.displayName}":`, err.message);
+      }
+    }
 
     // Sync sent items every cycle (incremental for subsequent syncs)
     let sentCount = 0;
@@ -643,7 +725,7 @@ async function syncEmailsToSupabase() {
     // Update heartbeat so the worker knows we're active
     updateHeartbeat(userId).catch(() => {});
 
-    return { synced: rows.length, sent_synced: sentCount };
+    return { synced: totalSynced, sent_synced: sentCount };
   } catch (err) {
     if (DEBUG) console.error("Email sync error:", err.message);
     // Surface network/server errors distinctly
@@ -742,11 +824,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       is_syncing: isSyncing,
     });
   } else if (msg.type === "supabaseSessionChanged") {
-    // Clear cached token if session was removed (logout)
+    // Clear cached token and folder cache if session was removed (logout)
     chrome.storage.local.get("supabaseSession", (result) => {
       if (!result.supabaseSession) {
         token = null;
         lastSyncTime = null;
+        cachedFolders = null;
+        folderCacheTime = null;
+        chrome.storage.local.remove(["cachedFolders", "folderCacheTime"]);
         updateBadge();
       }
     });
@@ -769,6 +854,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 (async () => {
   await restoreToken();
   await restoreSyncTime();
+
+  // Restore folder cache from storage
+  const folderData = await chrome.storage.local.get(["cachedFolders", "folderCacheTime"]);
+  if (folderData.cachedFolders) {
+    cachedFolders = folderData.cachedFolders;
+    folderCacheTime = folderData.folderCacheTime || null;
+  }
+
   updateBadge();
 
   // Initialize Supabase features (sync alarm + Realtime)
