@@ -289,6 +289,205 @@
             flex-shrink: 0;
         }
 
+        /* ── Outlook compose mockup ── */
+        .demo-outlook-step {
+            margin-top: 10px;
+            max-height: 0;
+            overflow: hidden;
+            opacity: 0;
+            transition: max-height 0.5s ease, opacity 0.5s ease, box-shadow 0.5s ease, background 0.5s ease;
+        }
+        body.touring .demo-section.demo-outlook-step.active {
+            max-height: 600px;
+            opacity: 1;
+        }
+        body.touring .demo-section.demo-outlook-step.dimmed {
+            max-height: 0;
+            opacity: 0;
+        }
+        .outlook-compose {
+            border: 1px solid #E0E0E0;
+            border-radius: 6px;
+            overflow: hidden;
+            background: var(--em-white);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+        .outlook-ribbon-tabs {
+            display: flex;
+            gap: 0;
+            padding: 0 12px;
+            background: #F5F5F5;
+            border-bottom: 1px solid #E0E0E0;
+            font-size: 11px;
+            color: #616161;
+        }
+        .outlook-tab {
+            padding: 5px 10px 4px;
+            cursor: default;
+            border-bottom: 2px solid transparent;
+        }
+        .outlook-tab--active {
+            color: #0F6CBD;
+            font-weight: 600;
+            border-bottom-color: #0F6CBD;
+        }
+        .outlook-format-bar {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 12px;
+            border-bottom: 1px solid #EDEBE9;
+            background: #FAFAFA;
+        }
+        .outlook-format-group {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .outlook-format-divider {
+            width: 1px;
+            height: 18px;
+            background: #D2D0CE;
+            margin: 0 2px;
+        }
+        .outlook-font-select, .outlook-size-select {
+            display: flex;
+            align-items: center;
+            gap: 3px;
+            padding: 2px 6px;
+            border: 1px solid #D2D0CE;
+            border-radius: 3px;
+            font-size: 11px;
+            color: #323130;
+            background: var(--em-white);
+        }
+        .outlook-size-select {
+            width: 36px;
+        }
+        .outlook-chevron {
+            width: 8px;
+            height: 5px;
+            color: #616161;
+        }
+        .outlook-fmt-icon {
+            width: 16px;
+            height: 16px;
+            color: #616161;
+            cursor: default;
+        }
+        .outlook-fmt-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 20px;
+            height: 20px;
+            font-size: 12px;
+            color: #323130;
+            cursor: default;
+        }
+        .outlook-send-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 7px 12px;
+            border-bottom: 1px solid #EDEBE9;
+        }
+        .outlook-send-group {
+            display: flex;
+            align-items: stretch;
+            flex-shrink: 0;
+        }
+        .outlook-send-btn {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            padding: 5px 14px;
+            background: #0F6CBD;
+            color: white;
+            border: none;
+            border-radius: 4px 0 0 4px;
+            font-size: 12px;
+            font-weight: 600;
+            font-family: var(--em-font);
+            cursor: default;
+        }
+        .outlook-send-dropdown {
+            display: flex;
+            align-items: center;
+            padding: 0 6px;
+            background: #115EA3;
+            border: none;
+            border-radius: 0 4px 4px 0;
+            border-left: 1px solid rgba(255,255,255,0.3);
+            cursor: default;
+        }
+        .outlook-from {
+            font-size: 12px;
+            color: #616161;
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .outlook-send-actions {
+            display: flex;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+        .outlook-action-icon {
+            width: 16px;
+            height: 16px;
+            cursor: default;
+        }
+        .outlook-to-field {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            border-bottom: 1px solid #EDEBE9;
+            font-size: 12px;
+            color: #323130;
+        }
+        .outlook-avatar-sm {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: #C4B5E0;
+            color: white;
+            font-size: 9px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .outlook-to-label {
+            color: #616161;
+            flex-shrink: 0;
+        }
+        .outlook-to-value {
+            color: #323130;
+        }
+        .outlook-subject-field {
+            padding: 7px 12px;
+            border-bottom: 1px solid #EDEBE9;
+            font-size: 13px;
+            font-weight: 600;
+            color: #323130;
+        }
+        .outlook-body {
+            padding: 10px 16px;
+            min-height: 60px;
+        }
+        .outlook-body-text {
+            font-size: 13px;
+            line-height: 1.5;
+            color: #323130;
+            white-space: pre-wrap;
+            font-family: 'Aptos', 'Calibri', var(--em-font);
+        }
+
         /* Trace */
         .em-trace-section { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--em-slate-100); }
         .em-trace-row { display: flex; flex-direction: column; gap: 12px; }
@@ -457,6 +656,84 @@ John Doe</div>
                     </div>
                 </div>
 
+                <!-- SECTION 5 — Outlook compose window -->
+                <div class="demo-section demo-outlook-step" data-step="5">
+                    <div class="outlook-compose">
+                        <!-- Outlook ribbon tabs -->
+                        <div class="outlook-ribbon-tabs">
+                            <span class="outlook-tab">File</span>
+                            <span class="outlook-tab outlook-tab--active">Message</span>
+                            <span class="outlook-tab">Insert</span>
+                            <span class="outlook-tab">Format text</span>
+                            <span class="outlook-tab">Draw</span>
+                            <span class="outlook-tab">Options</span>
+                        </div>
+                        <!-- Formatting toolbar -->
+                        <div class="outlook-format-bar">
+                            <div class="outlook-format-group">
+                                <svg class="outlook-fmt-icon" viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="10" rx="1" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M5 7h6M5 9.5h4" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg>
+                                <svg class="outlook-fmt-icon" viewBox="0 0 16 16"><path d="M4 4v8M4 4h5a3 3 0 0 1 0 4H4m0 0h5.5a3 3 0 0 1 0 4H4" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            </div>
+                            <div class="outlook-format-divider"></div>
+                            <div class="outlook-font-select">
+                                <span>Aptos</span>
+                                <svg class="outlook-chevron" viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linecap="round"/></svg>
+                            </div>
+                            <div class="outlook-size-select">
+                                <span>12</span>
+                                <svg class="outlook-chevron" viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linecap="round"/></svg>
+                            </div>
+                            <div class="outlook-format-divider"></div>
+                            <div class="outlook-format-group">
+                                <span class="outlook-fmt-btn"><strong>B</strong></span>
+                                <span class="outlook-fmt-btn"><em>I</em></span>
+                                <span class="outlook-fmt-btn" style="text-decoration:underline">U</span>
+                                <span class="outlook-fmt-btn" style="position:relative"><span style="border-bottom:2px solid #C00;padding-bottom:1px">A</span></span>
+                                <svg class="outlook-fmt-icon" viewBox="0 0 16 16"><path d="M3 12h10M5 3l-3 9M11 3l3 9M6 8h4" stroke="currentColor" stroke-width="1" fill="none" stroke-linecap="round"/></svg>
+                            </div>
+                            <div class="outlook-format-divider"></div>
+                            <div class="outlook-format-group">
+                                <svg class="outlook-fmt-icon" viewBox="0 0 16 16"><path d="M3 4h10M3 7h10M3 10h10M3 13h6" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg>
+                                <svg class="outlook-fmt-icon" viewBox="0 0 16 16"><circle cx="4" cy="5" r="1.2" fill="currentColor"/><circle cx="4" cy="8.5" r="1.2" fill="currentColor"/><circle cx="4" cy="12" r="1.2" fill="currentColor"/><path d="M7 5h6M7 8.5h6M7 12h6" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg>
+                            </div>
+                        </div>
+                        <!-- Send bar -->
+                        <div class="outlook-send-bar">
+                            <div class="outlook-send-group">
+                                <button class="outlook-send-btn">
+                                    <svg viewBox="0 0 16 16" width="14" height="14"><path d="M2 2.5l12 5.5-12 5.5V9.5L10 8 2 6.5z" fill="white"/></svg>
+                                    Send
+                                </button>
+                                <button class="outlook-send-dropdown">
+                                    <svg viewBox="0 0 10 6" width="8" height="5"><path d="M1 1l4 4 4-4" stroke="white" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
+                                </button>
+                            </div>
+                            <div class="outlook-from">From: nmcbride@arete-collective.com</div>
+                            <div class="outlook-send-actions">
+                                <svg class="outlook-action-icon" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" stroke="#616161" stroke-width="1.3" stroke-linecap="round"/></svg>
+                                <svg class="outlook-action-icon" viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12" rx="1.5" stroke="#616161" stroke-width="1.2" fill="none"/><path d="M2 6h12M6 2v12" stroke="#616161" stroke-width="1.2"/></svg>
+                            </div>
+                        </div>
+                        <!-- To field -->
+                        <div class="outlook-to-field">
+                            <div class="outlook-avatar-sm">JD</div>
+                            <span class="outlook-to-label">To:</span>
+                            <span class="outlook-to-value">Jane Doe &lt;jane.doe@titleco.com&gt;</span>
+                        </div>
+                        <!-- Subject -->
+                        <div class="outlook-subject-field">RE: Elm Street Signature</div>
+                        <!-- Compose body -->
+                        <div class="outlook-body">
+                            <div class="outlook-body-text">Hi Jane,
+
+I will get you an update on the DOT signature status by end of day today. The document is currently with the borrower for review and we're expecting it back shortly.
+
+Best,
+John Doe</div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Footer -->
                 <div class="em-detail-footer demo-footer-fade">
                     <button class="em-btn em-btn-secondary em-btn-sm">Mark as done</button>
@@ -474,6 +751,7 @@ John Doe</div>
                 <div class="demo-dot" data-dot="2"><span class="demo-dot-circle"></span><span class="demo-dot-label">Summarize</span></div>
                 <div class="demo-dot" data-dot="3"><span class="demo-dot-circle"></span><span class="demo-dot-label">Draft</span></div>
                 <div class="demo-dot" data-dot="4"><span class="demo-dot-circle"></span><span class="demo-dot-label">Explain</span></div>
+                <div class="demo-dot" data-dot="5"><span class="demo-dot-circle"></span><span class="demo-dot-label">Send</span></div>
             </div>
         </div>
 
@@ -495,6 +773,10 @@ John Doe</div>
                 <div class="demo-label-step">Explain</div>
                 <div class="demo-label-text">Shows the signals behind every recommendation</div>
             </div>
+            <div class="demo-label" data-label="5">
+                <div class="demo-label-step">Send</div>
+                <div class="demo-label-text">Your draft is waiting in Outlook — just review and hit Send</div>
+            </div>
         </div>
     </div>
 
@@ -506,6 +788,7 @@ John Doe</div>
             { step: 2, ms: 2500 },   // summary
             { step: 3, ms: 2500 },   // draft
             { step: 4, ms: 2500 },   // signals + context
+            { step: 5, ms: 3000 },   // outlook compose — the payoff
             { step: 0, ms: 1500 },   // all visible — breathe, then loop
         ];
 
@@ -564,6 +847,9 @@ John Doe</div>
                     d.classList.toggle('active', d.dataset.dot === String(step));
                 });
             }
+            // Re-position labels after Outlook section expand/collapse transition
+            setTimeout(positionLabels, 60);
+            setTimeout(positionLabels, 550);
         }
 
         /* Stop all timers and invalidate any in-flight callbacks */
