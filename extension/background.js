@@ -40,6 +40,7 @@ let isSyncing = false;   // lock to prevent concurrent Supabase syncs
 let lastSyncTime = null; // ISO string of last successful sync
 let cachedFolders = null;      // Array of { id, displayName, isDistinguished }
 let folderCacheTime = null;    // ISO timestamp of last folder discovery
+let outlookTabId = null;       // Tab ID of the active Outlook page (from content script)
 const FOLDER_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 /** Persist lastSyncTime to chrome.storage.local. */
@@ -495,53 +496,71 @@ async function handleGetSentItems(params) {
 // Folder discovery
 // ---------------------------------------------------------------------------
 
-const SKIP_FOLDER_NAMES = new Set([
-  "sent items", "drafts", "deleted items", "junk email",
-  "outbox", "conversation history", "archive",
-  "sync issues", "rss feeds", "rss subscriptions",
-]);
-
 async function discoverMailFolders() {
   // Return cache if still fresh
-  if (cachedFolders && folderCacheTime) {
+  if (cachedFolders && cachedFolders.length > 0 && folderCacheTime) {
     const age = Date.now() - new Date(folderCacheTime).getTime();
     if (age < FOLDER_CACHE_TTL_MS) return cachedFolders;
   }
 
-  const body = {
-    __type: "FindFolderRequest:#Exchange",
-    FolderShape: {
-      __type: "FolderResponseShape:#Exchange",
-      BaseShape: "Default",
-    },
-    ParentFolderIds: [
-      { __type: "DistinguishedFolderId:#Exchange", Id: "msgfolderroot" },
-    ],
-    Traversal: "Deep",
-  };
+  // OWA's service.svc does not support FindFolder. Instead, we inject a
+  // script into the Outlook tab's MAIN world via chrome.scripting to read
+  // folder IDs from React's internal fiber tree on the sidebar DOM nodes.
+  if (!outlookTabId) throw new Error("No Outlook tab ID available");
 
-  const data = await owaFetch("FindFolder", body);
-  const ri = data.Body?.ResponseMessages?.Items?.[0];
-  if (!ri || ri.ResponseCode !== "NoError") {
-    throw new Error(`FindFolder failed: ${ri?.ResponseCode || "unknown"}`);
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: outlookTabId },
+    world: "MAIN",
+    func: () => {
+      const SKIP = new Set([
+        "favorites", "sent items", "drafts", "deleted items", "junk email",
+        "outbox", "conversation history", "archive",
+        "sync issues", "rss feeds", "rss subscriptions", "notes",
+        "search folders",
+      ]);
+      const folderEls = document.querySelectorAll('[role="treeitem"][data-folder-name]');
+      if (!folderEls.length) return null;
+      const folders = [];
+      const seen = new Set();
+      folderEls.forEach(el => {
+        const name = el.getAttribute("data-folder-name") || "";
+        if (!name || SKIP.has(name.toLowerCase())) return;
+        if (el.getAttribute("aria-level") === "1") return;
+        const reactKey = Object.keys(el).find(k => k.startsWith("__reactFiber"));
+        if (!reactKey) return;
+        let current = el[reactKey];
+        let folderId = null;
+        let distinguishedFolderId = null;
+        for (let i = 0; i < 8 && current; i++) {
+          const props = current.memoizedProps || current.pendingProps;
+          if (props && typeof props.folderId === "string" && props.folderId) {
+            folderId = props.folderId;
+            distinguishedFolderId = props.distinguishedFolderId || null;
+            break;
+          }
+          current = current.return;
+        }
+        if (!folderId || seen.has(folderId)) return;
+        seen.add(folderId);
+        const title = el.getAttribute("title") || name;
+        const displayName = title.split(" - ")[0].trim() || name;
+        folders.push({ id: folderId, displayName, isDistinguished: !!distinguishedFolderId });
+      });
+      return folders.length > 0 ? folders : null;
+    },
+  });
+
+  const folders = results?.[0]?.result;
+  if (!folders || !folders.length) {
+    throw new Error("No folders found in Outlook sidebar — Mail view may not be open");
   }
 
-  const allFolders = ri.RootFolder?.Folders || [];
-  const mailFolders = allFolders
-    .filter(f => f.FolderClass === "IPF.Note" || !f.FolderClass)
-    .filter(f => !SKIP_FOLDER_NAMES.has((f.DisplayName || "").toLowerCase()))
-    .map(f => ({
-      id: f.FolderId?.Id,
-      displayName: f.DisplayName,
-      isDistinguished: (f.DisplayName || "").toLowerCase() === "inbox",
-    }));
-
-  cachedFolders = mailFolders;
+  cachedFolders = folders;
   folderCacheTime = new Date().toISOString();
   chrome.storage.local.set({ cachedFolders, folderCacheTime });
 
-  if (DEBUG) console.log("Discovered mail folders:", mailFolders.map(f => f.displayName));
-  return mailFolders;
+  if (DEBUG) console.log("Discovered mail folders:", folders.map(f => f.displayName));
+  return folders;
 }
 
 // ---------------------------------------------------------------------------
@@ -600,7 +619,7 @@ async function syncEmailsToSupabase() {
     // Set limit: small for incremental syncs, larger for catch-up
     const maxEmails = lastSyncTime ? 50 : MAX_CATCHUP_EMAILS;
 
-    // Discover all mail folders (cached for 1 hour)
+    // Discover mail folders from Outlook's sidebar DOM via chrome.scripting
     let folders;
     try {
       folders = await discoverMailFolders();
@@ -803,6 +822,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "token_update" && msg.data) {
     token = msg.data;
+    if (sender.tab?.id) outlookTabId = sender.tab.id;
     persistToken();
     updateBadge();
     sendResponse({ ok: true });

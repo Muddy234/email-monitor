@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clarion AI — Product Demo</title>
+    <style>
+        @font-face {
+            font-family: 'Inter';
+            src: url('assets/fonts/InterVariable.woff2') format('woff2');
+            font-weight: 100 900;
+            font-display: swap;
+            font-style: normal;
+        }
+        :root {
+            --em-font: 'Inter', system-ui, -apple-system, sans-serif;
+            --em-slate-900: #1C1917;
+            --em-slate-800: #292524;
+            --em-slate-700: #44403C;
+            --em-slate-500: #78716C;
+            --em-slate-400: #A8A29E;
+            --em-slate-300: #D6D3D1;
+            --em-slate-200: #E7E5E4;
+            --em-slate-100: #F5F5F4;
+            --em-slate-50:  #FAFAF9;
+            --em-white:     #FFFFFF;
+            --em-blue-700:  #1E3A5F;
+            --em-blue-600:  #2C4F7C;
+            --em-blue-500:  #3D6898;
+            --em-blue-100:  #E8EEF4;
+            --em-blue-50:   #F4F7FA;
+            --em-blue-200:  #bfdbfe;
+            --em-emerald-600: #059669;
+            --em-red-600:   #DC2626;
+            --em-red-100:   #FEE2E2;
+            --em-radius: 12px;
+            --em-radius-sm: 8px;
+            --em-radius-xs: 4px;
+            --em-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: var(--em-font);
+            background: transparent;
+            color: var(--em-slate-800);
+            overflow: hidden;
+        }
+
+        /* ── Demo layout ── */
+        .demo-container {
+            display: flex;
+            align-items: flex-start;
+            justify-content: center;
+            gap: 36px;
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 16px 24px 24px;
+        }
+
+        .demo-card-col {
+            flex: 0 1 720px;
+            animation: cardEntrance 0.6s ease-out both;
+        }
+        @keyframes cardEntrance {
+            from { opacity: 0; transform: translateY(16px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        .demo-anno-col {
+            flex: 0 0 260px;
+            position: relative;
+            min-height: 100px;
+        }
+
+        /* ── Section highlight system ── */
+        .demo-section {
+            position: relative;
+            border-radius: var(--em-radius-sm);
+            padding: 6px 10px;
+            margin: -6px -10px;
+            transition: opacity 0.5s ease, box-shadow 0.5s ease, background 0.5s ease;
+        }
+        .demo-section + .demo-section { margin-top: 6px; }
+
+        body.touring .demo-section.dimmed {
+            opacity: 0.15;
+        }
+        body.touring .demo-section.active {
+            box-shadow: 0 0 0 2px rgba(44,79,124,0.14);
+            background: rgba(244,247,250,0.55);
+        }
+
+        /* Footer dims during tour */
+        .demo-footer-fade {
+            transition: opacity 0.5s ease;
+        }
+        body.touring .demo-footer-fade {
+            opacity: 0.15;
+        }
+
+        /* ── Annotation labels ── */
+        .demo-label {
+            position: absolute;
+            left: 0;
+            right: 0;
+            padding: 14px 18px;
+            border-left: 3px solid var(--em-blue-600);
+            background: var(--em-white);
+            border-radius: 0 var(--em-radius) var(--em-radius) 0;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.07);
+            opacity: 0;
+            transform: translateX(16px);
+            transition: opacity 0.45s ease, transform 0.45s ease;
+            pointer-events: none;
+        }
+        .demo-label.visible {
+            opacity: 1;
+            transform: translateX(0);
+        }
+        .demo-label-step {
+            font-size: 10px;
+            font-weight: 700;
+            color: var(--em-blue-600);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 5px;
+        }
+        .demo-label-text {
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--em-slate-900);
+            line-height: 1.45;
+        }
+
+        /* ── Progress dots ── */
+        .demo-progress {
+            display: flex;
+            justify-content: center;
+            gap: 16px;
+            margin-top: 20px;
+        }
+        .demo-dot {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 5px;
+            cursor: pointer;
+        }
+        .demo-dot-circle {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--em-slate-300);
+            transition: background 0.35s ease, transform 0.35s ease;
+            padding: 4px;
+            background-clip: content-box;
+            box-sizing: content-box;
+        }
+        .demo-dot-label {
+            font-size: 10px;
+            font-weight: 500;
+            color: var(--em-slate-400);
+            transition: color 0.35s ease;
+            letter-spacing: 0.02em;
+        }
+        .demo-dot:hover .demo-dot-circle {
+            background: var(--em-slate-400);
+            background-clip: content-box;
+            transform: scale(1.2);
+        }
+        .demo-dot:hover .demo-dot-label {
+            color: var(--em-slate-500);
+        }
+        .demo-dot.active .demo-dot-circle {
+            background: var(--em-blue-600);
+            background-clip: content-box;
+            transform: scale(1.2);
+        }
+        .demo-dot.active .demo-dot-label {
+            color: var(--em-blue-600);
+            font-weight: 600;
+        }
+
+        /* Paused indicator — pulsing dot */
+        .demo-progress.paused .demo-dot.active .demo-dot-circle {
+            animation: dotPulse 1.2s ease-in-out infinite;
+        }
+        @keyframes dotPulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(44,79,124,0.4); }
+            50%      { box-shadow: 0 0 0 4px rgba(44,79,124,0); }
+        }
+
+        /* ════════════════════════════════════════
+           Email card styles (from app)
+           ════════════════════════════════════════ */
+        .em-email-card {
+            background: var(--em-white);
+            border: 1px solid var(--em-slate-200);
+            border-radius: var(--em-radius);
+            padding: 20px 24px;
+            box-shadow: var(--em-shadow);
+        }
+
+        .em-email-header {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+        }
+        .em-check-btn {
+            width: 22px; height: 22px;
+            border-radius: 50%;
+            border: 2px solid var(--em-slate-300);
+            background: none;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+        .em-email-header-content {
+            flex: 1;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+        .em-email-sender { font-size: 14px; font-weight: 600; color: var(--em-slate-900); }
+        .em-email-subject { font-size: 13px; color: var(--em-slate-500); margin-top: 2px; }
+        .em-email-header-badges { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+        .em-email-meta { font-size: 12px; color: var(--em-slate-400); display: flex; align-items: center; gap: 6px; }
+
+        .em-badge { display: inline-block; padding: 2px 10px; border-radius: 9999px; font-size: 11px; font-weight: 600; }
+        .em-badge-red  { background: var(--em-red-100);   color: var(--em-red-600); }
+        .em-badge-blue { background: var(--em-blue-100);  color: var(--em-blue-600); }
+        .em-badge-slate{ background: var(--em-slate-100); color: var(--em-slate-500); }
+
+        .em-email-action-hint {
+            margin-top: 8px;
+            padding: 6px 12px;
+            border-left: 3px solid var(--em-blue-500);
+            background: var(--em-blue-50);
+            font-size: 12px;
+            color: var(--em-slate-700);
+            border-radius: 0 var(--em-radius-xs) var(--em-radius-xs) 0;
+        }
+        .em-action-label { font-weight: 600; color: var(--em-slate-500); }
+
+        .em-email-section-label { font-size: 11px; font-weight: 600; color: var(--em-slate-500); margin-bottom: 4px; }
+        .em-email-body {
+            font-size: 12px; color: var(--em-slate-700);
+            line-height: 1.4; white-space: pre-wrap;
+            margin-bottom: 8px;
+        }
+        .em-email-summary { border-left: 3px solid var(--em-blue-200); padding-left: 12px; }
+
+        .em-draft-preview {
+            background: var(--em-white);
+            border: 1px solid var(--em-slate-200);
+            border-radius: var(--em-radius);
+            overflow: hidden; margin-top: 4px;
+        }
+        .em-draft-preview-header {
+            padding: 6px 12px;
+            background: var(--em-slate-50);
+            border-bottom: 1px solid var(--em-slate-200);
+            font-size: 12px; color: var(--em-slate-500);
+        }
+        .em-draft-preview-body {
+            padding: 8px 12px;
+            font-size: 12px; line-height: 1.4;
+            color: var(--em-slate-800);
+            white-space: pre-wrap;
+        }
+
+        /* Trace */
+        .em-trace-section { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--em-slate-100); }
+        .em-trace-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+        .em-trace-row .em-trace-stage { margin-bottom: 8px; }
+        .em-trace-row .em-trace-stage::before { display: none; }
+        .em-trace-stage { position: relative; padding-left: 32px; margin-bottom: 24px; }
+        .em-trace-dot {
+            position: absolute; left: 4px; top: 4px;
+            width: 16px; height: 16px; border-radius: 50%;
+            background: var(--em-blue-600);
+            border: 2px solid var(--em-white);
+            box-shadow: 0 0 0 2px var(--em-slate-200);
+        }
+        .em-trace-label {
+            font-size: 11px; font-weight: 600;
+            color: var(--em-slate-500);
+            text-transform: uppercase; letter-spacing: 0.05em;
+            margin-bottom: 8px;
+        }
+
+        /* Signals */
+        .em-signal-list { display: flex; flex-direction: column; gap: 6px; }
+        .em-signal-row { display: flex; align-items: baseline; gap: 8px; padding: 4px 0; font-size: 13px; color: var(--em-slate-400); }
+        .em-signal-row.em-signal-on { color: var(--em-slate-700); }
+        .em-signal-indicator { width: 16px; text-align: center; font-weight: 600; flex-shrink: 0; }
+        .em-signal-on .em-signal-indicator { color: var(--em-emerald-600); }
+        .em-signal-label { font-weight: 600; white-space: nowrap; min-width: 110px; }
+        .em-signal-desc { font-size: 12px; color: var(--em-slate-400); margin-left: 4px; }
+
+        /* KV grid */
+        .em-kv-grid { display: grid; grid-template-columns: 180px 1fr; gap: 6px 16px; font-size: 13px; }
+        .em-kv-label { font-weight: 600; color: var(--em-slate-500); }
+        .em-kv-value  { color: var(--em-slate-800); word-break: break-word; }
+
+        /* Footer */
+        .em-detail-footer {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-top: 12px; padding-top: 10px;
+            border-top: 1px solid var(--em-slate-100);
+        }
+        .em-btn {
+            display: inline-flex; align-items: center; justify-content: center;
+            padding: 8px 16px; border: none; border-radius: var(--em-radius-sm);
+            font-size: 13px; font-weight: 500; font-family: var(--em-font); cursor: pointer;
+        }
+        .em-btn-secondary { background: var(--em-slate-100); color: var(--em-slate-700); }
+        .em-btn-sm { padding: 5px 12px; font-size: 12px; }
+        .em-feedback-inline { display: flex; gap: 6px; }
+        .em-feedback-btn {
+            width: 28px; height: 28px; border-radius: 6px;
+            border: 1px solid var(--em-slate-200); background: none;
+            cursor: pointer; font-size: 14px; color: var(--em-slate-400);
+            display: flex; align-items: center; justify-content: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="demo-container">
+        <!-- ── Card column ── -->
+        <div class="demo-card-col">
+            <div class="em-email-card" id="demoCard">
+
+                <!-- SECTION 1 — Header -->
+                <div class="demo-section" data-step="1">
+                    <div class="em-email-header">
+                        <button class="em-check-btn"></button>
+                        <div class="em-email-header-content">
+                            <div>
+                                <div class="em-email-sender">Jane Doe</div>
+                                <div class="em-email-subject">RE: Elm Street Signature</div>
+                            </div>
+                            <div class="em-email-header-badges">
+                                <div class="em-email-meta">
+                                    18h ago
+                                    <span class="em-badge em-badge-red">High</span>
+                                </div>
+                                <span class="em-badge em-badge-blue">Draft</span>
+                                <span class="em-badge em-badge-slate">31 msgs</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SECTION 2 — Summary -->
+                <div class="demo-section" data-step="2">
+                    <div class="em-email-action-hint">
+                        <span class="em-action-label">Suggested action:</span> Title officer urgently needs update on DOT signature and executed document. Time-sensitive for funding/recording.
+                    </div>
+                    <div style="margin-top:8px; padding-top:8px; border-top:1px solid var(--em-slate-100);">
+                        <div class="em-email-section-label">Summary</div>
+                        <div class="em-email-body em-email-summary">1. Situation — Jane is a title officer who is following up urgently on a DOT (Deed of Trust) signature that was apparently discussed previously. She needs an update on the status of this document, which is likely holding up a closing/funding process.
+
+2. Sender's intent — She needs a status update on the DOT signature ASAP. This is time-sensitive for the closing process, and she's clearly been waiting for this information.
+
+3. Key information — This is a follow-up ("checking back in on the original DOT"), so there was prior communication about this. She's specifically asking about a signature status and needs it urgently. No other context is provided about what the current status actually is.
+
+4. What I don't know — I don't know the current status of the DOT signature, what the holdup is, when it might be resolved, or any specifics about this transaction. The sender is asking for information I cannot provide from the available context.
+
+5. Tone — This is urgent and professional. Jane is a title officer (external professional contact) and she's stressed about timing. The style guide shows John uses "Professional Mode" for external lenders/vendors with complete sentences and "Best," sign-offs.
+
+6. Useful response — I need to acknowledge her urgency and provide whatever status update is available, but since I don't have the actual status information, I'll need to use a placeholder for the user to fill in.</div>
+                    </div>
+                </div>
+
+                <!-- SECTION 3 — Draft response -->
+                <div class="demo-section" data-step="3">
+                    <div class="em-email-section-label">Draft Response</div>
+                    <div class="em-draft-preview">
+                        <div class="em-draft-preview-header">To: Jane Doe</div>
+                        <div class="em-draft-preview-body">Hi Jane,
+
+I will get you an update on the DOT signature status by end of day today. The document is currently with the borrower for review and we're expecting it back shortly.
+
+Best,
+John Doe</div>
+                    </div>
+                </div>
+
+                <!-- SECTION 4 — Signals + Context -->
+                <div class="demo-section" data-step="4">
+                    <div class="em-trace-section" style="margin-top:0; border-top:1px solid var(--em-slate-100);">
+                        <div class="em-email-section-label" style="padding-top:8px;">Pipeline Trace</div>
+                        <div class="em-trace-content">
+                            <div class="em-trace-row">
+                                <div class="em-trace-stage">
+                                    <div class="em-trace-dot"></div>
+                                    <div class="em-trace-label">Signals</div>
+                                    <div class="em-signal-list">
+                                        <div class="em-signal-row em-signal-on">
+                                            <span class="em-signal-indicator">&#10003;</span>
+                                            <span class="em-signal-label">Material</span>
+                                            <span class="em-signal-desc">Contains important or actionable content</span>
+                                        </div>
+                                        <div class="em-signal-row em-signal-on">
+                                            <span class="em-signal-indicator">&#10003;</span>
+                                            <span class="em-signal-label">Action Required</span>
+                                            <span class="em-signal-desc">Sender is requesting you do something</span>
+                                        </div>
+                                        <div class="em-signal-row em-signal-on">
+                                            <span class="em-signal-indicator">&#10003;</span>
+                                            <span class="em-signal-label">Blocker</span>
+                                            <span class="em-signal-desc">Someone is waiting on your response</span>
+                                        </div>
+                                        <div class="em-signal-row em-signal-on">
+                                            <span class="em-signal-indicator">&#10003;</span>
+                                            <span class="em-signal-label">Deadline</span>
+                                            <span class="em-signal-desc">Has a time-sensitive due date</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="em-trace-stage">
+                                    <div class="em-trace-dot"></div>
+                                    <div class="em-trace-label">Context</div>
+                                    <div class="em-kv-grid">
+                                        <div class="em-kv-label">Contact Type</div>
+                                        <div class="em-kv-value"><span class="em-badge em-badge-blue">external_title_escrow</span></div>
+                                        <div class="em-kv-label">Organization</div>
+                                        <div class="em-kv-value">Title Escrow Company</div>
+                                        <div class="em-kv-label">Role</div>
+                                        <div class="em-kv-value">Title/Escrow Officer</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Footer -->
+                <div class="em-detail-footer demo-footer-fade">
+                    <button class="em-btn em-btn-secondary em-btn-sm">Mark as done</button>
+                    <div class="em-feedback-inline">
+                        <button class="em-feedback-btn">&#128077;</button>
+                        <button class="em-feedback-btn">&#128078;</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Progress dots -->
+            <div class="demo-progress" id="progressDots">
+                <div class="demo-dot" data-dot="0"><span class="demo-dot-circle"></span><span class="demo-dot-label">Overview</span></div>
+                <div class="demo-dot" data-dot="1"><span class="demo-dot-circle"></span><span class="demo-dot-label">Identify</span></div>
+                <div class="demo-dot" data-dot="2"><span class="demo-dot-circle"></span><span class="demo-dot-label">Summarize</span></div>
+                <div class="demo-dot" data-dot="3"><span class="demo-dot-circle"></span><span class="demo-dot-label">Draft</span></div>
+                <div class="demo-dot" data-dot="4"><span class="demo-dot-circle"></span><span class="demo-dot-label">Explain</span></div>
+            </div>
+        </div>
+
+        <!-- ── Annotation column ── -->
+        <div class="demo-anno-col" id="annoCol">
+            <div class="demo-label" data-label="1">
+                <div class="demo-label-step">Identify</div>
+                <div class="demo-label-text">Recognizes sender, priority, and urgency automatically</div>
+            </div>
+            <div class="demo-label" data-label="2">
+                <div class="demo-label-step">Summarize</div>
+                <div class="demo-label-text">Reads the full thread and surfaces what matters</div>
+            </div>
+            <div class="demo-label" data-label="3">
+                <div class="demo-label-step">Draft</div>
+                <div class="demo-label-text">Writes a reply in your voice, ready to send</div>
+            </div>
+            <div class="demo-label" data-label="4">
+                <div class="demo-label-step">Explain</div>
+                <div class="demo-label-text">Shows the signals behind every recommendation</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        /* ── Timing sequence ── */
+        const SEQUENCE = [
+            { step: 0, ms: 1500 },   // all visible — initial view
+            { step: 1, ms: 2500 },   // header
+            { step: 2, ms: 2500 },   // summary
+            { step: 3, ms: 2500 },   // draft
+            { step: 4, ms: 2500 },   // signals + context
+            { step: 0, ms: 1500 },   // all visible — breathe, then loop
+        ];
+
+        const RESUME_DELAY = 8000; // auto-resume after 8s of inactivity
+
+        const sections    = document.querySelectorAll('.demo-section');
+        const labels      = document.querySelectorAll('.demo-label');
+        const dots        = document.querySelectorAll('.demo-dot');
+        const annoCol     = document.getElementById('annoCol');
+        const progressBar = document.getElementById('progressDots');
+
+        let idx         = 0;
+        let timer       = null;
+        let resumeTimer = null;
+        let playId      = 0;   // monotonic ID to invalidate stale timeouts
+
+        /* Position each annotation label vertically aligned with its section */
+        function positionLabels() {
+            const colRect = annoCol.getBoundingClientRect();
+
+            sections.forEach(sec => {
+                const step  = sec.dataset.step;
+                const label = document.querySelector(`.demo-label[data-label="${step}"]`);
+                if (!label) return;
+
+                const secRect = sec.getBoundingClientRect();
+                const top = secRect.top - colRect.top
+                          + (secRect.height / 2)
+                          - (label.offsetHeight / 2);
+                label.style.top = Math.max(0, top) + 'px';
+            });
+        }
+
+        /* Apply a step */
+        function applyStep(step) {
+            if (step === 0) {
+                document.body.classList.remove('touring');
+                sections.forEach(s => s.classList.remove('dimmed', 'active'));
+                labels.forEach(l => l.classList.remove('visible'));
+                dots.forEach(d => d.classList.toggle('active', d.dataset.dot === '0'));
+            } else {
+                document.body.classList.add('touring');
+                sections.forEach(s => {
+                    if (s.dataset.step === String(step)) {
+                        s.classList.add('active');
+                        s.classList.remove('dimmed');
+                    } else {
+                        s.classList.add('dimmed');
+                        s.classList.remove('active');
+                    }
+                });
+                labels.forEach(l => {
+                    l.classList.toggle('visible', l.dataset.label === String(step));
+                });
+                dots.forEach(d => {
+                    d.classList.toggle('active', d.dataset.dot === String(step));
+                });
+            }
+        }
+
+        /* Stop all timers and invalidate any in-flight callbacks */
+        function stopPlayback() {
+            playId++;                    // invalidate any queued advance()
+            clearTimeout(timer);
+            clearTimeout(resumeTimer);
+            progressBar.classList.add('paused');
+        }
+
+        /* Start auto-play from current idx */
+        function startPlayback() {
+            const myId = ++playId;       // new generation
+            progressBar.classList.remove('paused');
+
+            function tick() {
+                if (myId !== playId) return;   // stale — abort
+                const { step, ms } = SEQUENCE[idx];
+                applyStep(step);
+                idx = (idx + 1) % SEQUENCE.length;
+                timer = setTimeout(tick, ms);
+            }
+            tick();
+        }
+
+        /* Handle dot click */
+        dots.forEach(dot => {
+            dot.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const clickedStep = parseInt(dot.dataset.dot);
+                const isPaused = progressBar.classList.contains('paused');
+
+                if (isPaused) {
+                    // Already paused — check if clicking the active dot to resume
+                    const currentActive = document.querySelector('.demo-dot.active');
+                    const currentStep = currentActive ? parseInt(currentActive.dataset.dot) : 0;
+
+                    if (clickedStep === currentStep) {
+                        // Resume playback from next step
+                        const seqIdx = SEQUENCE.findIndex(s => s.step === clickedStep);
+                        idx = seqIdx !== -1 ? (seqIdx + 1) % SEQUENCE.length : 0;
+                        startPlayback();
+                        return;
+                    }
+                }
+
+                // Pause and jump to clicked step
+                stopPlayback();
+                applyStep(clickedStep);
+
+                // Set idx so resume continues from the right place
+                const seqIdx = SEQUENCE.findIndex(s => s.step === clickedStep);
+                idx = seqIdx !== -1 ? (seqIdx + 1) % SEQUENCE.length : 0;
+
+                // Auto-resume after inactivity
+                clearTimeout(resumeTimer);
+                resumeTimer = setTimeout(() => startPlayback(), RESUME_DELAY);
+            });
+        });
+
+        /* Boot */
+        window.addEventListener('load', () => {
+            positionLabels();
+            window.addEventListener('resize', positionLabels);
+            startPlayback();
+        });
+    </script>
+</body>
+</html>

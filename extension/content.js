@@ -38,7 +38,6 @@ function sendToken(tokenData) {
     chrome.runtime.sendMessage(
       { type: "token_update", data: tokenData },
       () => {
-        // Ignore response / errors (extension context may have been invalidated)
         if (chrome.runtime.lastError) { /* noop */ }
       }
     );
@@ -47,14 +46,8 @@ function sendToken(tokenData) {
   }
 }
 
-/** One capture cycle: find token → send to background. */
-function captureAndSend() {
-  const tokenData = findExchangeToken();
-  sendToken(tokenData);
-}
-
 // --- Initial capture on page load ---
-captureAndSend();
+sendToken(findExchangeToken());
 
 // --- Poll every 60 s for refreshed tokens ---
-setInterval(captureAndSend, TOKEN_POLL_INTERVAL_MS);
+setInterval(() => sendToken(findExchangeToken()), TOKEN_POLL_INTERVAL_MS);
