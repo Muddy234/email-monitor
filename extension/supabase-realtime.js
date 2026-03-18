@@ -152,7 +152,13 @@ async function handleNewDraft(record) {
     }
 
     // Build reply-all recipients and threaded HTML body
-    const { toRecipients, ccRecipients } = buildReplyAllRecipients(parentEmail, userAliases);
+    let { toRecipients, ccRecipients } = buildReplyAllRecipients(parentEmail, userAliases);
+
+    // Fallback: if To is empty, reply directly to the original sender
+    if (toRecipients.length === 0 && parentEmail.sender_email) {
+      toRecipients = [{ name: parentEmail.sender_name || "", address: parentEmail.sender_email }];
+    }
+
     const htmlBody = buildThreadedBody(draftBody, parentEmail);
 
     const subject = parentEmail.subject?.startsWith("Re: ")

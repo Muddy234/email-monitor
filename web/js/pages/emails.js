@@ -89,11 +89,16 @@ async function loadEmails() {
     try {
         // Fetch emails with classifications and drafts
         const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString();
-        const [emailsRes, eventsRes, contactsRes, convosRes] = await Promise.all([
+        const [emailsRes, draftEmailsRes, eventsRes, contactsRes, convosRes] = await Promise.all([
             supabase
                 .from("emails")
                 .select("*, classifications(*), drafts(*)")
                 .gte("received_time", thirtyDaysAgo)
+                .order("received_time", { ascending: false }),
+            // Emails with drafts — no date filter so drafts are always visible
+            supabase
+                .from("emails")
+                .select("*, classifications(*), drafts!inner(*)")
                 .order("received_time", { ascending: false }),
             supabase
                 .from("response_events")
@@ -108,7 +113,17 @@ async function loadEmails() {
 
         if (emailsRes.error) throw emailsRes.error;
 
-        allEmails = emailsRes.data || [];
+        // Merge: start with 30-day emails, add any older emails that have drafts
+        const seen = new Set((emailsRes.data || []).map(e => e.id));
+        allEmails = [...(emailsRes.data || [])];
+        if (draftEmailsRes.data) {
+            for (const e of draftEmailsRes.data) {
+                if (!seen.has(e.id)) {
+                    allEmails.push(e);
+                    seen.add(e.id);
+                }
+            }
+        }
 
         // Index response events by email_id
         responseEvents = {};
