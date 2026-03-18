@@ -2583,21 +2583,21 @@
 .em-signal-list {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 6px;
 }
 .em-signal-row {
     display: flex;
     align-items: baseline;
-    gap: 6px;
-    padding: 3px 0;
-    font-size: 12px;
+    gap: 8px;
+    padding: 4px 0;
+    font-size: 13px;
     color: var(--em-slate-400);
 }
 .em-signal-row.em-signal-on {
     color: var(--em-slate-700);
 }
 .em-signal-indicator {
-    width: 14px;
+    width: 16px;
     text-align: center;
     font-weight: 600;
     flex-shrink: 0;
@@ -2608,11 +2608,12 @@
 .em-signal-label {
     font-weight: 600;
     white-space: nowrap;
-    min-width: 90px;
+    min-width: 110px;
 }
 .em-signal-desc {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--em-slate-400);
+    margin-left: 4px;
 }
 
 /* Body toggle (show original when summary displayed) */
