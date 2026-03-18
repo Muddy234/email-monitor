@@ -53,14 +53,14 @@
             display: flex;
             align-items: flex-start;
             justify-content: center;
-            gap: 36px;
-            max-width: 1100px;
+            gap: 20px;
+            max-width: 100%;
             margin: 0 auto;
-            padding: 16px 24px 24px;
+            padding: 16px 8px 24px;
         }
 
         .demo-card-col {
-            flex: 0 1 720px;
+            flex: 1 1 0;
             animation: cardEntrance 0.6s ease-out both;
         }
         @keyframes cardEntrance {
@@ -69,7 +69,7 @@
         }
 
         .demo-anno-col {
-            flex: 0 0 260px;
+            flex: 0 0 200px;
             position: relative;
             min-height: 100px;
         }
@@ -85,7 +85,7 @@
         .demo-section + .demo-section { margin-top: 6px; }
 
         body.touring .demo-section.dimmed {
-            opacity: 0.15;
+            opacity: 0.35;
         }
         body.touring .demo-section.active {
             box-shadow: 0 0 0 2px rgba(44,79,124,0.14);
@@ -97,7 +97,7 @@
             transition: opacity 0.5s ease;
         }
         body.touring .demo-footer-fade {
-            opacity: 0.15;
+            opacity: 0.35;
         }
 
         /* ── Annotation labels ── */
@@ -272,10 +272,10 @@
 
         /* Trace */
         .em-trace-section { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--em-slate-100); }
-        .em-trace-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+        .em-trace-row { display: flex; flex-direction: column; gap: 8px; }
         .em-trace-row .em-trace-stage { margin-bottom: 8px; }
         .em-trace-row .em-trace-stage::before { display: none; }
-        .em-trace-stage { position: relative; padding-left: 32px; margin-bottom: 24px; }
+        .em-trace-stage { position: relative; padding-left: 32px; margin-bottom: 4px; }
         .em-trace-dot {
             position: absolute; left: 4px; top: 4px;
             width: 16px; height: 16px; border-radius: 50%;
@@ -300,9 +300,20 @@
         .em-signal-desc { font-size: 12px; color: var(--em-slate-400); margin-left: 4px; }
 
         /* KV grid */
-        .em-kv-grid { display: grid; grid-template-columns: 180px 1fr; gap: 6px 16px; font-size: 13px; }
+        .em-kv-grid { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; font-size: 13px; }
         .em-kv-label { font-weight: 600; color: var(--em-slate-500); }
         .em-kv-value  { color: var(--em-slate-800); word-break: break-word; }
+
+        /* Draft + Trace side-by-side */
+        .demo-bottom-row {
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: 16px;
+            margin-top: 6px;
+        }
+        .demo-bottom-row > .demo-section {
+            margin: 0;
+        }
 
         /* Footer */
         .em-detail-footer {
@@ -360,76 +371,72 @@
                     </div>
                     <div style="margin-top:8px; padding-top:8px; border-top:1px solid var(--em-slate-100);">
                         <div class="em-email-section-label">Summary</div>
-                        <div class="em-email-body em-email-summary">1. Situation — Jane is a title officer who is following up urgently on a DOT (Deed of Trust) signature that was apparently discussed previously. She needs an update on the status of this document, which is likely holding up a closing/funding process.
+                        <div class="em-email-body em-email-summary">1. Situation — Jane is a title officer following up urgently on a DOT (Deed of Trust) signature. The document is likely holding up a closing/funding process.
 
-2. Sender's intent — She needs a status update on the DOT signature ASAP. This is time-sensitive for the closing process, and she's clearly been waiting for this information.
+2. Sender's intent — She needs a status update on the DOT signature ASAP. This is time-sensitive for the closing process.
 
-3. Key information — This is a follow-up ("checking back in on the original DOT"), so there was prior communication about this. She's specifically asking about a signature status and needs it urgently. No other context is provided about what the current status actually is.
-
-4. What I don't know — I don't know the current status of the DOT signature, what the holdup is, when it might be resolved, or any specifics about this transaction. The sender is asking for information I cannot provide from the available context.
-
-5. Tone — This is urgent and professional. Jane is a title officer (external professional contact) and she's stressed about timing. The style guide shows John uses "Professional Mode" for external lenders/vendors with complete sentences and "Best," sign-offs.
-
-6. Useful response — I need to acknowledge her urgency and provide whatever status update is available, but since I don't have the actual status information, I'll need to use a placeholder for the user to fill in.</div>
+3. Tone — Urgent and professional. Style guide indicates "Professional Mode" for external lenders/vendors with complete sentences and "Best," sign-offs.</div>
                     </div>
                 </div>
 
-                <!-- SECTION 3 — Draft response -->
-                <div class="demo-section" data-step="3">
-                    <div class="em-email-section-label">Draft Response</div>
-                    <div class="em-draft-preview">
-                        <div class="em-draft-preview-header">To: Jane Doe</div>
-                        <div class="em-draft-preview-body">Hi Jane,
+                <div class="demo-bottom-row">
+                    <!-- SECTION 3 — Draft response -->
+                    <div class="demo-section" data-step="3">
+                        <div class="em-email-section-label">Draft Response</div>
+                        <div class="em-draft-preview">
+                            <div class="em-draft-preview-header">To: Jane Doe</div>
+                            <div class="em-draft-preview-body">Hi Jane,
 
 I will get you an update on the DOT signature status by end of day today. The document is currently with the borrower for review and we're expecting it back shortly.
 
 Best,
 John Doe</div>
+                        </div>
                     </div>
-                </div>
 
-                <!-- SECTION 4 — Signals + Context -->
-                <div class="demo-section" data-step="4">
-                    <div class="em-trace-section" style="margin-top:0; border-top:1px solid var(--em-slate-100);">
-                        <div class="em-email-section-label" style="padding-top:8px;">Pipeline Trace</div>
-                        <div class="em-trace-content">
-                            <div class="em-trace-row">
-                                <div class="em-trace-stage">
-                                    <div class="em-trace-dot"></div>
-                                    <div class="em-trace-label">Signals</div>
-                                    <div class="em-signal-list">
-                                        <div class="em-signal-row em-signal-on">
-                                            <span class="em-signal-indicator">&#10003;</span>
-                                            <span class="em-signal-label">Material</span>
-                                            <span class="em-signal-desc">Contains important or actionable content</span>
-                                        </div>
-                                        <div class="em-signal-row em-signal-on">
-                                            <span class="em-signal-indicator">&#10003;</span>
-                                            <span class="em-signal-label">Action Required</span>
-                                            <span class="em-signal-desc">Sender is requesting you do something</span>
-                                        </div>
-                                        <div class="em-signal-row em-signal-on">
-                                            <span class="em-signal-indicator">&#10003;</span>
-                                            <span class="em-signal-label">Blocker</span>
-                                            <span class="em-signal-desc">Someone is waiting on your response</span>
-                                        </div>
-                                        <div class="em-signal-row em-signal-on">
-                                            <span class="em-signal-indicator">&#10003;</span>
-                                            <span class="em-signal-label">Deadline</span>
-                                            <span class="em-signal-desc">Has a time-sensitive due date</span>
+                    <!-- SECTION 4 — Signals + Context -->
+                    <div class="demo-section" data-step="4">
+                        <div class="em-trace-section" style="margin-top:0; border-top:none;">
+                            <div class="em-email-section-label" style="padding-top:0;">Pipeline Trace</div>
+                            <div class="em-trace-content">
+                                <div class="em-trace-row">
+                                    <div class="em-trace-stage">
+                                        <div class="em-trace-dot"></div>
+                                        <div class="em-trace-label">Signals</div>
+                                        <div class="em-signal-list">
+                                            <div class="em-signal-row em-signal-on">
+                                                <span class="em-signal-indicator">&#10003;</span>
+                                                <span class="em-signal-label">Material</span>
+                                                <span class="em-signal-desc">Contains important or actionable content</span>
+                                            </div>
+                                            <div class="em-signal-row em-signal-on">
+                                                <span class="em-signal-indicator">&#10003;</span>
+                                                <span class="em-signal-label">Action Required</span>
+                                                <span class="em-signal-desc">Sender is requesting you do something</span>
+                                            </div>
+                                            <div class="em-signal-row em-signal-on">
+                                                <span class="em-signal-indicator">&#10003;</span>
+                                                <span class="em-signal-label">Blocker</span>
+                                                <span class="em-signal-desc">Someone is waiting on your response</span>
+                                            </div>
+                                            <div class="em-signal-row em-signal-on">
+                                                <span class="em-signal-indicator">&#10003;</span>
+                                                <span class="em-signal-label">Deadline</span>
+                                                <span class="em-signal-desc">Has a time-sensitive due date</span>
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
-                                <div class="em-trace-stage">
-                                    <div class="em-trace-dot"></div>
-                                    <div class="em-trace-label">Context</div>
-                                    <div class="em-kv-grid">
-                                        <div class="em-kv-label">Contact Type</div>
-                                        <div class="em-kv-value"><span class="em-badge em-badge-blue">external_title_escrow</span></div>
-                                        <div class="em-kv-label">Organization</div>
-                                        <div class="em-kv-value">Title Escrow Company</div>
-                                        <div class="em-kv-label">Role</div>
-                                        <div class="em-kv-value">Title/Escrow Officer</div>
+                                    <div class="em-trace-stage">
+                                        <div class="em-trace-dot"></div>
+                                        <div class="em-trace-label">Context</div>
+                                        <div class="em-kv-grid">
+                                            <div class="em-kv-label">Contact Type</div>
+                                            <div class="em-kv-value"><span class="em-badge em-badge-blue">external_title_escrow</span></div>
+                                            <div class="em-kv-label">Organization</div>
+                                            <div class="em-kv-value">Title Escrow Company</div>
+                                            <div class="em-kv-label">Role</div>
+                                            <div class="em-kv-value">Title/Escrow Officer</div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
