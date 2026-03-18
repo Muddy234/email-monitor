@@ -272,6 +272,22 @@
             color: var(--em-slate-800);
             white-space: pre-wrap;
         }
+        .em-draft-outlook-banner {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background: #E1F0FF;
+            border-top: 1px solid #B3D7FF;
+            font-size: 12px;
+            font-weight: 600;
+            color: #0F6CBD;
+        }
+        .em-draft-outlook-icon {
+            width: 18px;
+            height: 18px;
+            flex-shrink: 0;
+        }
 
         /* Trace */
         .em-trace-section { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--em-slate-100); }
@@ -390,6 +406,13 @@ I will get you an update on the DOT signature status by end of day today. The do
 
 Best,
 John Doe</div>
+                            <div class="em-draft-outlook-banner">
+                                <svg class="em-draft-outlook-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <rect x="2" y="4" width="20" height="16" rx="2" stroke="#0F6CBD" stroke-width="1.5" fill="none"/>
+                                    <path d="M2 8l10 6 10-6" stroke="#0F6CBD" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                </svg>
+                                Saved to Outlook Drafts — open and send
+                            </div>
                         </div>
                     </div>
 
@@ -475,7 +498,7 @@ John Doe</div>
             </div>
             <div class="demo-label" data-label="3">
                 <div class="demo-label-step">Draft</div>
-                <div class="demo-label-text">Writes a reply in your voice, ready to send</div>
+                <div class="demo-label-text">Writes a reply in your voice and saves it directly to your Outlook Drafts</div>
             </div>
             <div class="demo-label" data-label="4">
                 <div class="demo-label-step">Explain</div>
