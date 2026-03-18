@@ -80,7 +80,9 @@
             border-radius: var(--em-radius-sm);
             padding: 6px 10px;
             margin: -6px -10px;
-            transition: opacity 0.5s ease, box-shadow 0.5s ease, background 0.5s ease;
+            transition: opacity 0.5s ease, box-shadow 0.5s ease, background 0.5s ease, max-height 0.5s ease, padding 0.5s ease, margin 0.5s ease;
+            max-height: 800px;
+            overflow: hidden;
         }
         .demo-section + .demo-section { margin-top: 6px; }
 
@@ -90,6 +92,16 @@
         body.touring .demo-section.active {
             box-shadow: 0 0 0 2px rgba(44,79,124,0.14);
             background: rgba(244,247,250,0.55);
+        }
+
+        /* Collapse summary when Outlook compose is showing */
+        body[data-step="4"] .demo-section[data-step="2"].dimmed {
+            max-height: 0;
+            padding-top: 0;
+            padding-bottom: 0;
+            margin-top: 0;
+            margin-bottom: 0;
+            opacity: 0;
         }
 
         /* Footer dims during tour */
@@ -298,7 +310,7 @@
             transition: max-height 0.5s ease, opacity 0.5s ease, box-shadow 0.5s ease, background 0.5s ease;
         }
         body.touring .demo-section.demo-outlook-step.active {
-            max-height: 600px;
+            max-height: 500px;
             opacity: 1;
         }
         body.touring .demo-section.demo-outlook-step.dimmed {
@@ -490,7 +502,7 @@
 
         /* Trace */
         .em-trace-section { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--em-slate-100); }
-        .em-trace-row { display: flex; flex-direction: column; gap: 12px; }
+        .em-trace-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 24px; }
         .em-trace-row .em-trace-stage { margin-bottom: 8px; }
         .em-trace-row .em-trace-stage::before { display: none; }
         .em-trace-stage { position: relative; padding-left: 0; margin-bottom: 4px; }
@@ -515,17 +527,6 @@
         .em-kv-grid { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; font-size: 13px; }
         .em-kv-label { font-weight: 600; color: var(--em-slate-500); }
         .em-kv-value  { color: var(--em-slate-800); word-break: break-word; }
-
-        /* Draft + Trace side-by-side */
-        .demo-bottom-row {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 24px;
-            margin-top: 10px;
-        }
-        .demo-bottom-row > .demo-section {
-            margin: 0;
-        }
 
         /* Footer */
         .em-detail-footer {
@@ -587,68 +588,45 @@
                     </div>
                 </div>
 
-                <div class="demo-bottom-row">
-                    <!-- SECTION 3 — Draft response -->
-                    <div class="demo-section" data-step="3">
-                        <div class="em-email-section-label">Draft Response</div>
-                        <div class="em-draft-preview">
-                            <div class="em-draft-preview-header">To: Jane Doe</div>
-                            <div class="em-draft-preview-body">Hi Jane,
-
-I will get you an update on the DOT signature status by end of day today. The document is currently with the borrower for review and we're expecting it back shortly.
-
-Best,
-John Doe</div>
-                            <div class="em-draft-outlook-banner">
-                                <svg class="em-draft-outlook-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                    <rect x="2" y="4" width="20" height="16" rx="2" stroke="#0F6CBD" stroke-width="1.5" fill="none"/>
-                                    <path d="M2 8l10 6 10-6" stroke="#0F6CBD" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                                </svg>
-                                Saved to Outlook Drafts — open and send
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- SECTION 4 — Signals + Context -->
-                    <div class="demo-section" data-step="4">
-                        <div class="em-trace-section" style="margin-top:0; border-top:none;">
-                            <div class="em-trace-content">
-                                <div class="em-trace-row">
-                                    <div class="em-trace-stage">
-                                        <div class="em-trace-label">Signals</div>
-                                        <div class="em-signal-list">
-                                            <div class="em-signal-row em-signal-on">
-                                                <span class="em-signal-indicator">&#10003;</span>
-                                                <span class="em-signal-label">Material</span>
-                                                <span class="em-signal-desc">Contains important or actionable content</span>
-                                            </div>
-                                            <div class="em-signal-row em-signal-on">
-                                                <span class="em-signal-indicator">&#10003;</span>
-                                                <span class="em-signal-label">Action Required</span>
-                                                <span class="em-signal-desc">Sender is requesting you do something</span>
-                                            </div>
-                                            <div class="em-signal-row em-signal-on">
-                                                <span class="em-signal-indicator">&#10003;</span>
-                                                <span class="em-signal-label">Blocker</span>
-                                                <span class="em-signal-desc">Someone is waiting on your response</span>
-                                            </div>
-                                            <div class="em-signal-row em-signal-on">
-                                                <span class="em-signal-indicator">&#10003;</span>
-                                                <span class="em-signal-label">Deadline</span>
-                                                <span class="em-signal-desc">Has a time-sensitive due date</span>
-                                            </div>
+                <!-- SECTION 3 — Signals + Context -->
+                <div class="demo-section" data-step="3">
+                    <div class="em-trace-section" style="margin-top:0; border-top:none;">
+                        <div class="em-trace-content">
+                            <div class="em-trace-row">
+                                <div class="em-trace-stage">
+                                    <div class="em-trace-label">Signals</div>
+                                    <div class="em-signal-list">
+                                        <div class="em-signal-row em-signal-on">
+                                            <span class="em-signal-indicator">&#10003;</span>
+                                            <span class="em-signal-label">Material</span>
+                                            <span class="em-signal-desc">Contains important or actionable content</span>
+                                        </div>
+                                        <div class="em-signal-row em-signal-on">
+                                            <span class="em-signal-indicator">&#10003;</span>
+                                            <span class="em-signal-label">Action Required</span>
+                                            <span class="em-signal-desc">Sender is requesting you do something</span>
+                                        </div>
+                                        <div class="em-signal-row em-signal-on">
+                                            <span class="em-signal-indicator">&#10003;</span>
+                                            <span class="em-signal-label">Blocker</span>
+                                            <span class="em-signal-desc">Someone is waiting on your response</span>
+                                        </div>
+                                        <div class="em-signal-row em-signal-on">
+                                            <span class="em-signal-indicator">&#10003;</span>
+                                            <span class="em-signal-label">Deadline</span>
+                                            <span class="em-signal-desc">Has a time-sensitive due date</span>
                                         </div>
                                     </div>
-                                    <div class="em-trace-stage">
-                                        <div class="em-trace-label">Context</div>
-                                        <div class="em-kv-grid">
-                                            <div class="em-kv-label">Contact Type</div>
-                                            <div class="em-kv-value"><span class="em-badge em-badge-blue">external_title_escrow</span></div>
-                                            <div class="em-kv-label">Organization</div>
-                                            <div class="em-kv-value">Title Escrow Company</div>
-                                            <div class="em-kv-label">Role</div>
-                                            <div class="em-kv-value">Title/Escrow Officer</div>
-                                        </div>
+                                </div>
+                                <div class="em-trace-stage">
+                                    <div class="em-trace-label">Context</div>
+                                    <div class="em-kv-grid">
+                                        <div class="em-kv-label">Contact Type</div>
+                                        <div class="em-kv-value"><span class="em-badge em-badge-blue">external_title_escrow</span></div>
+                                        <div class="em-kv-label">Organization</div>
+                                        <div class="em-kv-value">Title Escrow Company</div>
+                                        <div class="em-kv-label">Role</div>
+                                        <div class="em-kv-value">Title/Escrow Officer</div>
                                     </div>
                                 </div>
                             </div>
@@ -656,8 +634,8 @@ John Doe</div>
                     </div>
                 </div>
 
-                <!-- SECTION 5 — Outlook compose window -->
-                <div class="demo-section demo-outlook-step" data-step="5">
+                <!-- SECTION 4 — Outlook compose window -->
+                <div class="demo-section demo-outlook-step" data-step="4">
                     <div class="outlook-compose">
                         <!-- Outlook ribbon tabs -->
                         <div class="outlook-ribbon-tabs">
@@ -749,9 +727,8 @@ John Doe</div>
                 <div class="demo-dot" data-dot="0"><span class="demo-dot-circle"></span><span class="demo-dot-label">Overview</span></div>
                 <div class="demo-dot" data-dot="1"><span class="demo-dot-circle"></span><span class="demo-dot-label">Identify</span></div>
                 <div class="demo-dot" data-dot="2"><span class="demo-dot-circle"></span><span class="demo-dot-label">Summarize</span></div>
-                <div class="demo-dot" data-dot="3"><span class="demo-dot-circle"></span><span class="demo-dot-label">Draft</span></div>
-                <div class="demo-dot" data-dot="4"><span class="demo-dot-circle"></span><span class="demo-dot-label">Explain</span></div>
-                <div class="demo-dot" data-dot="5"><span class="demo-dot-circle"></span><span class="demo-dot-label">Send</span></div>
+                <div class="demo-dot" data-dot="3"><span class="demo-dot-circle"></span><span class="demo-dot-label">Explain</span></div>
+                <div class="demo-dot" data-dot="4"><span class="demo-dot-circle"></span><span class="demo-dot-label">Draft</span></div>
             </div>
         </div>
 
@@ -766,16 +743,12 @@ John Doe</div>
                 <div class="demo-label-text">Reads the full thread and surfaces what matters</div>
             </div>
             <div class="demo-label" data-label="3">
-                <div class="demo-label-step">Draft</div>
-                <div class="demo-label-text">Writes a reply in your voice and saves it directly to your Outlook Drafts</div>
-            </div>
-            <div class="demo-label" data-label="4">
                 <div class="demo-label-step">Explain</div>
                 <div class="demo-label-text">Shows the signals behind every recommendation</div>
             </div>
-            <div class="demo-label" data-label="5">
-                <div class="demo-label-step">Send</div>
-                <div class="demo-label-text">Your draft is waiting in Outlook — just review and hit Send</div>
+            <div class="demo-label" data-label="4">
+                <div class="demo-label-step">Draft</div>
+                <div class="demo-label-text">Writes a reply in your voice, ready to review and send from Outlook</div>
             </div>
         </div>
     </div>
@@ -786,9 +759,8 @@ John Doe</div>
             { step: 0, ms: 1500 },   // all visible — initial view
             { step: 1, ms: 2500 },   // header
             { step: 2, ms: 2500 },   // summary
-            { step: 3, ms: 2500 },   // draft
-            { step: 4, ms: 2500 },   // signals + context
-            { step: 5, ms: 3000 },   // outlook compose — the payoff
+            { step: 3, ms: 2500 },   // signals + context
+            { step: 4, ms: 3000 },   // outlook compose — the payoff
             { step: 0, ms: 1500 },   // all visible — breathe, then loop
         ];
 
@@ -824,6 +796,7 @@ John Doe</div>
 
         /* Apply a step */
         function applyStep(step) {
+            document.body.dataset.step = step;
             if (step === 0) {
                 document.body.classList.remove('touring');
                 sections.forEach(s => s.classList.remove('dimmed', 'active'));
