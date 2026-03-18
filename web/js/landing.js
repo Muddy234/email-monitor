@@ -146,9 +146,27 @@ function initScrollAnimations() {
 }
 
 
+// --- Waitlist Form Handler ---
+function initWaitlistForm() {
+    const form = document.querySelector('.lp-waitlist-form');
+    if (!form) return;
+
+    form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const input = form.querySelector('.lp-waitlist-form__input');
+        const btn = form.querySelector('.lp-waitlist-form__btn');
+        btn.textContent = 'You\'re on the list!';
+        btn.disabled = true;
+        input.disabled = true;
+        input.value = '';
+    });
+}
+
+
 // --- Initialize ---
 initNavbar();
 initSmoothScroll();
 initMobileNav();
 initFAQ();
 initScrollAnimations();
+initWaitlistForm();

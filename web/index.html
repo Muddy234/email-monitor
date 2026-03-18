@@ -94,8 +94,9 @@
         <section class="lp-hero" id="hero">
             <div class="lp-container lp-hero__inner">
                 <div class="lp-hero__content">
-                    <span class="lp-badge">AI-Powered Email Intelligence</span>
-                    <h1 class="lp-hero__headline">Your inbox, handled.<br>Before your first meeting.</h1>
+                    <span class="lp-badge">Save 2+ Hours Every Morning</span>
+                    <h1 class="lp-hero__headline">Your inbox, handled.</h1>
+                    <p class="lp-hero__subheadline">Before your first meeting.</p>
                     <p class="lp-hero__subtitle">Clarion AI uses AI to read, prioritize, and draft replies to your email — saving 2+ hours every morning. Works with Outlook, requires zero IT approval.</p>
                     <div class="lp-hero__cta-group">
                         <a href="#" class="lp-btn lp-btn--primary lp-btn--lg">Add to Chrome — It's Free</a>
@@ -106,10 +107,49 @@
                             </svg>
                         </a>
                     </div>
-                    <p class="lp-hero__proof">Designed for real estate, finance, consulting, and legal professionals</p>
+                    <p class="lp-hero__proof">No credit card. No IT ticket. Works in 60 seconds.</p>
+                </div>
+
+                <!-- Hero Product Mockup -->
+                <div class="lp-hero__visual">
+                    <div class="lp-hero-mockup">
+                        <div class="lp-hero-mockup__chrome">
+                            <span class="lp-hero-mockup__dot"></span>
+                            <span class="lp-hero-mockup__dot"></span>
+                            <span class="lp-hero-mockup__dot"></span>
+                        </div>
+                        <div class="lp-hero-mockup__card">
+                            <div class="lp-hero-mockup__header">
+                                <div class="lp-hero-mockup__sender-row">
+                                    <span class="lp-hero-mockup__sender">Sarah Chen</span>
+                                    <span class="lp-hero-mockup__badge lp-hero-mockup__badge--priority">9/10</span>
+                                    <span class="lp-hero-mockup__badge lp-hero-mockup__badge--category">Deal</span>
+                                </div>
+                                <span class="lp-hero-mockup__subject">Re: Q3 Partnership Terms — Final Review</span>
+                            </div>
+                            <div class="lp-hero-mockup__action-hint">
+                                <span class="lp-hero-mockup__action-label">Action:</span> Reply by EOD — confirm revised terms
+                            </div>
+                            <div class="lp-hero-mockup__summary">
+                                <div class="lp-hero-mockup__summary-label">AI Summary</div>
+                                <p>Partner accepted revised rev-share. Needs sign-off on exclusivity clause before board meeting Friday.</p>
+                            </div>
+                            <div class="lp-hero-mockup__draft">
+                                <div class="lp-hero-mockup__draft-header">Draft Reply</div>
+                                <div class="lp-hero-mockup__draft-body">Hi Sarah, thanks for confirming. I've reviewed the updated terms and the exclusivity clause works for us. I'll send the signed copy by 3pm...</div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </section>
+
+        <!-- Social Proof Bar -->
+        <div class="lp-social-proof-bar">
+            <div class="lp-container lp-social-proof-bar__inner">
+                <span class="lp-social-proof-bar__text">Trusted by professionals at 50+ firms in real estate, finance, consulting, and legal</span>
+            </div>
+        </div>
 
         <!-- ============================================================
              PROBLEM STATEMENT
@@ -204,7 +244,7 @@
 
                 <div class="lp-feature-grid lp-animate">
                     <!-- Priority Inbox -->
-                    <div class="lp-feature-card">
+                    <div class="lp-feature-card lp-feature-card--featured">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lp-feature-card__icon" aria-hidden="true">
                             <line x1="10" y1="6" x2="21" y2="6"/>
                             <line x1="10" y1="12" x2="21" y2="12"/>
@@ -218,7 +258,7 @@
                     </div>
 
                     <!-- AI Draft Generation -->
-                    <div class="lp-feature-card">
+                    <div class="lp-feature-card lp-feature-card--featured">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lp-feature-card__icon" aria-hidden="true">
                             <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
                             <path d="m15 5 4 4"/>
@@ -373,7 +413,16 @@
                         </li>
                     </ul>
                     <a href="#" class="lp-btn lp-btn--primary lp-btn--lg lp-pricing__cta">Add to Chrome — It's Free</a>
-                    <p class="lp-pricing__note">Pro plan with desktop agent, batch processing, and advanced features coming soon.</p>
+                    <div class="lp-pricing__divider"></div>
+                    <p class="lp-pricing__pro-label">Pro plan coming soon</p>
+                    <p class="lp-pricing__pro-desc">Desktop agent, batch processing, and advanced features.</p>
+                    <form class="lp-waitlist-form" action="#" method="post">
+                        <div class="lp-waitlist-form__row">
+                            <input type="email" class="lp-waitlist-form__input" placeholder="you@company.com" aria-label="Email address for Pro waitlist" required>
+                            <button type="submit" class="lp-btn lp-btn--primary lp-waitlist-form__btn">Join Pro Waitlist</button>
+                        </div>
+                        <p class="lp-waitlist-form__note">We'll notify you when Pro launches. No spam.</p>
+                    </form>
                 </div>
             </div>
         </section>
@@ -459,6 +508,7 @@
                 <p class="lp-final-cta__subtitle">Install Clarion AI in 60 seconds. Free forever for the Chrome Extension.</p>
                 <a href="#" class="lp-btn lp-btn--primary lp-btn--xl">Add to Chrome — It's Free</a>
                 <p class="lp-final-cta__note">No credit card required. No IT approval needed.</p>
+                <p class="lp-final-cta__social-proof">Join professionals at 50+ firms who've taken back their mornings</p>
             </div>
         </section>
     </main>
