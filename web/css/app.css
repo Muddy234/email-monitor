@@ -716,26 +716,26 @@
 .em-email-card.expanded .em-email-detail {
     max-height: 5000px;
     opacity: 1;
-    margin-top: 16px;
-    padding-top: 16px;
+    margin-top: 8px;
+    padding-top: 8px;
     border-top: 1px solid var(--em-slate-100);
 }
 
 .em-email-body {
-    font-size: 13px;
+    font-size: 12px;
     color: var(--em-slate-700);
-    line-height: 1.6;
+    line-height: 1.4;
     white-space: pre-wrap;
-    max-height: 300px;
+    max-height: 200px;
     overflow-y: auto;
-    margin-bottom: 16px;
+    margin-bottom: 8px;
 }
 
 .em-email-section-label {
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
     color: var(--em-slate-500);
-    margin-bottom: 8px;
+    margin-bottom: 4px;
 }
 
 /* --- 13. Draft Preview (email-like) --- */
@@ -744,23 +744,25 @@
     border: 1px solid var(--em-slate-200);
     border-radius: var(--em-radius);
     overflow: hidden;
-    margin-top: 8px;
+    margin-top: 4px;
 }
 
 .em-draft-preview-header {
-    padding: 12px 20px;
+    padding: 6px 12px;
     background: var(--em-slate-50);
     border-bottom: 1px solid var(--em-slate-200);
-    font-size: 13px;
+    font-size: 12px;
     color: var(--em-slate-500);
 }
 
 .em-draft-preview-body {
-    padding: 20px;
-    font-size: 14px;
-    line-height: 1.7;
+    padding: 8px 12px;
+    font-size: 12px;
+    line-height: 1.4;
     color: var(--em-slate-800);
     white-space: pre-wrap;
+    max-height: 200px;
+    overflow-y: auto;
 }
 
 /* --- 14. Draft Editor --- */
@@ -2542,9 +2544,17 @@
 }
 
 /* --- 49b. Pipeline Trace (inline in email card) --- */
+.em-trace-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0 16px;
+}
+.em-trace-row .em-trace-stage { margin-bottom: 8px; }
+.em-trace-row .em-trace-stage::before { display: none; }
+
 .em-trace-section {
-    margin-top: 16px;
-    padding-top: 12px;
+    margin-top: 10px;
+    padding-top: 8px;
     border-top: 1px solid var(--em-slate-100);
 }
 
@@ -2567,7 +2577,7 @@
 }
 
 .em-trace-content {
-    padding-top: 16px;
+    padding-top: 8px;
 }
 
 /* Body toggle (show original when summary displayed) */

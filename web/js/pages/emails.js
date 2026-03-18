@@ -272,6 +272,7 @@ function renderEmails() {
 function renderEmailTrace(email) {
     const cls = email.classifications?.[0];
     const draft = email.drafts?.[0];
+    const hasDraftAbove = !!draft;
     const ev = responseEvents[email.id];
     const senderEmail = (email.sender_email || email.sender || "").toLowerCase();
     const contact = contacts[senderEmail];
@@ -324,10 +325,14 @@ function renderEmailTrace(email) {
         stage4 = traceStage("Context", "empty", `<div class="em-trace-note">No contact record found.</div>`);
     }
 
+    const stage5 = hasDraftAbove ? "" : renderStage5_draft(draft, ev, cls, wasFiltered);
+
     return `
-        ${stage3}
-        ${stage4}
-        ${renderStage5_draft(draft, ev, cls, wasFiltered)}
+        <div class="em-trace-row">
+            ${stage3}
+            ${stage4}
+        </div>
+        ${stage5}
     `;
 }
 
