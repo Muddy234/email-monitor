@@ -294,14 +294,8 @@
         .em-trace-row { display: flex; flex-direction: column; gap: 12px; }
         .em-trace-row .em-trace-stage { margin-bottom: 8px; }
         .em-trace-row .em-trace-stage::before { display: none; }
-        .em-trace-stage { position: relative; padding-left: 32px; margin-bottom: 4px; }
-        .em-trace-dot {
-            position: absolute; left: 4px; top: 4px;
-            width: 16px; height: 16px; border-radius: 50%;
-            background: var(--em-blue-600);
-            border: 2px solid var(--em-white);
-            box-shadow: 0 0 0 2px var(--em-slate-200);
-        }
+        .em-trace-stage { position: relative; padding-left: 0; margin-bottom: 4px; }
+        .em-trace-dot { display: none; }
         .em-trace-label {
             font-size: 11px; font-weight: 600;
             color: var(--em-slate-500);
@@ -326,7 +320,7 @@
         /* Draft + Trace side-by-side */
         .demo-bottom-row {
             display: grid;
-            grid-template-columns: 1fr 2fr;
+            grid-template-columns: 1fr 1fr;
             gap: 24px;
             margin-top: 10px;
         }
@@ -419,11 +413,9 @@ John Doe</div>
                     <!-- SECTION 4 — Signals + Context -->
                     <div class="demo-section" data-step="4">
                         <div class="em-trace-section" style="margin-top:0; border-top:none;">
-                            <div class="em-email-section-label" style="padding-top:0;">Pipeline Trace</div>
                             <div class="em-trace-content">
                                 <div class="em-trace-row">
                                     <div class="em-trace-stage">
-                                        <div class="em-trace-dot"></div>
                                         <div class="em-trace-label">Signals</div>
                                         <div class="em-signal-list">
                                             <div class="em-signal-row em-signal-on">
@@ -449,7 +441,6 @@ John Doe</div>
                                         </div>
                                     </div>
                                     <div class="em-trace-stage">
-                                        <div class="em-trace-dot"></div>
                                         <div class="em-trace-label">Context</div>
                                         <div class="em-kv-grid">
                                             <div class="em-kv-label">Contact Type</div>
