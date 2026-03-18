@@ -53,10 +53,10 @@
             display: flex;
             align-items: flex-start;
             justify-content: center;
-            gap: 20px;
+            gap: 28px;
             max-width: 100%;
             margin: 0 auto;
-            padding: 16px 8px 24px;
+            padding: 16px 32px 20px;
         }
 
         .demo-card-col {
@@ -69,7 +69,7 @@
         }
 
         .demo-anno-col {
-            flex: 0 0 200px;
+            flex: 0 0 240px;
             position: relative;
             min-height: 100px;
         }
@@ -139,7 +139,7 @@
             display: flex;
             justify-content: center;
             gap: 16px;
-            margin-top: 20px;
+            margin-top: 14px;
         }
         .demo-dot {
             display: flex;
@@ -199,7 +199,7 @@
             background: var(--em-white);
             border: 1px solid var(--em-slate-200);
             border-radius: var(--em-radius);
-            padding: 20px 24px;
+            padding: 24px 32px;
             box-shadow: var(--em-shadow);
         }
 
@@ -245,10 +245,13 @@
 
         .em-email-section-label { font-size: 11px; font-weight: 600; color: var(--em-slate-500); margin-bottom: 4px; }
         .em-email-body {
-            font-size: 12px; color: var(--em-slate-700);
-            line-height: 1.4; white-space: pre-wrap;
+            font-size: 13px; color: var(--em-slate-700);
+            line-height: 1.45; white-space: pre-wrap;
             margin-bottom: 8px;
         }
+        .em-email-summary { white-space: normal; }
+        .em-summary-item { margin-bottom: 4px; }
+        .em-summary-item:last-child { margin-bottom: 0; }
         .em-email-summary { border-left: 3px solid var(--em-blue-200); padding-left: 12px; }
 
         .em-draft-preview {
@@ -264,15 +267,15 @@
             font-size: 12px; color: var(--em-slate-500);
         }
         .em-draft-preview-body {
-            padding: 8px 12px;
-            font-size: 12px; line-height: 1.4;
+            padding: 12px 16px;
+            font-size: 13px; line-height: 1.5;
             color: var(--em-slate-800);
             white-space: pre-wrap;
         }
 
         /* Trace */
         .em-trace-section { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--em-slate-100); }
-        .em-trace-row { display: flex; flex-direction: column; gap: 8px; }
+        .em-trace-row { display: flex; flex-direction: column; gap: 12px; }
         .em-trace-row .em-trace-stage { margin-bottom: 8px; }
         .em-trace-row .em-trace-stage::before { display: none; }
         .em-trace-stage { position: relative; padding-left: 32px; margin-bottom: 4px; }
@@ -291,7 +294,7 @@
         }
 
         /* Signals */
-        .em-signal-list { display: flex; flex-direction: column; gap: 6px; }
+        .em-signal-list { display: flex; flex-direction: column; gap: 8px; }
         .em-signal-row { display: flex; align-items: baseline; gap: 8px; padding: 4px 0; font-size: 13px; color: var(--em-slate-400); }
         .em-signal-row.em-signal-on { color: var(--em-slate-700); }
         .em-signal-indicator { width: 16px; text-align: center; font-weight: 600; flex-shrink: 0; }
@@ -300,7 +303,7 @@
         .em-signal-desc { font-size: 12px; color: var(--em-slate-400); margin-left: 4px; }
 
         /* KV grid */
-        .em-kv-grid { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; font-size: 13px; }
+        .em-kv-grid { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; font-size: 13px; }
         .em-kv-label { font-weight: 600; color: var(--em-slate-500); }
         .em-kv-value  { color: var(--em-slate-800); word-break: break-word; }
 
@@ -308,8 +311,8 @@
         .demo-bottom-row {
             display: grid;
             grid-template-columns: 1fr 2fr;
-            gap: 16px;
-            margin-top: 6px;
+            gap: 24px;
+            margin-top: 10px;
         }
         .demo-bottom-row > .demo-section {
             margin: 0;
@@ -371,17 +374,7 @@
                     </div>
                     <div style="margin-top:8px; padding-top:8px; border-top:1px solid var(--em-slate-100);">
                         <div class="em-email-section-label">Summary</div>
-                        <div class="em-email-body em-email-summary">1. Situation — Jane is a title officer following up urgently on a DOT (Deed of Trust) signature. The document is likely holding up a closing/funding process.
-
-2. Sender's intent — She needs a status update on the DOT signature ASAP. This is time-sensitive for the closing process.
-
-3. Tone — Urgent and professional. Style guide indicates "Professional Mode" for external lenders/vendors with complete sentences and "Best," sign-offs.
-
-4. Key details — DOT for Elm Street property, borrower is reviewing, expected back shortly. Title company needs confirmation before scheduling closing.
-
-5. Thread context — 31 messages deep; recurring follow-ups every 2–3 days. Previous responses promised updates "by end of week."
-
-6. Suggested response — Acknowledge urgency, provide current status on borrower review, give realistic timeline for DOT return.</div>
+                        <div class="em-email-body em-email-summary"><div class="em-summary-item"><strong>Situation</strong> — Jane is a title officer following up urgently on a DOT (Deed of Trust) signature. The document is likely holding up a closing/funding process.</div><div class="em-summary-item"><strong>Sender's intent</strong> — She needs a status update on the DOT signature ASAP. This is time-sensitive for the closing process.</div><div class="em-summary-item"><strong>Tone</strong> — Urgent and professional. Style guide indicates "Professional Mode" for external lenders/vendors with complete sentences and "Best," sign-offs.</div><div class="em-summary-item"><strong>Key details</strong> — DOT for Elm Street property, borrower is reviewing, expected back shortly. Title company needs confirmation before scheduling closing.</div><div class="em-summary-item"><strong>Thread context</strong> — 31 messages deep; recurring follow-ups every 2–3 days. Previous responses promised updates "by end of week."</div><div class="em-summary-item"><strong>Suggested response</strong> — Acknowledge urgency, provide current status on borrower review, give realistic timeline for DOT return.</div></div>
                     </div>
                 </div>
 
