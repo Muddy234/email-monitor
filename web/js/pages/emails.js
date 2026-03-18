@@ -290,18 +290,20 @@ function renderEmailTrace(email) {
         stage3 = traceStage("Signals", "skipped", `<div class="em-trace-note">Skipped — email was filtered.</div>`);
     } else if (ev && (ev.pri != null || ev.mc != null)) {
         const signalDefs = [
-            { key: "mc", label: "Material" },
-            { key: "ar", label: "Action Req" },
-            { key: "ub", label: "Blocker" },
-            { key: "dl", label: "Deadline" },
+            { key: "mc", label: "Material", desc: "Contains important or actionable content" },
+            { key: "ar", label: "Action Required", desc: "Sender is requesting you do something" },
+            { key: "ub", label: "Blocker", desc: "Someone is waiting on your response" },
+            { key: "dl", label: "Deadline", desc: "Has a time-sensitive due date" },
         ];
-        const pills = signalDefs.map(s => {
+        const rows = signalDefs.map(s => {
             const on = ev[s.key] === true;
-            const color = on ? "var(--em-amber-100)" : "var(--em-slate-50)";
-            const textColor = on ? "var(--em-amber-700)" : "var(--em-slate-400)";
-            return `<span style="display:inline-block;padding:3px 10px;margin:2px 4px 2px 0;background:${color};border-radius:var(--em-radius-sm);font-size:12px;color:${textColor};font-weight:${on ? 600 : 400}">${s.label}${on ? " ✓" : ""}</span>`;
+            return `<div class="em-signal-row${on ? " em-signal-on" : ""}">
+                <span class="em-signal-indicator">${on ? "✓" : "–"}</span>
+                <span class="em-signal-label">${s.label}</span>
+                <span class="em-signal-desc">${s.desc}</span>
+            </div>`;
         }).join("");
-        stage3 = traceStage("Signals", "active", `<div style="display:flex;flex-wrap:wrap">${pills}</div>`);
+        stage3 = traceStage("Signals", "active", `<div class="em-signal-list">${rows}</div>`);
     } else {
         stage3 = traceStage("Signals", "empty", `<div class="em-trace-note">No signal data.</div>`);
     }
