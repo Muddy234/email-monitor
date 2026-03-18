@@ -356,33 +356,6 @@ function renderEmailCard(email) {
         priorityBadge = `<span class="em-badge em-badge-amber">Med</span>`;
     }
 
-    // Contact context
-    const senderEmail = (email.sender_email || email.sender || "").toLowerCase();
-    const contact = contacts[senderEmail];
-    let contactBadge = "";
-    if (contact) {
-        const parts = [];
-        if (contact.contact_type && contact.contact_type !== "unknown") {
-            const typeLabels = {
-                internal: "Internal",
-                external_legal: "Legal",
-                external_lender: "Lender",
-                external_vendor: "Vendor",
-                investor: "Investor",
-            };
-            parts.push(typeLabels[contact.contact_type] || contact.contact_type);
-        }
-        if (contact.emails_per_month) {
-            parts.push(`~${contact.emails_per_month}/mo`);
-        }
-        if (contact.is_vip) {
-            parts.unshift("VIP");
-        }
-        if (parts.length > 0) {
-            contactBadge = `<span class="em-contact-badge">${escapeHtml(parts.join(" · "))}</span>`;
-        }
-    }
-
     // Suggested action
     let actionHtml = "";
     if (cls && !isCompleted) {
@@ -485,7 +458,6 @@ function renderEmailCard(email) {
                     <div>
                         <div class="em-email-sender">
                             ${escapeHtml(email.sender_name || email.sender || "Unknown")}
-                            ${contactBadge}
                         </div>
                         <div class="em-email-subject">${escapeHtml(email.subject || "(no subject)")}</div>
                     </div>
