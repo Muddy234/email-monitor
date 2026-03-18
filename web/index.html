@@ -15,11 +15,17 @@
     <meta property="og:title" content="Clarion AI — AI-Powered Email Intelligence">
     <meta property="og:description" content="Your inbox, handled. Before your first meeting. AI reads, prioritizes, and drafts replies.">
     <meta property="og:type" content="website">
+    <meta property="og:url" content="https://www.clarion-ai.app/">
+    <meta property="og:image" content="https://www.clarion-ai.app/assets/og-image.png">
 
     <!-- Twitter Card -->
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Clarion AI — AI-Powered Email Intelligence">
     <meta name="twitter:description" content="Your inbox, handled. Before your first meeting.">
+    <meta name="twitter:image" content="https://www.clarion-ai.app/assets/og-image.png">
+
+    <!-- Canonical -->
+    <link rel="canonical" href="https://www.clarion-ai.app/">
 
     <!-- Favicon -->
     <link rel="icon" type="image/svg+xml" href="assets/favicon/favicon.svg">
@@ -48,6 +54,62 @@
         "publisher": { "@type": "Organization", "name": "Arete Collective, L.P." }
     }
     </script>
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+            {
+                "@type": "Question",
+                "name": "Is my email data secure?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Clarion AI processes email locally through your browser. Content is sent to AI over encrypted HTTPS and is never stored on our servers. We never see your password or have access to your email account."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "Does this require IT approval?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "No. The Chrome Extension reads email through Outlook Web, the same interface you already use. No API access, admin permissions, or OAuth tokens required."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "Why doesn't this need API access like other email tools?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Clarion AI works at the browser layer — the same way you read email. It doesn't use Microsoft's Mail API or OAuth tokens, so there's nothing for IT to approve."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "Will the AI drafts sound like me?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "The Preference Engine learns your communication style from sent emails. Tone, formality, sentence structure, and vocabulary all adapt to match how you write."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "Is it really free?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Yes. The Chrome Extension is completely free with no time limit and no credit card required. Pro features with additional capabilities are coming soon."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "What email providers are supported?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Currently Microsoft Outlook (Web and Desktop). Gmail support is on the roadmap."
+                }
+            }
+        ]
+    }
+    </script>
 
     <title>Clarion AI — AI-Powered Email Intelligence for Outlook</title>
 </head>
@@ -71,17 +133,19 @@
                 <span>Clarion AI</span>
             </a>
 
-            <!-- Nav Links (desktop) -->
+            <!-- Nav Links (desktop inline / mobile dropdown) -->
             <ul class="lp-navbar__links" id="nav-links">
                 <li><a href="#features">Features</a></li>
                 <li><a href="#how-it-works">How It Works</a></li>
                 <li><a href="#faq">FAQ</a></li>
+                <li class="lp-navbar__mobile-only"><a href="app/login.html">Log In</a></li>
+                <li class="lp-navbar__mobile-only"><a href="#" class="lp-btn lp-btn--primary lp-navbar__cta-mobile">Add to Chrome — Free</a></li>
             </ul>
 
             <!-- CTA + Hamburger -->
             <div class="lp-navbar__actions">
-                <a href="app/login.html" class="lp-navbar__login">Log In</a>
-                <a href="#" class="lp-btn lp-btn--primary lp-navbar__cta">Add to Chrome — Free</a>
+                <a href="app/login.html" class="lp-navbar__login lp-navbar__desktop-only">Log In</a>
+                <a href="#" class="lp-btn lp-btn--primary lp-navbar__cta lp-navbar__desktop-only">Add to Chrome — Free</a>
                 <button class="lp-navbar__hamburger" id="nav-toggle" aria-label="Open menu" aria-expanded="false">
                     <span></span>
                     <span></span>
@@ -104,7 +168,7 @@
                     <p class="lp-hero__subtitle">Clarion AI uses AI to read, prioritize, and draft replies to your email — saving 2+ hours every morning. Works with Outlook, requires zero IT approval.</p>
                     <div class="lp-hero__cta-group">
                         <a href="#" class="lp-btn lp-btn--primary lp-btn--lg">Add to Chrome — It's Free</a>
-                        <a href="#how-it-works" class="lp-hero__secondary-link">
+                        <a href="#demo" class="lp-hero__secondary-link">
                             See how it works
                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true">
                                 <path d="m6 9 6 6 6-6"/>
@@ -154,6 +218,19 @@
                 <span class="lp-social-proof-bar__text">Trusted by professionals at 50+ firms in real estate, finance, consulting, and legal</span>
             </div>
         </div>
+
+        <!-- ============================================================
+             DEMO
+             ============================================================ -->
+        <section class="lp-demo-section" id="demo">
+            <div class="lp-container">
+                <span class="lp-section-label">SEE IT IN ACTION</span>
+                <h2 class="lp-section-heading">Watch Clarion AI process an email in real time</h2>
+                <div class="lp-demo-section__wrapper lp-animate">
+                    <iframe src="demo-animated.html" class="lp-demo-iframe" title="Interactive demo of Clarion AI processing an email" loading="lazy"></iframe>
+                </div>
+            </div>
+        </section>
 
         <!-- ============================================================
              PROBLEM STATEMENT
@@ -230,10 +307,6 @@
                         <h3 class="lp-step__title">Let AI Handle the Rest</h3>
                         <p class="lp-step__desc">Every email is scored, categorized, and summarized. Reply drafts are written in your voice.</p>
                     </div>
-                </div>
-
-                <div class="lp-how-it-works__demo lp-animate">
-                    <iframe src="demo-animated.html" class="lp-demo-iframe" title="Interactive demo of Clarion AI processing an email" loading="lazy"></iframe>
                 </div>
             </div>
         </section>

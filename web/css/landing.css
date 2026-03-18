@@ -129,6 +129,17 @@ h3 { font-size: 1.125rem; font-weight: 600; }
     font-size: 1.0625rem;
 }
 
+/* Ensure fixed navbar doesn't overlap sections on anchor scroll */
+.lp-demo-section,
+.lp-problem,
+.lp-how-it-works,
+.lp-features,
+.lp-comparison,
+.lp-pricing,
+.lp-faq {
+    scroll-margin-top: var(--lp-navbar-height);
+}
+
 .lp-badge {
     display: inline-block;
     font-size: 0.8125rem;
@@ -276,8 +287,24 @@ h3 { font-size: 1.125rem; font-weight: 600; }
     color: var(--lp-blue-700);
 }
 
-.lp-navbar__cta {
+/* Desktop-only elements: hidden on mobile, shown at 768px+ */
+.lp-navbar__desktop-only {
     display: none;
+}
+
+/* Mobile-only items inside dropdown */
+.lp-navbar__mobile-only {
+    display: none;
+}
+
+.lp-navbar__links.lp-mobile-nav--open .lp-navbar__mobile-only {
+    display: block;
+}
+
+.lp-navbar__cta-mobile {
+    width: 100%;
+    text-align: center;
+    margin-top: 4px;
 }
 
 .lp-navbar__hamburger {
@@ -526,6 +553,21 @@ h3 { font-size: 1.125rem; font-weight: 600; }
     font-weight: 500;
     color: var(--lp-slate-500);
     letter-spacing: 0.01em;
+}
+
+
+/* --- Demo Section (standalone) --- */
+.lp-demo-section {
+    padding: 48px 0;
+    background: var(--lp-slate-50);
+}
+
+.lp-demo-section__wrapper {
+    margin-top: 36px;
+    border-radius: var(--lp-radius);
+    overflow: hidden;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+    background: var(--lp-slate-50);
 }
 
 
@@ -1194,8 +1236,12 @@ h3 { font-size: 1.125rem; font-weight: 600; }
         display: flex;
     }
 
-    .lp-navbar__cta {
+    .lp-navbar__desktop-only {
         display: inline-flex;
+    }
+
+    .lp-navbar__mobile-only {
+        display: none !important;
     }
 
     .lp-navbar__hamburger {
@@ -1211,7 +1257,8 @@ h3 { font-size: 1.125rem; font-weight: 600; }
     .lp-features,
     .lp-comparison,
     .lp-pricing,
-    .lp-faq {
+    .lp-faq,
+    .lp-demo-section {
         padding: 56px 0;
     }
 
@@ -1285,7 +1332,8 @@ h3 { font-size: 1.125rem; font-weight: 600; }
     .lp-features,
     .lp-comparison,
     .lp-pricing,
-    .lp-faq {
+    .lp-faq,
+    .lp-demo-section {
         padding: 68px 0;
     }
 
