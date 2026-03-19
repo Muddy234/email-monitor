@@ -315,53 +315,62 @@ provided separately below. Use the authoritative profiles to re-map and refine \
 the extraction data. Do not treat extraction-time labels and profile labels as \
 different taxonomies.
 
-The profile MUST cover these 4 dimensions:
+The profile MUST cover these 4 dimensions, expressed as IF-THEN routing \
+rules that a draft model can apply directly. The draft model will know: \
+contact_type, email_type (direct_request, approval_needed, status_update, \
+fyi_informational, etc.), thread_depth, and whether the inbound contains \
+questions or action language. Write rules using these observable inputs.
 
-1. Decision disposition — How the user handles decisions. Values include: \
-decides, proposes_solution, defers, delegates, asks_for_info, diagnoses. \
-Describe EACH mode observed and the conditions that trigger it. Note when the \
-user constructs a solution vs simply approving/rejecting, and when they run \
-diagnostics vs immediately requesting info. \
-e.g., "Decides immediately for operational requests from internal contacts. \
-Proposes solutions for construction issues rather than just approving vendor \
-suggestions. Defers to partner for financial/legal decisions. Diagnoses before \
-acting on anomalies — asks targeted questions to narrow down the issue."
+1. Decision disposition — Values: decides, proposes_solution, defers, \
+delegates, asks_for_info, diagnoses. For each mode observed, state the \
+CONDITIONS that trigger it as an IF-THEN rule. Note the boundary between \
+deciding and proposing a solution, and between asking for info and diagnosing. \
+e.g., "IF internal + operational request → decides immediately. \
+IF construction/vendor issue → proposes_solution (constructs a path forward \
+rather than just approving). IF financial/legal decision → defers to partner. \
+IF something seems off or inconsistent → diagnoses (asks targeted questions \
+to narrow down the issue before committing)."
 
-2. Response completeness — Does the user address every point raised, zero in on \
-the key issue, or respond partially? Describe the pattern and what triggers each \
-mode. \
-e.g., "Addresses all points for external legal/lender contacts. Key-point-only \
-for internal operational threads — picks the blocking issue and ignores the rest. \
-Partial responses are rare and usually indicate low-priority threads."
+2. Response completeness — Values: addresses_all, key_point_only, partial. \
+State what determines which mode the user picks. Reference observable inputs. \
+e.g., "IF external_legal or external_lender + multiple questions → \
+addresses_all. IF internal + single operational issue → key_point_only \
+(picks the blocking issue, skips the rest). partial is rare and indicates \
+a low-priority thread the user is monitoring but not driving."
 
-3. Commitment patterns — What forward-looking commitments does the user make? \
-Does the user commit to specific next steps, give vague forward references, or \
-redirect the ask back to the sender? Describe by situation type. \
-e.g., "Specific next steps for items in their direct control ('I'll send the \
-revised schedule by Thursday'). Redirected asks for items requiring others' input \
-('Can you send me the updated numbers?'). Vague forward references are rare — \
-the user almost always either commits specifically or redirects."
+3. Commitment patterns — Values: specific_next_step, vague_forward, \
+redirected_ask, none. State the decision boundary between specific_next_step \
+and redirected_ask — what determines which one the user picks? Exclude \
+trivially obvious patterns (e.g., no commitments on pure FYI emails). \
+e.g., "IF user owns the workstream and action is within their authority → \
+specific_next_step with concrete detail ('I'll send the revised schedule by \
+Thursday'). IF action requires input from others → redirected_ask ('Can you \
+send me the updated numbers?'). vague_forward is rare — user almost always \
+either commits specifically or redirects."
 
-4. Scope behavior — Does the user stay narrow, add unrequested context, or expand \
-the conversation? Describe when each mode appears. \
-e.g., "Stays narrow on routine approvals. Adds context when they spot a related \
-risk the sender may not be aware of ('heads up — the Phase 2 permit is still \
-pending, which could affect this timeline'). Rarely expands scope outright."
+4. Scope behavior — Values: stays_narrow, adds_context, expands_scope. \
+When the user adds unrequested context, describe WHAT KIND of context triggers \
+it (risk flags, dependency notes, timeline impacts, status updates) and under \
+what conditions. \
+e.g., "IF routine approval or acknowledgment → stays_narrow. IF user spots a \
+related risk or dependency the sender may not be aware of → adds_context \
+(e.g., 'heads up — the Phase 2 permit is still pending, which could affect \
+this timeline'). expands_scope is rare and limited to [conditions]."
 
 CRITICAL INSTRUCTIONS:
-- Do NOT produce a single flattened average. Behavior varies by context.
-- Identify MODES and label what triggers each mode (contact_type, situation type, \
-information completeness).
-- If no clear pattern exists for a dimension, state "no consistent pattern \
-observed" rather than guessing. The draft generator will fall back to neutral \
-behavior for uncertain dimensions.
-- Use concrete examples from the data to anchor each pattern.
-- If a pattern only appears with certain contact_types, say so explicitly.
+- Express patterns as conditional rules, not descriptive summaries. The draft \
+model needs rules it can apply, not personality descriptions.
+- Exclude trivially obvious patterns that any reasonable person would follow.
+- If no clear conditional pattern exists for a dimension, state "no consistent \
+pattern observed" rather than guessing. The draft generator will fall back to \
+neutral behavior for uncertain dimensions.
+- Use concrete examples from the data to anchor each rule.
+- If a rule only applies to certain contact_types, say so explicitly.
 - This profile will be injected alongside a separate WRITING STYLE GUIDE. This \
 profile governs WHAT the reply contains (decisions, commitments, scope). The \
 style guide governs HOW it is written (tone, vocabulary, pleasantries, structure). \
 Do not repeat style information here.
 - Do NOT invent a name, title, or heading for the profile. Do not reference the \
-user by name. Start directly with the behavioral patterns.
+user by name. Start directly with the behavioral rules.
 
 Output as plain text, not JSON."""
