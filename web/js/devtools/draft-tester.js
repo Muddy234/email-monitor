@@ -231,12 +231,21 @@ async function renderDraftDetail(email, userId) {
             let draftText = data?.draft || "";
             if (!draftText) throw new Error("Empty response from API");
 
-            // Strip chain-of-thought <thinking> block from model output
+            // Extract chain-of-thought <thinking> block before stripping
+            let thinkingText = "";
+            const thinkingMatch = draftText.match(/<thinking>([\s\S]*?)<\/thinking>/);
+            if (thinkingMatch) thinkingText = thinkingMatch[1].trim();
             draftText = draftText.replace(/<thinking>[\s\S]*?<\/thinking>/g, "").trim();
 
             statusEl.textContent = "";
             resultEl.innerHTML = `
                 <h3 class="em-section-title">Generated Draft</h3>
+                ${thinkingText ? `
+                    <details class="em-card" style="border-left:3px solid var(--em-slate-400);margin-bottom:12px">
+                        <summary style="cursor:pointer;font-size:13px;font-weight:600;color:var(--em-slate-500);padding:8px 0">Chain of Thought (Steps 1–8)</summary>
+                        <div style="white-space:pre-wrap;font-size:13px;line-height:1.6;color:var(--em-slate-600);margin-top:8px">${escapeHtml(thinkingText)}</div>
+                    </details>
+                ` : ""}
                 <div class="em-card" style="border-left:3px solid var(--em-blue-600)">
                     <div style="white-space:pre-wrap;font-size:14px;line-height:1.7;color:var(--em-slate-700)">${escapeHtml(draftText)}</div>
                 </div>
