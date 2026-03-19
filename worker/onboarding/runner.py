@@ -29,10 +29,19 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 from onboarding.collectors import collect_onboarding_emails
-from onboarding.extraction import extract_email_features, extract_writing_styles
+from onboarding.extraction import (
+    extract_email_features,
+    extract_writing_styles,
+    extract_behavioral_features,
+)
 from onboarding.stats_extraction import extract_all
 from onboarding.model_trainer import train_user_model
-from onboarding.synthesis import synthesize_contacts, synthesize_topics, synthesize_style_guide
+from onboarding.synthesis import (
+    synthesize_contacts,
+    synthesize_topics,
+    synthesize_style_guide,
+    synthesize_behavioral_profile,
+)
 
 logger = logging.getLogger("worker.onboarding")
 
@@ -152,13 +161,18 @@ def run_onboarding(db, user_id, profile):
         # STAGE 2: AI Enrichment  (Haiku + Sonnet)
         # ================================================================
 
-        # ── Phase 3 + 4C-1: Parallel Haiku extraction ───────────
+        # ── Phase 3 + 4C-1 + 4C-1b: Parallel Haiku extraction ────
         db.update_onboarding_status(user_id, "extracting")
 
         extraction_result = None
         style_result = None
+        behavioral_result = None
 
-        with ThreadPoolExecutor(max_workers=2) as executor:
+        # Derive user domain for contact_type heuristic
+        user_email = profile.get("email") or (aliases[0] if aliases else "")
+        user_domain = user_email.split("@")[1] if "@" in user_email else None
+
+        with ThreadPoolExecutor(max_workers=3) as executor:
             f_extract = executor.submit(
                 extract_email_features,
                 received,
@@ -167,6 +181,13 @@ def run_onboarding(db, user_id, profile):
             f_style = executor.submit(
                 extract_writing_styles,
                 sent,
+            )
+            f_behavioral = executor.submit(
+                extract_behavioral_features,
+                sent,
+                extraction["response_events"],
+                received,
+                user_domain,
             )
 
             try:
@@ -179,12 +200,17 @@ def run_onboarding(db, user_id, profile):
             except Exception:
                 logger.exception("Phase 4C-1: writing style extraction raised")
 
+            try:
+                behavioral_result = f_behavioral.result()
+            except Exception:
+                logger.exception("Phase 4C-1b: behavioral extraction raised")
+
         if extraction_result is None:
             logger.error("Phase 3 extraction failed completely")
             db.update_onboarding_status(user_id, "failed")
             return False
 
-        logger.info("Phase 3 + 4C-1 complete: Haiku extraction done")
+        logger.info("Phase 3 + 4C-1 + 4C-1b complete: Haiku extraction done")
 
         # ── Phase 4A: Contact profile synthesis ──────────────────
         db.update_onboarding_status(user_id, "synthesizing")
@@ -217,13 +243,14 @@ def run_onboarding(db, user_id, profile):
             logger.error(f"Stage 2: upsert enriched contacts failed: {e}")
             # Non-fatal — stats-only contacts from Stage 1 are already in DB
 
-        # ── Phase 4B + 4C-2: Parallel Sonnet synthesis ───────────
+        # ── Phase 4B + 4C-2 + 4C-3: Parallel Sonnet synthesis ────
         db.update_onboarding_status(user_id, "style_guide")
 
         topic_result = None
         style_guide = None
+        behavioral_profile = None
 
-        with ThreadPoolExecutor(max_workers=2) as executor:
+        with ThreadPoolExecutor(max_workers=3) as executor:
             f_topics = executor.submit(
                 synthesize_topics,
                 extraction_result.get("keyword_frequencies", {}),
@@ -233,13 +260,22 @@ def run_onboarding(db, user_id, profile):
                 style_result.get("style_features", []) if style_result else [],
                 contact_profiles,
             )
+            f_behavioral = executor.submit(
+                synthesize_behavioral_profile,
+                behavioral_result.get("behavioral_features", []) if behavioral_result else [],
+                contact_profiles,
+            )
             topic_result = f_topics.result()
             style_guide = f_guide.result()
+            try:
+                behavioral_profile = f_behavioral.result()
+            except Exception:
+                logger.exception("Phase 4C-3: behavioral profile synthesis raised")
 
         if topic_result is None:
             topic_result = {"domains": [], "high_signal_keywords": []}
 
-        logger.info("Phase 4B + 4C-2 complete: topics + style guide done")
+        logger.info("Phase 4B + 4C-2 + 4C-3 complete: topics + style + behavioral done")
 
         # Write enrichment results to DB
         try:
@@ -258,6 +294,12 @@ def run_onboarding(db, user_id, profile):
                 db.update_writing_style(user_id, style_guide, sample_count)
         except Exception as e:
             logger.error(f"Stage 2: update_writing_style failed: {e}")
+
+        try:
+            if behavioral_profile:
+                db.update_behavioral_profile(user_id, behavioral_profile)
+        except Exception as e:
+            logger.error(f"Stage 2: update_behavioral_profile failed: {e}")
 
         logger.info("Stage 2 complete: AI enrichments persisted")
 

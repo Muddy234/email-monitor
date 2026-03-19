@@ -506,6 +506,18 @@ class SupabaseWorkerClient:
             "style_sample_count": sample_count,
         }).eq("id", user_id).execute()
 
+    def update_behavioral_profile(self, user_id, profile_text):
+        """Store the behavioral profile on the user's profile.
+
+        Args:
+            user_id: UUID string.
+            profile_text: Plain text behavioral profile.
+        """
+        self.client.table("profiles").update({
+            "behavioral_profile": profile_text,
+            "behavioral_profiled_at": datetime.utcnow().isoformat(),
+        }).eq("id", user_id).execute()
+
     # ------------------------------------------------------------------
     # Batch context fetchers (for enrichment pipeline)
     # ------------------------------------------------------------------

@@ -198,3 +198,118 @@ contact_type.
 
 Output the guide as plain text, not JSON. It will be injected directly into a \
 draft generation prompt."""
+
+
+# ---------------------------------------------------------------------------
+# Phase 4C-1b: Haiku behavioral extraction from sent emails (with parent)
+# ---------------------------------------------------------------------------
+
+HAIKU_BEHAVIORAL_EXTRACTION_PROMPT = """\
+You are a behavioral pattern analyzer. For each sent email (paired with the \
+inbound message it replies to, when available), extract ONLY the following \
+fields. Return valid JSON and nothing else.
+
+For paired emails (sent + inbound parent), return:
+{
+    "email_index": <integer matching the PAIR N or EMAIL N header>,
+    "contact_type": "<the contact_type label provided in the header>",
+    "decision_type": "<one of: decides, defers, delegates, asks_for_info, n/a>",
+    "challenges_premise": <true if the user questions, pushes back on, or \
+flags an inconsistency in the sender's message — false otherwise>,
+    "asks_clarifying_questions": <true if the user asks a question to gather \
+more information — false otherwise>,
+    "pleasantry_level": "<one of: none, minimal, standard, warm>",
+    "takes_action_in_reply": <true if the user approves, rejects, instructs, \
+or commits to a next step — false if they only acknowledge>
+}
+
+For unpaired emails (no inbound parent available), return:
+{
+    "email_index": <integer>,
+    "contact_type": "<the contact_type label provided>",
+    "decision_type": null,
+    "challenges_premise": null,
+    "asks_clarifying_questions": <true/false — observable from sent email alone>,
+    "pleasantry_level": "<one of: none, minimal, standard, warm>",
+    "takes_action_in_reply": null
+}
+
+Field definitions:
+- decision_type: How the user handles the situation.
+  - "decides": user makes a clear decision or gives a definitive answer
+  - "defers": user explicitly postpones or says they'll handle it later
+  - "delegates": user routes the task to someone else
+  - "asks_for_info": user needs more information before acting
+  - "n/a": the inbound was not requesting a decision (pure FYI, etc.)
+- challenges_premise: Does the user question something the sender said or \
+flag something that seems off? Includes phrases like "that's odd," \
+"are you sure," "that doesn't match," pushing back on assumptions.
+- pleasantry_level:
+  - "none": no greeting, no thank you, straight to content
+  - "minimal": brief greeting or thanks ("Thanks," "Hi Michael,")
+  - "standard": greeting + closing pleasantry
+  - "warm": effusive thanks, personal remarks, extra warmth
+
+Output format:
+{"extractions": [<one object per email/pair>]}
+
+Start your response with { and end with }."""
+
+
+# ---------------------------------------------------------------------------
+# Phase 4C-3: Sonnet behavioral profile synthesis
+# ---------------------------------------------------------------------------
+
+SONNET_BEHAVIORAL_PROFILE_PROMPT = """\
+Based on the following behavioral pattern analysis from a user's sent emails \
+(paired with the inbound messages they were replying to), generate a behavioral \
+profile (300-500 words) that another AI can follow to replicate this user's \
+decision-making patterns when drafting email replies.
+
+IMPORTANT: The contact_type labels in the extraction data are APPROXIMATE \
+(domain-based: same org = internal, different org = external). The authoritative \
+contact profiles with specific types (external_lender, external_legal, etc.) are \
+provided separately below. Use the authoritative profiles to re-map and refine \
+the extraction data. Do not treat extraction-time labels and profile labels as \
+different taxonomies.
+
+The profile MUST cover these 4 dimensions:
+
+1. Decision disposition — Does the user decide, defer, delegate, or gather info? \
+Describe EACH mode and the conditions that trigger it. Include whether the \
+user gives conditional directives ("if X, do Y") as a decision tactic. \
+e.g., "Decides immediately for operational requests from internal contacts. \
+Defers to partner (Luke) for financial/legal decisions. Uses conditional \
+instructions when the decision hinges on one unknown."
+
+2. Information gap handling — When information is missing or something seems off, \
+does the user accept the premise, ask clarifying questions, or challenge it? \
+Include skepticism patterns — does the user flag inconsistencies directly? \
+e.g., "Probes before acting — asks 'who initiated this?' before approving. \
+Calls out oddities bluntly: 'That's odd.'"
+
+3. Action orientation — Does the user take action in the reply (approve, reject, \
+instruct) or acknowledge and defer? Under what conditions? \
+e.g., "Takes action on operational items immediately. Acknowledges receipt \
+on legal/financial items but defers decision to partner."
+
+4. Pleasantry calibration — When does the user skip thank-yous and get straight \
+to business? When warm? Break down by contact_type if patterns differ. \
+e.g., "Minimal pleasantries with internal colleagues. Standard warmth with \
+external title/escrow contacts."
+
+CRITICAL INSTRUCTIONS:
+- Do NOT produce a single flattened average. Behavior varies by context.
+- Identify MODES and label what triggers each mode (contact_type, situation type, \
+information completeness).
+- If no clear pattern exists for a dimension, state "no consistent pattern \
+observed" rather than guessing. The draft generator will fall back to neutral \
+behavior for uncertain dimensions.
+- Use concrete examples from the data to anchor each pattern.
+- If a pattern only appears with certain contact_types, say so explicitly.
+- This profile will be injected alongside a separate WRITING STYLE GUIDE. This \
+profile governs WHAT the user does (decisions, actions, questions). The style \
+guide governs HOW they write (tone, vocabulary, structure). Do not repeat \
+style information here.
+
+Output as plain text, not JSON."""

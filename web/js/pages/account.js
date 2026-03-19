@@ -154,6 +154,12 @@ async function renderAccount(sub) {
             ${renewalText ? `<div class="em-account-renewal">${escapeHtml(renewalText)}</div>` : ""}
             <div class="em-account-actions">${actionHtml}</div>
         </div>
+        <div class="em-account-card" style="margin-top:24px">
+            <h3 style="font-size:15px;font-weight:600;color:var(--em-slate-900);margin-bottom:8px">Communication Style</h3>
+            <p style="font-size:13px;color:var(--em-slate-500);margin-bottom:12px">Re-analyze your sent emails to update your writing style guide and behavioral profile.</p>
+            <button class="em-btn em-btn-secondary" id="reanalyzeBtn">Re-analyze my communication style</button>
+            <span id="reanalyzeStatus" style="margin-left:12px;font-size:13px;color:var(--em-slate-500)"></span>
+        </div>
     `;
 
     // Bind events
@@ -186,6 +192,31 @@ async function renderAccount(sub) {
                 showError(`Failed to open billing portal: ${err.message}`);
                 manageBtn.disabled = false;
                 manageBtn.textContent = "Manage Billing";
+            }
+        });
+    }
+
+    const reanalyzeBtn = document.getElementById("reanalyzeBtn");
+    const reanalyzeStatus = document.getElementById("reanalyzeStatus");
+    if (reanalyzeBtn) {
+        reanalyzeBtn.addEventListener("click", async () => {
+            reanalyzeBtn.disabled = true;
+            reanalyzeStatus.textContent = "Scheduling re-analysis...";
+            try {
+                const { data: { user } } = await supabase.auth.getUser();
+                const { error } = await supabase
+                    .from("profiles")
+                    .update({
+                        behavioral_profiled_at: null,
+                        onboarding_status: "pending",
+                        onboarding_completed_at: null,
+                    })
+                    .eq("id", user.id);
+                if (error) throw error;
+                reanalyzeStatus.textContent = "Queued — your profiles will be regenerated shortly.";
+            } catch (err) {
+                reanalyzeStatus.textContent = `Failed: ${err.message}`;
+                reanalyzeBtn.disabled = false;
             }
         });
     }

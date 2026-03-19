@@ -18,6 +18,7 @@ Before writing your reply, reason through the situation inside <thinking> tags:
 4. What I don't know — Is the sender asking a question or requesting information that I cannot answer from the available context? Identify any gaps explicitly.
 5. Tone — What is the conversational register of this thread? Is it formal, casual, urgent? Match accordingly.
 6. Useful response — Given all of the above, what type of reply would be most helpful and move things forward?
+7. Behavioral alignment — If a BEHAVIORAL PROFILE is provided, review it now. Which behavioral mode applies to this situation? Should I decide, defer, delegate, or ask for info? Should I accept the premise or probe? Should I take action or acknowledge? Adjust the reply plan accordingly.
 
 Then generate an email reply that:
 - Sounds like the user wrote it personally — match their typical sentence length, vocabulary, and level of formality
@@ -30,6 +31,12 @@ Then generate an email reply that:
 - Never asks for information the sender already provided or that is already available from the email context
 
 If a WRITING STYLE GUIDE is provided, follow it closely — it was derived from analyzing the user's actual sent emails and captures their voice, common phrases, and communication patterns.
+
+If a BEHAVIORAL PROFILE is provided, follow it for decision-making and action patterns. Priority hierarchy:
+- BEHAVIORAL PROFILE governs WHAT the reply does (decide vs defer, probe vs accept, act vs acknowledge)
+- WRITING STYLE GUIDE governs HOW the reply is written (tone, vocabulary, sentence structure)
+- If the two conflict, the behavioral profile wins
+- If the behavioral profile says "no consistent pattern observed" for a dimension, fall back to neutral behavior for that dimension
 
 Output your <thinking> analysis first, then the reply body text (no JSON, no subject line, no headers).
 The reply text should be ready to paste into an email above the quoted original message.`;
@@ -229,6 +236,7 @@ export function buildUserPrompt(email, classification, contact, styleGuide, {
     conversationMessages = [],
     userAliases = [],
     threadStats = null,
+    behavioralProfile = null,
 } = {}) {
     const subject = email.subject || "(no subject)";
     const senderName = email.sender_name || "Unknown";
@@ -284,6 +292,12 @@ export function buildUserPrompt(email, classification, contact, styleGuide, {
         styleBlock = `\n\nWRITING STYLE GUIDE:\n${styleGuide}\n`;
     }
 
+    // Behavioral profile block
+    let behavioralBlock = "";
+    if (behavioralProfile) {
+        behavioralBlock = `\n\nBEHAVIORAL PROFILE:\n${behavioralProfile}\n`;
+    }
+
     // Thread context block (prior messages)
     const threadBlock = buildThreadBlock(conversationMessages, userAliases, email.received_time);
 
@@ -297,7 +311,7 @@ SUBJECT: ${subject}
 EMAIL BODY:
 ${body}
 
-${contextBlock}${toneBlock}${styleBlock}${threadBlock}
+${contextBlock}${toneBlock}${styleBlock}${behavioralBlock}${threadBlock}
 
 Generate the reply body text only (no subject, no headers).`;
 }

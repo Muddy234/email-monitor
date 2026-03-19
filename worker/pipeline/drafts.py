@@ -91,6 +91,11 @@ class DraftGenerator:
         if style_guide:
             style_block = f"\n\nWRITING STYLE GUIDE:\n{style_guide}\n"
 
+        behavioral_profile = action_context.get("behavioral_profile", "")
+        behavioral_block = ""
+        if behavioral_profile:
+            behavioral_block = f"\n\nBEHAVIORAL PROFILE:\n{behavioral_profile}\n"
+
         # Build thread context from enrichment messages or conversation_history
         thread_block = self._build_thread_block(action_context, email_data)
 
@@ -102,7 +107,7 @@ SUBJECT: {subject}
 EMAIL BODY:
 {body}
 
-{context_block}{tone_block}{style_block}{thread_block}
+{context_block}{tone_block}{style_block}{behavioral_block}{thread_block}
 
 Generate the reply body text only (no subject, no headers)."""
 

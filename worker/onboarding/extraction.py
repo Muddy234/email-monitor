@@ -13,7 +13,11 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from onboarding.collectors import clean_email_body
-from onboarding.prompts import HAIKU_EXTRACTION_PROMPT, HAIKU_STYLE_EXTRACTION_PROMPT
+from onboarding.prompts import (
+    HAIKU_EXTRACTION_PROMPT,
+    HAIKU_STYLE_EXTRACTION_PROMPT,
+    HAIKU_BEHAVIORAL_EXTRACTION_PROMPT,
+)
 from onboarding.retry import call_with_retry
 
 logger = logging.getLogger("worker.onboarding")
@@ -160,6 +164,97 @@ def extract_writing_styles(sent_emails):
     }
 
 
+BEHAVIORAL_BATCH_SIZE = 10
+BEHAVIORAL_MAX_SAMPLE = 80
+PARENT_TRUNCATION = 1500
+
+
+def extract_behavioral_features(sent_emails, response_events, received_emails,
+                                user_domain=None):
+    """Phase 4C-1b: Extract behavioral patterns from sent emails via Haiku.
+
+    Pairs sent emails with their parent inbound messages using response_events
+    linkage. Samples up to 80 emails stratified by contact_type.
+
+    Args:
+        sent_emails: List of sent email dicts.
+        response_events: List of response event dicts from Phase 2.
+        received_emails: List of received email dicts.
+        user_domain: User's email domain for contact_type heuristic.
+
+    Returns:
+        dict with 'behavioral_features' (list) and 'sample_count' (int),
+        or None if extraction fails.
+    """
+    # Build pairing map: sent_msg_id -> received email
+    received_by_id = {}
+    for email in received_emails:
+        eid = email.get("email_ref") or email.get("id")
+        if eid:
+            received_by_id[eid] = email
+
+    # Map sent emails to their parent inbound via response_events
+    # response_events link received -> sent via response_msg_id
+    sent_to_parent = {}
+    for event in response_events:
+        resp_id = event.get("response_msg_id")
+        recv_id = event.get("email_ref") or event.get("email_id")
+        if resp_id and recv_id and recv_id in received_by_id:
+            sent_to_parent[resp_id] = received_by_id[recv_id]
+
+    # Build sent email lookup by id
+    sent_by_id = {}
+    for email in sent_emails:
+        eid = email.get("email_ref") or email.get("id")
+        if eid:
+            sent_by_id[eid] = email
+
+    # Sample sent emails stratified by contact_type
+    sampled = _sample_behavioral_emails(
+        sent_emails, sent_to_parent, sent_by_id,
+        user_domain, max_count=BEHAVIORAL_MAX_SAMPLE,
+    )
+    logger.info(f"Sampled {len(sampled)} sent emails for behavioral extraction")
+
+    if not sampled:
+        return {"behavioral_features": [], "sample_count": 0}
+
+    # Format pairs into batches
+    batches = _prepare_behavioral_batches(
+        sampled, sent_to_parent, sent_by_id, user_domain,
+    )
+    all_features = []
+    failed_batches = 0
+
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = {
+            executor.submit(_run_behavioral_batch, batch, i): i
+            for i, batch in enumerate(batches)
+        }
+
+        for future in as_completed(futures):
+            try:
+                result = future.result()
+                if result:
+                    all_features.extend(result)
+                else:
+                    failed_batches += 1
+            except Exception:
+                logger.exception("Behavioral extraction batch failed")
+                failed_batches += 1
+
+    if not all_features:
+        logger.warning("No behavioral features extracted")
+        return None
+
+    logger.info(f"Extracted behavioral features from {len(all_features)} sent emails")
+
+    return {
+        "behavioral_features": all_features,
+        "sample_count": len(sampled),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -284,5 +379,148 @@ def _run_style_batch(batch_text, batch_idx):
     data = _parse_json_response(response)
     if data is None:
         logger.warning(f"Style batch {batch_idx}: invalid JSON — {response[:200]}")
+        return None
+    return data.get("extractions", [])
+
+
+# ---------------------------------------------------------------------------
+# Behavioral extraction helpers
+# ---------------------------------------------------------------------------
+
+def _infer_contact_type(email_addr, user_domain):
+    """Domain-based contact_type heuristic (approximate).
+
+    Same org domain = internal, different = external.
+    """
+    if not email_addr or not user_domain:
+        return "external"
+    try:
+        domain = email_addr.split("@")[1].lower()
+        return "internal" if domain == user_domain.lower() else "external"
+    except (IndexError, AttributeError):
+        return "external"
+
+
+def _sample_behavioral_emails(sent_emails, sent_to_parent, sent_by_id,
+                              user_domain, max_count=80):
+    """Stratified sample of sent emails by contact_type, then recency."""
+    if len(sent_emails) <= max_count:
+        return sent_emails
+
+    # Bucket by contact_type
+    buckets = {}
+    for email in sent_emails:
+        # Determine contact type from recipient
+        to_field = (email.get("to_field") or "").lower()
+        # Extract first recipient email
+        import re as _re
+        addrs = _re.findall(r"[\w.+-]+@[\w.-]+\.\w+", to_field)
+        first_addr = addrs[0] if addrs else ""
+        ctype = _infer_contact_type(first_addr, user_domain)
+        buckets.setdefault(ctype, []).append(email)
+
+    # Sort each bucket by recency (newest first)
+    for bucket in buckets.values():
+        bucket.sort(
+            key=lambda e: e.get("received_time") or "",
+            reverse=True,
+        )
+
+    # Allocate proportionally, minimum 3 per bucket
+    result = []
+    for ctype, emails in buckets.items():
+        share = max(3, int(max_count * len(emails) / len(sent_emails)))
+        result.extend(emails[:share])
+
+    # If under max, fill with remaining recent emails
+    if len(result) < max_count:
+        seen = {id(e) for e in result}
+        all_by_recency = sorted(
+            sent_emails,
+            key=lambda e: e.get("received_time") or "",
+            reverse=True,
+        )
+        for email in all_by_recency:
+            if id(email) not in seen:
+                result.append(email)
+                seen.add(id(email))
+                if len(result) >= max_count:
+                    break
+
+    return result[:max_count]
+
+
+def _prepare_behavioral_batches(sampled, sent_to_parent, sent_by_id,
+                                user_domain):
+    """Format sent+parent pairs into batches for Haiku."""
+    import re as _re
+    batches = []
+    batch_lines = []
+    count_in_batch = 0
+    pair_index = 1
+
+    for email in sampled:
+        eid = email.get("email_ref") or email.get("id")
+        parent = sent_to_parent.get(eid) if eid else None
+
+        # Determine contact_type
+        to_field = (email.get("to_field") or "").lower()
+        addrs = _re.findall(r"[\w.+-]+@[\w.-]+\.\w+", to_field)
+        first_addr = addrs[0] if addrs else ""
+        ctype = _infer_contact_type(first_addr, user_domain)
+
+        sent_body = clean_email_body(email.get("body") or "")
+
+        if parent:
+            parent_body = clean_email_body(parent.get("body") or "")
+            if len(parent_body) > PARENT_TRUNCATION:
+                parent_body = parent_body[:PARENT_TRUNCATION] + "\n[... truncated]"
+            sender_name = parent.get("sender_name") or parent.get("sender_email") or "Unknown"
+            text = (
+                f"--- PAIR {pair_index} ---\n"
+                f"INBOUND (from {sender_name}, contact_type: {ctype}):\n"
+                f"{parent_body}\n\n"
+                f"USER'S REPLY:\n"
+                f"{sent_body}\n"
+            )
+        else:
+            text = (
+                f"--- EMAIL {pair_index} ---\n"
+                f"SENT TO: contact_type: {ctype}\n"
+                f"{sent_body}\n"
+            )
+
+        batch_lines.append(text)
+        count_in_batch += 1
+        pair_index += 1
+
+        if count_in_batch >= BEHAVIORAL_BATCH_SIZE:
+            batches.append("\n".join(batch_lines))
+            batch_lines = []
+            count_in_batch = 0
+
+    if batch_lines:
+        batches.append("\n".join(batch_lines))
+
+    return batches
+
+
+def _run_behavioral_batch(batch_text, batch_idx):
+    """Run a single Haiku behavioral extraction batch."""
+    response, _usage = call_with_retry(
+        prompt=batch_text,
+        system_prompt=HAIKU_BEHAVIORAL_EXTRACTION_PROMPT,
+        model="haiku",
+        max_tokens=4096,
+        temperature=0,
+        cache_system_prompt=True,
+    )
+    if not response:
+        logger.warning(f"Behavioral batch {batch_idx}: no response")
+        return None
+
+    data = _parse_json_response(response)
+    if data is None:
+        logger.warning(f"Behavioral batch {batch_idx}: invalid JSON — {response[:200]}")
         return None
     return data.get("extractions", [])

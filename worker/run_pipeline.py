@@ -209,7 +209,7 @@ def filter_emails(db_client, emails, user_id, config):
 
 def process_classification_results(db_client, action_items, filtered_emails,
                                    user_id, config, draft_generator,
-                                   style_guide=""):
+                                   style_guide="", behavioral_profile=""):
     """Write classification results to DB and collect draft candidates.
 
     Returns:
@@ -277,6 +277,8 @@ def process_classification_results(db_client, action_items, filtered_emails,
 
             if style_guide:
                 action_context["style_guide"] = style_guide
+            if behavioral_profile:
+                action_context["behavioral_profile"] = behavioral_profile
 
             conv_id = email_data.get("conversation_id")
             if conv_id:
@@ -926,6 +928,10 @@ def process_user_batch_signals(db, user_id, profile, emails):
                     style_guide = profile.get("writing_style_guide") or ""
                     if style_guide:
                         action_context["style_guide"] = style_guide
+
+                    behavioral_profile = profile.get("behavioral_profile") or ""
+                    if behavioral_profile:
+                        action_context["behavioral_profile"] = behavioral_profile
 
                     draft_candidates.append({
                         "db_id": db_id,

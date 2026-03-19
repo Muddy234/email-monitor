@@ -13,6 +13,7 @@ from onboarding.prompts import (
     SONNET_CONTACT_PROFILE_PROMPT,
     SONNET_TOPIC_CLUSTERING_PROMPT,
     SONNET_STYLE_GUIDE_PROMPT,
+    SONNET_BEHAVIORAL_PROFILE_PROMPT,
 )
 from onboarding.retry import call_with_retry
 
@@ -157,6 +158,63 @@ def synthesize_style_guide(style_features, contact_profiles):
         return None
 
     logger.info(f"Generated style guide ({len(response)} chars)")
+    return response
+
+
+def synthesize_behavioral_profile(behavioral_features, contact_profiles):
+    """Phase 4C-3: Generate a behavioral profile via Sonnet.
+
+    Passes both extraction features (with approximate domain-based contact_types)
+    and authoritative contact profiles so Sonnet can reconcile.
+
+    Args:
+        behavioral_features: List of per-email behavioral dicts from Haiku.
+        contact_profiles: List of authoritative contact profile dicts from Phase 4A.
+
+    Returns:
+        str: Plain text behavioral profile, or None on failure.
+    """
+    if not behavioral_features:
+        logger.warning("No behavioral features to synthesize")
+        return None
+
+    # Format authoritative contact profiles for reconciliation
+    profile_lines = []
+    for cp in (contact_profiles or []):
+        email = cp.get("email", "")
+        ctype = cp.get("contact_type", "unknown")
+        org = cp.get("inferred_organization", "")
+        role = cp.get("inferred_role", "")
+        profile_lines.append(f"- {email}: {ctype} ({org}, {role})")
+
+    profiles_block = ""
+    if profile_lines:
+        profiles_block = (
+            "\n\nAUTHORITATIVE CONTACT PROFILES (use these to reconcile "
+            "approximate contact_types in the extraction data):\n"
+            + "\n".join(profile_lines)
+        )
+
+    prompt_text = (
+        f"Behavioral pattern analysis from {len(behavioral_features)} sent emails:\n\n"
+        + json.dumps(behavioral_features, indent=2)
+        + profiles_block
+    )
+
+    response, _usage = call_with_retry(
+        prompt=prompt_text,
+        system_prompt=SONNET_BEHAVIORAL_PROFILE_PROMPT,
+        model="sonnet",
+        max_tokens=4096,
+        temperature=0.3,
+        cache_system_prompt=True,
+    )
+
+    if not response:
+        logger.error("Behavioral profile synthesis: no response from Sonnet")
+        return None
+
+    logger.info(f"Generated behavioral profile ({len(response)} chars)")
     return response
 
 

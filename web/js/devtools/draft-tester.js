@@ -8,6 +8,7 @@ import { createEmailPicker } from "./email-picker.js";
 import { buildSystemPrompt, buildUserPrompt } from "./prompt-builder.js";
 
 let styleGuide = null;
+let behavioralProfile = null;
 let userName = "";
 let userTitle = "";
 let userAliases = [];
@@ -21,11 +22,12 @@ export async function initDraftTester() {
 
     const { data: profile } = await supabase
         .from("profiles")
-        .select("writing_style_guide, style_sample_count, display_name, user_email_aliases")
+        .select("writing_style_guide, style_sample_count, display_name, user_email_aliases, behavioral_profile")
         .eq("id", user.id)
         .single();
 
     styleGuide = profile?.writing_style_guide || null;
+    behavioralProfile = profile?.behavioral_profile || null;
     userName = profile?.display_name || user.user_metadata?.full_name || user.email?.split("@")[0] || "";
     userTitle = user.user_metadata?.title || "professional";
     userAliases = (profile?.user_email_aliases || []).map(a => a.toLowerCase());
@@ -42,6 +44,13 @@ export async function initDraftTester() {
                     ${styleGuide
                         ? `<div class="em-style-guide-text" style="max-height:260px">${escapeHtml(styleGuide)}</div>`
                         : `<div class="em-empty" style="padding:16px">No style guide available. Onboarding may not have completed.</div>`
+                    }
+                </div>
+                <h3 class="em-section-title" style="margin-top:16px">Behavioral Profile ${behavioralProfile ? `<span class="em-badge em-badge-green" style="font-size:10px">Loaded</span>` : `<span class="em-badge em-badge-amber" style="font-size:10px">Not Found</span>`}</h3>
+                <div class="em-card">
+                    ${behavioralProfile
+                        ? `<div class="em-style-guide-text" style="max-height:260px">${escapeHtml(behavioralProfile)}</div>`
+                        : `<div class="em-empty" style="padding:16px">No behavioral profile available. Re-run onboarding to generate.</div>`
                     }
                 </div>
             </div>
@@ -101,6 +110,7 @@ async function renderDraftDetail(email, userId) {
         conversationMessages,
         userAliases,
         threadStats,
+        behavioralProfile,
     });
 
     detail.innerHTML = `
