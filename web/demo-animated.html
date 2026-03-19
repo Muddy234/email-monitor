@@ -671,7 +671,7 @@ John Doe</div>
             </div>
             <div class="demo-label" data-label="4">
                 <div class="demo-label-step">Draft</div>
-                <div class="demo-label-text">Writes a reply in your voice, ready to review and send from Outlook</div>
+                <div class="demo-label-text">Learns your writing style and crafts replies that sound like you wrote them</div>
             </div>
         </div>
     </div>
@@ -679,15 +679,15 @@ John Doe</div>
     <script>
         /* ── Timing sequence ── */
         const SEQUENCE = [
-            { step: 0, ms: 1500 },   // all visible — initial view
-            { step: 1, ms: 2500 },   // header
-            { step: 2, ms: 2500 },   // summary
-            { step: 3, ms: 2500 },   // signals + context
-            { step: 4, ms: 3000 },   // outlook compose — the payoff
-            { step: 0, ms: 1500 },   // all visible — breathe, then loop
+            { step: 0, ms: 2500 },   // all visible — initial view
+            { step: 1, ms: 4000 },   // header
+            { step: 2, ms: 4000 },   // summary
+            { step: 3, ms: 4000 },   // signals
+            { step: 4, ms: 5000 },   // outlook compose — the payoff
+            { step: 0, ms: 2500 },   // all visible — breathe, then loop
         ];
 
-        const RESUME_DELAY = 8000; // auto-resume after 8s of inactivity
+        const RESUME_DELAY = 10000; // auto-resume after 10s of inactivity
 
         const sections    = document.querySelectorAll('.demo-section');
         const labels      = document.querySelectorAll('.demo-label');
