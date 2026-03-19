@@ -66,9 +66,16 @@ For each email, return:
     "uses_bullet_points": <boolean>,
     "tone": "<one of: formal, professional, casual, terse>",
     "recipient_email": "<email address of the primary recipient>",
+    "pleasantry_level": "<one of: none, minimal, standard, warm>",
     "notable_phrases": ["<any recurring phrases or verbal habits — e.g., \
 'Let me know if you have questions', 'Happy to discuss'>"]
 }
+
+Pleasantry level definitions:
+- "none": no greeting, no thank you, straight to content
+- "minimal": brief greeting or thanks ("Thanks," "Hi Michael,")
+- "standard": greeting + closing pleasantry
+- "warm": effusive thanks, personal remarks, extra warmth
 
 Output format:
 {"extractions": [<one object per email>]}
@@ -186,10 +193,14 @@ and which contact_types trigger it:
 short sentences"
    - e.g., "Formal mode (external_legal, external_lender): full sentences, \
 titles, no contractions"
-5. Common phrases and verbal habits
-6. How they handle requests (direct? delegating? collaborative?)
-7. Punctuation and formatting habits (bullets vs prose, exclamation marks, etc.)
-8. Any notable style markers that make their writing distinctive
+5. Pleasantry calibration — When does the user skip thank-yous and get \
+straight to business? When warm? Break down by contact_type if patterns differ. \
+   - e.g., "Minimal pleasantries with internal colleagues. Standard warmth \
+with external title/escrow contacts. Warm with long-standing external partners."
+6. Common phrases and verbal habits
+7. How they handle requests (direct? delegating? collaborative?)
+8. Punctuation and formatting habits (bullets vs prose, exclamation marks, etc.)
+9. Any notable style markers that make their writing distinctive
 
 IMPORTANT: If the user shows different styles for different audience types, \
 describe ALL modes with clear labels for when each applies. The draft \
@@ -213,14 +224,12 @@ For paired emails (sent + inbound parent), return:
 {
     "email_index": <integer matching the PAIR N or EMAIL N header>,
     "contact_type": "<the contact_type label provided in the header>",
-    "decision_type": "<one of: decides, defers, delegates, asks_for_info, n/a>",
-    "challenges_premise": <true if the user questions, pushes back on, or \
-flags an inconsistency in the sender's message — false otherwise>,
-    "asks_clarifying_questions": <true if the user asks a question to gather \
-more information — false otherwise>,
-    "pleasantry_level": "<one of: none, minimal, standard, warm>",
-    "takes_action_in_reply": <true if the user approves, rejects, instructs, \
-or commits to a next step — false if they only acknowledge>
+    "decision_type": "<one of: decides, proposes_solution, defers, delegates, \
+asks_for_info, diagnoses, n/a>",
+    "response_completeness": "<one of: addresses_all, key_point_only, partial>",
+    "commitment_pattern": "<one of: specific_next_step, vague_forward, \
+redirected_ask, none>",
+    "scope_behavior": "<one of: stays_narrow, adds_context, expands_scope>"
 }
 
 For unpaired emails (no inbound parent available), return:
@@ -228,27 +237,43 @@ For unpaired emails (no inbound parent available), return:
     "email_index": <integer>,
     "contact_type": "<the contact_type label provided>",
     "decision_type": null,
-    "challenges_premise": null,
-    "asks_clarifying_questions": <true/false — observable from sent email alone>,
-    "pleasantry_level": "<one of: none, minimal, standard, warm>",
-    "takes_action_in_reply": null
+    "response_completeness": null,
+    "commitment_pattern": "<observable from sent email alone>",
+    "scope_behavior": "<observable from sent email alone>"
 }
 
 Field definitions:
-- decision_type: How the user handles the situation.
+- decision_type: How the user handles the situation presented in the inbound.
   - "decides": user makes a clear decision or gives a definitive answer
+  - "proposes_solution": user identifies a problem and offers a specific fix \
+or approach (not just deciding yes/no, but constructing a path forward)
   - "defers": user explicitly postpones or says they'll handle it later
   - "delegates": user routes the task to someone else
   - "asks_for_info": user needs more information before acting
+  - "diagnoses": user asks targeted diagnostic questions to narrow down a \
+problem before committing to a course of action
   - "n/a": the inbound was not requesting a decision (pure FYI, etc.)
-- challenges_premise: Does the user question something the sender said or \
-flag something that seems off? Includes phrases like "that's odd," \
-"are you sure," "that doesn't match," pushing back on assumptions.
-- pleasantry_level:
-  - "none": no greeting, no thank you, straight to content
-  - "minimal": brief greeting or thanks ("Thanks," "Hi Michael,")
-  - "standard": greeting + closing pleasantry
-  - "warm": effusive thanks, personal remarks, extra warmth
+- response_completeness: How thoroughly the user addresses the inbound.
+  - "addresses_all": user responds to every question or point raised
+  - "key_point_only": user zeroes in on the single most important issue and \
+skips or defers the rest
+  - "partial": user addresses some points but ignores others without apparent \
+intent (incomplete rather than selective)
+- commitment_pattern: What forward-looking commitment the user makes.
+  - "specific_next_step": user commits to a concrete action with detail \
+(e.g., "I'll send the revised draw schedule by Thursday")
+  - "vague_forward": user references a future action without specifics \
+(e.g., "will follow up," "let me look into this")
+  - "redirected_ask": user turns the commitment back to the sender or a \
+third party (e.g., "can you send me the updated numbers?")
+  - "none": no forward commitment — purely reactive or acknowledgment
+- scope_behavior: Whether the user stays within the boundaries of the inbound \
+or expands the conversation.
+  - "stays_narrow": user responds only to what was asked, nothing more
+  - "adds_context": user provides relevant information the sender didn't ask \
+for but would find useful (e.g., flagging a related issue, adding a caveat)
+  - "expands_scope": user broadens the conversation to adjacent topics or \
+raises new issues beyond the original thread
 
 Additional context: Some emails include a [CONTEXT: ...] block with pre-computed \
 metadata about the interaction:
@@ -259,9 +284,10 @@ language (e.g., "please approve", "can you")
 - subject_type: "new", "reply", "forward", or "chain_forward"
 - thread_depth: total messages in the conversation thread
 
-Use these to inform your extraction — for example, a very fast response \
-with takes_action_in_reply=true suggests the user prioritizes that type of \
-request. Do NOT include these fields in your output; they are input-only context.
+Use these to inform your extraction — for example, a fast response with \
+decision_type="decides" and commitment_pattern="specific_next_step" suggests \
+the user prioritizes that type of request. Do NOT include these fields in \
+your output; they are input-only context.
 
 Output format:
 {"extractions": [<one object per email/pair>]}
@@ -277,7 +303,7 @@ SONNET_BEHAVIORAL_PROFILE_PROMPT = """\
 Based on the following behavioral pattern analysis from a user's sent emails \
 (paired with the inbound messages they were replying to), generate a behavioral \
 profile (300-500 words) that another AI can follow to replicate this user's \
-decision-making patterns when drafting email replies.
+content and decision-making patterns when drafting email replies.
 
 IMPORTANT: The contact_type labels in the extraction data are APPROXIMATE \
 (domain-based: same org = internal, different org = external). The authoritative \
@@ -288,28 +314,36 @@ different taxonomies.
 
 The profile MUST cover these 4 dimensions:
 
-1. Decision disposition — Does the user decide, defer, delegate, or gather info? \
-Describe EACH mode and the conditions that trigger it. Include whether the \
-user gives conditional directives ("if X, do Y") as a decision tactic. \
+1. Decision disposition — How the user handles decisions. Values include: \
+decides, proposes_solution, defers, delegates, asks_for_info, diagnoses. \
+Describe EACH mode observed and the conditions that trigger it. Note when the \
+user constructs a solution vs simply approving/rejecting, and when they run \
+diagnostics vs immediately requesting info. \
 e.g., "Decides immediately for operational requests from internal contacts. \
-Defers to partner (Luke) for financial/legal decisions. Uses conditional \
-instructions when the decision hinges on one unknown."
+Proposes solutions for construction issues rather than just approving vendor \
+suggestions. Defers to partner for financial/legal decisions. Diagnoses before \
+acting on anomalies — asks targeted questions to narrow down the issue."
 
-2. Information gap handling — When information is missing or something seems off, \
-does the user accept the premise, ask clarifying questions, or challenge it? \
-Include skepticism patterns — does the user flag inconsistencies directly? \
-e.g., "Probes before acting — asks 'who initiated this?' before approving. \
-Calls out oddities bluntly: 'That's odd.'"
+2. Response completeness — Does the user address every point raised, zero in on \
+the key issue, or respond partially? Describe the pattern and what triggers each \
+mode. \
+e.g., "Addresses all points for external legal/lender contacts. Key-point-only \
+for internal operational threads — picks the blocking issue and ignores the rest. \
+Partial responses are rare and usually indicate low-priority threads."
 
-3. Action orientation — Does the user take action in the reply (approve, reject, \
-instruct) or acknowledge and defer? Under what conditions? \
-e.g., "Takes action on operational items immediately. Acknowledges receipt \
-on legal/financial items but defers decision to partner."
+3. Commitment patterns — What forward-looking commitments does the user make? \
+Does the user commit to specific next steps, give vague forward references, or \
+redirect the ask back to the sender? Describe by situation type. \
+e.g., "Specific next steps for items in their direct control ('I'll send the \
+revised schedule by Thursday'). Redirected asks for items requiring others' input \
+('Can you send me the updated numbers?'). Vague forward references are rare — \
+the user almost always either commits specifically or redirects."
 
-4. Pleasantry calibration — When does the user skip thank-yous and get straight \
-to business? When warm? Break down by contact_type if patterns differ. \
-e.g., "Minimal pleasantries with internal colleagues. Standard warmth with \
-external title/escrow contacts."
+4. Scope behavior — Does the user stay narrow, add unrequested context, or expand \
+the conversation? Describe when each mode appears. \
+e.g., "Stays narrow on routine approvals. Adds context when they spot a related \
+risk the sender may not be aware of ('heads up — the Phase 2 permit is still \
+pending, which could affect this timeline'). Rarely expands scope outright."
 
 CRITICAL INSTRUCTIONS:
 - Do NOT produce a single flattened average. Behavior varies by context.
@@ -321,8 +355,8 @@ behavior for uncertain dimensions.
 - Use concrete examples from the data to anchor each pattern.
 - If a pattern only appears with certain contact_types, say so explicitly.
 - This profile will be injected alongside a separate WRITING STYLE GUIDE. This \
-profile governs WHAT the user does (decisions, actions, questions). The style \
-guide governs HOW they write (tone, vocabulary, structure). Do not repeat \
-style information here.
+profile governs WHAT the reply contains (decisions, commitments, scope). The \
+style guide governs HOW it is written (tone, vocabulary, pleasantries, structure). \
+Do not repeat style information here.
 
 Output as plain text, not JSON."""
