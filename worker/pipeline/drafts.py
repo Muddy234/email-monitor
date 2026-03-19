@@ -57,7 +57,9 @@ class DraftGenerator:
             if context_text:
                 context_lines.append(f"CONTEXT: {context_text}")
 
-        if archetype and archetype != "none":
+        # Include archetype only when no behavioral profile exists —
+        # the profile's decision disposition rules handle routing when present.
+        if archetype and archetype != "none" and not action_context.get("behavioral_profile"):
             context_lines.append(f"Expected response type: {archetype}")
 
         if enrichment:
@@ -107,9 +109,14 @@ SUBJECT: {subject}
 EMAIL BODY:
 {body}
 
-{context_block}{tone_block}{style_block}{behavioral_block}{thread_block}
+{context_block}{tone_block}{thread_block}{style_block}{behavioral_block}
 
 Generate the reply body text only (no subject, no headers)."""
+
+        logger.debug(f"Draft prompt assembled: {len(prompt)} chars "
+                     f"(body={len(body)}, style={len(style_guide)}, "
+                     f"behavioral={len(behavioral_profile)}, "
+                     f"thread={len(thread_block)})")
 
         return prompt
 

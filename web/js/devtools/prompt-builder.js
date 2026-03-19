@@ -18,12 +18,12 @@ Before writing your reply, reason through the situation inside <thinking> tags:
 4. What I don't know — Is the sender asking a question or requesting information that I cannot answer from the available context? Identify any gaps explicitly.
 5. Tone — What is the conversational register of this thread? Is it formal, casual, urgent? Match accordingly.
 6. Useful response — Given all of the above, what type of reply would be most helpful and move things forward?
-7. Behavioral alignment — If a BEHAVIORAL PROFILE is provided, review it now:
-   - Decision: Should I decide, propose a solution, defer, delegate, ask for info, or diagnose?
-   - Completeness: Should I address every point or zero in on the key issue?
-   - Commitment: Should I commit to a specific next step, give a vague forward reference, or redirect the ask?
-   - Scope: Should I stay narrow, add useful context the sender didn't ask for, or expand the conversation?
-   Match the mode that fits this situation and contact type. Adjust the reply plan accordingly.
+7. Behavioral alignment — If a BEHAVIORAL PROFILE is provided, apply it now. The profile contains IF-THEN rules. For each dimension, find the ONE rule that matches this situation and apply it:
+   - Decision disposition: Which rule matches? Lock in: decide, propose solution, defer, delegate, ask for info, or diagnose.
+   - Response completeness: Which rule matches? Lock in: address all points or key point only.
+   - Commitment pattern: Which rule matches? Lock in: specific next step, vague forward, or redirected ask.
+   - Scope: Which rule matches? Lock in: stay narrow, add context, or expand.
+   Do not blend or average across rules. Pick one per dimension and commit.
 
 Then generate an email reply that:
 - Sounds like the user wrote it personally — match their typical sentence length, vocabulary, and level of formality
@@ -262,7 +262,9 @@ export function buildUserPrompt(email, classification, contact, styleGuide, {
         if (cls.context) contextLines.push(`CONTEXT: ${cls.context}`);
     }
 
-    if (cls.archetype && cls.archetype !== "none") {
+    // Include archetype only when no behavioral profile exists —
+    // the profile's decision disposition rules handle routing when present.
+    if (cls.archetype && cls.archetype !== "none" && !behavioralProfile) {
         contextLines.push(`Expected response type: ${cls.archetype}`);
     }
 
@@ -316,7 +318,7 @@ SUBJECT: ${subject}
 EMAIL BODY:
 ${body}
 
-${contextBlock}${toneBlock}${styleBlock}${behavioralBlock}${threadBlock}
+${contextBlock}${toneBlock}${threadBlock}${styleBlock}${behavioralBlock}
 
 Generate the reply body text only (no subject, no headers).`;
 }
