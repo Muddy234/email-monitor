@@ -6,7 +6,7 @@ in batch via the Anthropic Message Batches API (50% cost discount).
 Adaptive window logic:
 - Starts at INITIAL_WINDOW (45 seconds).
 - If no emails arrive during a window, the next window doubles in length.
-- Caps at MAX_WINDOW (1 hour).
+- Caps at MAX_WINDOW (6 minutes).
 - Resets to INITIAL_WINDOW whenever emails are found.
 
 Within each window the worker polls Supabase every POLL_INTERVAL seconds,
@@ -50,7 +50,7 @@ logger = logging.getLogger("worker")
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL_SECONDS", "30"))
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", "10"))
 INITIAL_WINDOW = int(os.environ.get("INITIAL_WINDOW_SECONDS", "45"))  # 45s
-MAX_WINDOW = int(os.environ.get("MAX_WINDOW_SECONDS", "3600"))  # 1 hour
+MAX_WINDOW = int(os.environ.get("MAX_WINDOW_SECONDS", "360"))  # 6 minutes
 
 # ---------------------------------------------------------------------------
 # Graceful shutdown
