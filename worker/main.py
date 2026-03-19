@@ -40,6 +40,7 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
     stream=sys.stdout,
 )
+logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger("worker")
 
 # ---------------------------------------------------------------------------
