@@ -207,6 +207,9 @@ describe ALL modes with clear labels for when each applies. The draft \
 generator will select the appropriate mode based on the recipient's \
 contact_type.
 
+Do NOT invent a name, title, or heading for the guide. Do not reference the \
+user by name. Start directly with the style patterns.
+
 Output the guide as plain text, not JSON. It will be injected directly into a \
 draft generation prompt."""
 
@@ -358,5 +361,7 @@ behavior for uncertain dimensions.
 profile governs WHAT the reply contains (decisions, commitments, scope). The \
 style guide governs HOW it is written (tone, vocabulary, pleasantries, structure). \
 Do not repeat style information here.
+- Do NOT invent a name, title, or heading for the profile. Do not reference the \
+user by name. Start directly with the behavioral patterns.
 
 Output as plain text, not JSON."""
