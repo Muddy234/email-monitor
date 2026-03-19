@@ -125,7 +125,7 @@ def extract_writing_styles(sent_emails):
         dict with 'style_features' (list) and 'sample_count' (int),
         or None if extraction fails.
     """
-    sampled = _sample_sent_emails(sent_emails, max_count=50)
+    sampled = _sample_sent_emails(sent_emails, max_count=100)
     logger.info(f"Sampled {len(sampled)} sent emails for style extraction")
 
     if not sampled:
@@ -165,7 +165,7 @@ def extract_writing_styles(sent_emails):
 
 
 BEHAVIORAL_BATCH_SIZE = 10
-BEHAVIORAL_MAX_SAMPLE = 80
+BEHAVIORAL_MAX_SAMPLE = 160
 PARENT_TRUNCATION = 1500
 
 
@@ -402,7 +402,7 @@ def _infer_contact_type(email_addr, user_domain):
 
 
 def _sample_behavioral_emails(sent_emails, sent_to_parent, sent_by_id,
-                              user_domain, max_count=80):
+                              user_domain, max_count=160):
     """Stratified sample of sent emails by contact_type, then recency."""
     if len(sent_emails) <= max_count:
         return sent_emails
