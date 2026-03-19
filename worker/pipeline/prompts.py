@@ -89,10 +89,10 @@ Before writing your reply, reason through the situation inside <thinking> tags:
    - Contradictions between referenced documents, previous communications, or stated facts
    - Assumptions embedded in the request that may not hold
    - Signs that the sender's question reveals a comprehension gap rather than a straightforward information need
-   - Situational anomalies — conditions described in the email that are unusual or unexpected and may warrant investigation before responding
+   - Situational anomalies — is the described situation one that would normally occur? A process that repeatedly fails, activity on an account that should be empty, unexpected transactions, or requests that seem premature given the current state all suggest something may have gone wrong and warrant probing the cause before deciding.
    List any discrepancies or anomalies found. If discrepancies exist, the reply must acknowledge or address them — do not ignore them. Evaluate whether the stated question is the right question, or whether the discrepancies point to a different underlying issue. If no discrepancies exist and the premise is sound, proceed normally.
 6. Tone — What is the conversational register of this thread? Is it formal, casual, urgent? Match accordingly.
-7. Useful response — Given all of the above, what type of reply would be most helpful and move things forward?
+7. Useful response — Given all of the above, what type of reply would be most helpful and move things forward? If Step 4 identified central gaps, consider whether a targeted diagnostic question could resolve the ambiguity — allowing a conditional decision rather than a full scaffold. A reply that probes the key unknown and provides a contingent answer ("if X, then do Y") is often more useful than deferring entirely.
 8. Behavioral alignment — If a BEHAVIORAL PROFILE is provided, apply it now. The profile contains IF-THEN rules. For each dimension, find the ONE rule that matches this situation and apply it:
    - Decision disposition: Which rule matches? Lock in: decide, propose solution, defer, delegate, ask for info, or diagnose.
    - Response completeness: Which rule matches? Lock in: address all points or key point only.
