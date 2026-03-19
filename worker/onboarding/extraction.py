@@ -112,20 +112,57 @@ def extract_email_features(received, contact_freq):
     }
 
 
-def extract_writing_styles(sent_emails):
-    """Phase 4C-1: Extract writing style patterns from sent emails via Haiku.
+def sample_unified_sent_emails(sent_emails, user_domain, max_count=120):
+    """Stratified sample by body_length x contact_type (3x2 grid).
 
-    Samples up to 50 sent emails (stratified by length), extracts
-    greeting, signoff, tone, phrases.
+    Both style and behavioral extraction use this same sample to ensure
+    profile agreement.
+    """
+    if len(sent_emails) <= max_count:
+        return list(sent_emails)
+
+    import re as _re
+
+    buckets = {}  # (length_tier, contact_type) -> [emails]
+    for email in sent_emails:
+        body_len = len(email.get("body") or "")
+        if body_len < 100:
+            length_tier = "short"
+        elif body_len < 500:
+            length_tier = "medium"
+        else:
+            length_tier = "long"
+
+        to_field = (email.get("to_field") or "").lower()
+        addrs = _re.findall(r"[\w.+-]+@[\w.-]+\.\w+", to_field)
+        first_addr = addrs[0] if addrs else ""
+        ctype = _infer_contact_type(first_addr, user_domain)
+
+        buckets.setdefault((length_tier, ctype), []).append(email)
+
+    total = len(sent_emails)
+    result = []
+    for key, bucket in buckets.items():
+        random.shuffle(bucket)
+        share = max(3, int(max_count * len(bucket) / total))
+        result.extend(bucket[:share])
+
+    random.shuffle(result)
+    return result[:max_count]
+
+
+def extract_writing_styles(sent_emails, pre_sampled=None):
+    """Phase 4C-1: Extract writing style patterns from sent emails via Haiku.
 
     Args:
         sent_emails: List of sent email dicts.
+        pre_sampled: Optional pre-sampled list (skips internal sampling).
 
     Returns:
         dict with 'style_features' (list) and 'sample_count' (int),
         or None if extraction fails.
     """
-    sampled = _sample_sent_emails(sent_emails, max_count=100)
+    sampled = pre_sampled if pre_sampled is not None else _sample_sent_emails(sent_emails, max_count=100)
     logger.info(f"Sampled {len(sampled)} sent emails for style extraction")
 
     if not sampled:
@@ -170,17 +207,18 @@ PARENT_TRUNCATION = 1500
 
 
 def extract_behavioral_features(sent_emails, response_events, received_emails,
-                                user_domain=None):
+                                user_domain=None, pre_sampled=None):
     """Phase 4C-1b: Extract behavioral patterns from sent emails via Haiku.
 
     Pairs sent emails with their parent inbound messages using response_events
-    linkage. Samples up to 80 emails stratified by contact_type.
+    linkage.
 
     Args:
         sent_emails: List of sent email dicts.
         response_events: List of response event dicts from Phase 2.
         received_emails: List of received email dicts.
         user_domain: User's email domain for contact_type heuristic.
+        pre_sampled: Optional pre-sampled list (skips internal sampling).
 
     Returns:
         dict with 'behavioral_features' (list) and 'sample_count' (int),
@@ -209,8 +247,8 @@ def extract_behavioral_features(sent_emails, response_events, received_emails,
         if eid:
             sent_by_id[eid] = email
 
-    # Sample sent emails stratified by contact_type
-    sampled = _sample_behavioral_emails(
+    # Sample sent emails (use pre-sampled if provided by unified sampler)
+    sampled = pre_sampled if pre_sampled is not None else _sample_behavioral_emails(
         sent_emails, sent_to_parent, sent_by_id,
         user_domain, max_count=BEHAVIORAL_MAX_SAMPLE,
     )
@@ -219,9 +257,10 @@ def extract_behavioral_features(sent_emails, response_events, received_emails,
     if not sampled:
         return {"behavioral_features": [], "sample_count": 0}
 
-    # Format pairs into batches
+    # Format pairs into batches (with response event metadata)
     batches = _prepare_behavioral_batches(
         sampled, sent_to_parent, sent_by_id, user_domain,
+        response_events=response_events,
     )
     all_features = []
     failed_batches = 0
@@ -451,9 +490,18 @@ def _sample_behavioral_emails(sent_emails, sent_to_parent, sent_by_id,
 
 
 def _prepare_behavioral_batches(sampled, sent_to_parent, sent_by_id,
-                                user_domain):
+                                user_domain, response_events=None):
     """Format sent+parent pairs into batches for Haiku."""
     import re as _re
+
+    # Build sent_id -> response_event for metadata injection
+    sent_id_to_event = {}
+    if response_events:
+        for event in response_events:
+            resp_id = event.get("response_msg_id")
+            if resp_id:
+                sent_id_to_event[resp_id] = event
+
     batches = []
     batch_lines = []
     count_in_batch = 0
@@ -469,6 +517,22 @@ def _prepare_behavioral_batches(sampled, sent_to_parent, sent_by_id,
         first_addr = addrs[0] if addrs else ""
         ctype = _infer_contact_type(first_addr, user_domain)
 
+        # Build metadata context from response event
+        re_meta = sent_id_to_event.get(eid, {})
+        meta_parts = []
+        latency = re_meta.get("response_latency_hours")
+        if latency is not None:
+            meta_parts.append(f"response_latency_hours: {latency:.1f}")
+        if re_meta.get("has_question") is not None:
+            meta_parts.append(f"inbound_has_question: {re_meta['has_question']}")
+        if re_meta.get("has_action_language") is not None:
+            meta_parts.append(f"inbound_has_action_language: {re_meta['has_action_language']}")
+        if re_meta.get("subject_type"):
+            meta_parts.append(f"subject_type: {re_meta['subject_type']}")
+        if re_meta.get("thread_depth") is not None:
+            meta_parts.append(f"thread_depth: {re_meta['thread_depth']}")
+        meta_block = f"[CONTEXT: {', '.join(meta_parts)}]\n" if meta_parts else ""
+
         sent_body = clean_email_body(email.get("body") or "")
 
         if parent:
@@ -479,6 +543,7 @@ def _prepare_behavioral_batches(sampled, sent_to_parent, sent_by_id,
             text = (
                 f"--- PAIR {pair_index} ---\n"
                 f"INBOUND (from {sender_name}, contact_type: {ctype}):\n"
+                f"{meta_block}"
                 f"{parent_body}\n\n"
                 f"USER'S REPLY:\n"
                 f"{sent_body}\n"
@@ -487,6 +552,7 @@ def _prepare_behavioral_batches(sampled, sent_to_parent, sent_by_id,
             text = (
                 f"--- EMAIL {pair_index} ---\n"
                 f"SENT TO: contact_type: {ctype}\n"
+                f"{meta_block}"
                 f"{sent_body}\n"
             )
 

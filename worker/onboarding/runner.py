@@ -33,6 +33,7 @@ from onboarding.extraction import (
     extract_email_features,
     extract_writing_styles,
     extract_behavioral_features,
+    sample_unified_sent_emails,
 )
 from onboarding.stats_extraction import extract_all
 from onboarding.model_trainer import train_user_model
@@ -172,6 +173,10 @@ def run_onboarding(db, user_id, profile):
         user_email = profile.get("email") or (aliases[0] if aliases else "")
         user_domain = user_email.split("@")[1] if "@" in user_email else None
 
+        # Unified sample for style + behavioral extraction
+        unified_sample = sample_unified_sent_emails(sent, user_domain, max_count=120)
+        logger.info(f"Unified sample: {len(unified_sample)} sent emails for style + behavioral")
+
         with ThreadPoolExecutor(max_workers=3) as executor:
             f_extract = executor.submit(
                 extract_email_features,
@@ -181,6 +186,7 @@ def run_onboarding(db, user_id, profile):
             f_style = executor.submit(
                 extract_writing_styles,
                 sent,
+                pre_sampled=unified_sample,
             )
             f_behavioral = executor.submit(
                 extract_behavioral_features,
@@ -188,6 +194,7 @@ def run_onboarding(db, user_id, profile):
                 extraction["response_events"],
                 received,
                 user_domain,
+                pre_sampled=unified_sample,
             )
 
             try:

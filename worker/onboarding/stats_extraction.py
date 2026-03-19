@@ -219,7 +219,7 @@ def _build_response_events(received, sent, user_aliases):
             "is_recurring": False,  # Set in _detect_recurring below
             "mentions_user_name": mentions_user_name,
             "sender_is_internal": sender_is_internal,
-            "_response_msg_id": response_msg_id,
+            "response_msg_id": response_msg_id,
         }
         events.append(event)
 
@@ -228,10 +228,6 @@ def _build_response_events(received, sent, user_aliases):
 
     # Detect recurring patterns and mark events
     _detect_recurring(events)
-
-    # Clean internal keys
-    for ev in events:
-        ev.pop("_response_msg_id", None)
 
     return events
 
@@ -294,7 +290,7 @@ def _fix_fanout(events):
     """Fix fan-out: only the most recent inbound before each reply keeps responded=true."""
     by_response = defaultdict(list)
     for ev in events:
-        resp_id = ev.get("_response_msg_id")
+        resp_id = ev.get("response_msg_id")
         if ev.get("responded") and resp_id:
             by_response[resp_id].append(ev)
 

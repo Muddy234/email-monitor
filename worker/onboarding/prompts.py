@@ -250,6 +250,19 @@ flag something that seems off? Includes phrases like "that's odd," \
   - "standard": greeting + closing pleasantry
   - "warm": effusive thanks, personal remarks, extra warmth
 
+Additional context: Some emails include a [CONTEXT: ...] block with pre-computed \
+metadata about the interaction:
+- response_latency_hours: how quickly the user replied (in hours)
+- inbound_has_question: whether the inbound contained a question mark
+- inbound_has_action_language: whether the inbound contained action-oriented \
+language (e.g., "please approve", "can you")
+- subject_type: "new", "reply", "forward", or "chain_forward"
+- thread_depth: total messages in the conversation thread
+
+Use these to inform your extraction — for example, a very fast response \
+with takes_action_in_reply=true suggests the user prioritizes that type of \
+request. Do NOT include these fields in your output; they are input-only context.
+
 Output format:
 {"extractions": [<one object per email/pair>]}
 
