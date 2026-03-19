@@ -265,6 +265,9 @@ intent (incomplete rather than selective)
 - commitment_pattern: What forward-looking commitment the user makes.
   - "specific_next_step": user commits to a concrete action with detail \
 (e.g., "I'll send the revised draw schedule by Thursday")
+  - "conditional_decision": user defines a decision boundary and delegates \
+execution based on a stated condition (e.g., "If it was initiated by us, \
+go ahead and delete it")
   - "vague_forward": user references a future action without specifics \
 (e.g., "will follow up," "let me look into this")
   - "redirected_ask": user turns the commitment back to the sender or a \
@@ -338,15 +341,20 @@ addresses_all. IF internal + single operational issue → key_point_only \
 (picks the blocking issue, skips the rest). partial is rare and indicates \
 a low-priority thread the user is monitoring but not driving."
 
-3. Commitment patterns — Values: specific_next_step, vague_forward, \
-redirected_ask, none. State the decision boundary between specific_next_step \
-and redirected_ask — what determines which one the user picks? Exclude \
-trivially obvious patterns (e.g., no commitments on pure FYI emails). \
+3. Commitment patterns — Values: specific_next_step, conditional_decision, \
+vague_forward, redirected_ask, none. State what determines which mode the \
+user picks. Pay special attention to the boundary between specific_next_step \
+(unconditional commitment), conditional_decision (commits contingent on a \
+stated condition), and redirected_ask (seeks information before acting). \
+Exclude trivially obvious patterns (e.g., no commitments on pure FYI emails). \
 e.g., "IF user owns the workstream and action is within their authority → \
 specific_next_step with concrete detail ('I'll send the revised schedule by \
-Thursday'). IF action requires input from others → redirected_ask ('Can you \
-send me the updated numbers?'). vague_forward is rare — user almost always \
-either commits specifically or redirects."
+Thursday'). IF user has enough information to define the decision boundary \
+but not enough to commit unconditionally → conditional_decision ('If it was \
+initiated by us, go ahead and delete it'). IF action requires input from \
+others → redirected_ask ('Can you send me the updated numbers?'). \
+vague_forward is rare — user almost always either commits specifically or \
+redirects."
 
 4. Scope behavior — Values: stays_narrow, adds_context, expands_scope. \
 When the user adds unrequested context, describe WHAT KIND of context triggers \
