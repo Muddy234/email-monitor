@@ -11,7 +11,7 @@ import time
 
 import anthropic
 
-logger = logging.getLogger("clarion")
+logger = logging.getLogger("worker")
 
 # Short names used in config → full Anthropic model identifiers.
 MODEL_MAP = {

@@ -314,53 +314,6 @@ async function handleGetEmails(params) {
   };
 }
 
-// --- GetItem (get_item) ----------------------------------------------------
-
-async function handleGetItem(params) {
-  const messageId = params.message_id;
-  const changeKey = params.change_key || undefined;
-
-  const properties = [
-    { __type: "PropertyUri:#Exchange", FieldURI: "Subject" },
-    { __type: "PropertyUri:#Exchange", FieldURI: "Body" },
-    { __type: "PropertyUri:#Exchange", FieldURI: "From" },
-    { __type: "PropertyUri:#Exchange", FieldURI: "ToRecipients" },
-    { __type: "PropertyUri:#Exchange", FieldURI: "CcRecipients" },
-    { __type: "PropertyUri:#Exchange", FieldURI: "DateTimeReceived" },
-    { __type: "PropertyUri:#Exchange", FieldURI: "Importance" },
-    { __type: "PropertyUri:#Exchange", FieldURI: "HasAttachments" },
-    { __type: "PropertyUri:#Exchange", FieldURI: "Attachments" },
-    { __type: "PropertyUri:#Exchange", FieldURI: "Flag" },
-    { __type: "PropertyUri:#Exchange", FieldURI: "ConversationId" },
-    { __type: "PropertyUri:#Exchange", FieldURI: "ConversationTopic" },
-  ];
-
-  const itemId = { __type: "ItemId:#Exchange", Id: messageId };
-  if (changeKey) itemId.ChangeKey = changeKey;
-
-  const body = {
-    __type: "GetItemRequest:#Exchange",
-    ItemShape: {
-      __type: "ItemResponseShape:#Exchange",
-      BaseShape: "IdOnly",
-      AdditionalProperties: properties,
-      BodyType: "Text",
-    },
-    ItemIds: [itemId],
-  };
-
-  const data = await owaFetch("GetItem", body);
-  const ri = data.Body?.ResponseMessages?.Items?.[0];
-  if (!ri || ri.ResponseCode !== "NoError") {
-    throw new Error(`GetItem failed: ${ri?.ResponseCode || data.Body?.ErrorCode || "unknown"}`);
-  }
-
-  const msg = ri.Items?.[0];
-  if (!msg) throw new Error("GetItem returned no items");
-
-  return parseGetItemMessage(msg);
-}
-
 // --- GetItem batch — fetch multiple emails in one request -------------------
 
 const GETITEM_BATCH_SIZE = 50; // OWA handles up to ~50-100 items per request

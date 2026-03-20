@@ -6,7 +6,7 @@ import re
 from .analyzer import _strip_quoted_content
 from .prompts import DEFAULT_DRAFT_PROMPT_TEMPLATE
 
-logger = logging.getLogger("clarion")
+logger = logging.getLogger("worker")
 
 
 class DraftGenerator:

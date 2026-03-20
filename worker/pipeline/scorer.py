@@ -13,30 +13,13 @@ Functions:
 """
 
 import logging
-import re
+
+from onboarding.stats_extraction import _normalize_subject
 
 logger = logging.getLogger("worker.scorer")
 
-# Subject normalization regex (mirrored from prediction_model.py)
-_STRIP_PATTERNS = re.compile(
-    r'\b(?:\d{1,2}[/\-]\d{1,2}[/\-]?\d{0,4}|'
-    r'(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d+'
-    r'|\d{4}|#\d+|v\d+)\b',
-    re.IGNORECASE,
-)
-
 # Scoring constants
 COMBINED_PENALTY_FLOOR = 0.30
-
-
-def _normalize_subject(subject):
-    """Normalize subject for recurring pattern matching."""
-    if not subject:
-        return ""
-    s = re.sub(r'^(?:re|fw|fwd)\s*:\s*', '', subject, flags=re.IGNORECASE).strip()
-    s = _STRIP_PATTERNS.sub('', s).strip()
-    s = re.sub(r'\s+', ' ', s).lower()
-    return s
 
 
 class UserScoringArtifacts:

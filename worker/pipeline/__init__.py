@@ -1,4 +1,3 @@
-"""Pipeline engine — filter, analyze, draft generation."""
+"""Pipeline engine — filter, signal extraction, draft generation."""
 from .filter import EmailFilter
-from .analyzer import ClaudeAnalyzer
 from .drafts import DraftGenerator

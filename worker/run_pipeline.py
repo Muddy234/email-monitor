@@ -1,9 +1,9 @@
 """Pipeline orchestration for the Railway worker.
 
-Ports the core logic from pipeline/runner.py, adapted for Supabase I/O:
-- Reads email data from Supabase rows (not from a provider).
-- Writes results to Supabase tables (not to Outlook via provider).
-- Reuses existing EmailFilter, ClaudeAnalyzer, DraftGenerator classes.
+Ports the core logic for Supabase I/O:
+- Reads email data from Supabase rows.
+- Writes results to Supabase tables.
+- Uses EmailFilter, signal_extractor, and DraftGenerator.
 """
 
 import logging
@@ -12,7 +12,6 @@ import re
 from datetime import datetime, timezone, timedelta
 
 from pipeline.filter import EmailFilter
-from pipeline.analyzer import ClaudeAnalyzer
 from pipeline.drafts import DraftGenerator
 from pipeline.prompts import (
     get_draft_prompt_template, build_notable_summary_prompt,
@@ -27,36 +26,10 @@ from pipeline.pre_process import (
 
 logger = logging.getLogger("worker")
 
-# Per-user artifact cache: user_id → (artifacts, loaded_at)
-_user_artifacts_cache = {}
-_ARTIFACTS_CACHE_TTL = 300  # 5 min
-
-
-def _get_user_artifacts(db, user_id):
-    """Load per-user scoring artifacts from DB with 5-min cache."""
-    import time
-    now = time.time()
-
-    cached = _user_artifacts_cache.get(user_id)
-    if cached and (now - cached[1]) < _ARTIFACTS_CACHE_TTL:
-        return cached[0]
-
-    params = db.fetch_scoring_parameters(user_id)
-    if params:
-        artifacts = UserScoringArtifacts(params)
-    else:
-        # Fall back to defaults for users without trained model
-        from onboarding.model_trainer import DEFAULT_PARAMETERS
-        artifacts = UserScoringArtifacts(DEFAULT_PARAMETERS)
-        logger.info(f"  User {user_id[:8]}...: using default scoring parameters")
-
-    _user_artifacts_cache[user_id] = (artifacts, now)
-    return artifacts
-
 
 def build_config_from_profile(profile):
     """Convert a Supabase profiles row into the config dict that
-    EmailFilter, ClaudeAnalyzer, and DraftGenerator expect.
+    EmailFilter and DraftGenerator expect.
 
     The existing pipeline classes read config keys like
     'filter_blacklist_senders', etc.
@@ -462,7 +435,7 @@ def supabase_row_to_email_data(row):
         row: dict from Supabase emails table.
 
     Returns:
-        dict: email_data compatible with EmailFilter, ClaudeAnalyzer, etc.
+        dict: email_data compatible with EmailFilter, signal_extractor, etc.
     """
     return {
         "subject": row.get("subject", ""),

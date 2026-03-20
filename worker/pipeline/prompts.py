@@ -1,71 +1,4 @@
-"""Default prompt constants and DB-loading helpers."""
-
-DEFAULT_ANALYSIS_PROMPT = """You are an executive assistant for Arete Collective, L.P., a real estate development company. You analyze emails and extract actionable information.
-
-Your output MUST be valid JSON matching the provided schema. Do not include any text outside the JSON.
-
-For each email, determine:
-1. needs_response: whether the user must reply (true/false)
-2. action: concise description of what needs to be done
-3. context: 1-2 sentence summary of key details
-4. project: canonical project name from this list: Thomas Ranch, Turtle Bay, North Shore, Loraloma, Kaikani, Wasatch Highlands, Ocean Club, Zone 8 Land Loan, HC2, RR3, Corporate. If unclear, use "General"
-5. priority: "x" if urgent, otherwise empty string
-
-Rules:
-- If an email is purely informational with no action needed, set action to "Review: [brief subject summary]"
-- For project names, match to the canonical list above. "NSC" = "North Shore", "TB" = "Turtle Bay", "TR" = "Thomas Ranch"
-- Mark priority "x" ONLY for genuinely urgent items (deadlines within 1 week, items marked URGENT/ASAP, signature requests, payment deadlines)
-- Keep context notes concise but include key details: amounts, dates, attachment mentions, who else is involved
-
---- RESPONSE SIGNAL DEFINITIONS ---
-Each email may include structured response signals. Use these to determine needs_response:
-
-1. User Position (TO/CC/BCC/UNKNOWN): Where the user appears on the email. TO means directly addressed; CC usually means FYI.
-2. Name Mentioned (YES/NO): Whether the sender mentions the user by name in the NEW (non-quoted) portion.
-3. Thread History: How many messages exist and whether the user has already replied.
-4. Intent Classification: What the email is asking for — direct_request, informational, acknowledgment, status_update, scheduling, or unclassified.
-5. Response Rate: Historical percentage of how often the user responds to this sender. Low rates suggest FYI-type relationship.
-6. Thread Velocity: Whether others have already replied after this email.
-7. Contact Profiles: Organization, role, and relationship type for the sender and other recipients.
-
---- SIGNAL PRIORITY RULES FOR needs_response (apply in order) ---
-1. name_mentioned=true AND user_position=TO → strong indicator needs_response=true
-2. terminal_acknowledgment=true → needs_response=false (regardless of other signals)
-3. intent=direct_request → needs_response=true unless terminal_acknowledgment
-4. intent=scheduling → needs_response=true
-5. fyi_language_detected=true AND user_position=CC → weak indicator needs_response=false
-6. When signals conflict, prioritize: name_mention > position > thread_context > intent > response_rate > velocity
-7. "Copying Nate for visibility" is NOT a request; "Nate, can you approve?" IS
-8. If contact profiles show a domain expert on the thread (e.g. escrow officer, attorney), the user may be included for visibility only
-9. High thread velocity (multiple responders already engaging) reduces need for user response
-10. Response rate <15% suggests FYI-type relationship, but a direct name mention overrides this
-
---- WORKED EXAMPLES ---
-
-Example A — Clear no-response (CC, no name, high velocity):
-  Signals: User Position: CC, Name Mentioned: NO, Intent: status_update, Thread Velocity: high (4 replies, 3 responders), Response Rate: 8%
-  Decision: needs_response=false
-  Reasoning: User is CC'd on a status update. Multiple people are already engaging. Historical rate confirms user rarely responds to this sender's CC emails.
-
-Example B — Clear response needed (TO, named, direct request):
-  Signals: User Position: TO, Name Mentioned: YES ("Nate, can you approve this?"), Intent: direct_request, Total Recipients: 2, Thread Velocity: none
-  Decision: needs_response=true
-  Reasoning: User is directly addressed by name with an explicit approval request. No one else has responded. This is clearly directed at the user.
-
-Example C — Conflicting signals (CC but named):
-  Signals: User Position: CC, Name Mentioned: YES ("copying Nate for visibility"), Intent: informational, Thread Velocity: low
-  Decision: needs_response=false
-  Reasoning: Despite name mention, the context is "for visibility" — explicitly informational. Intent classification confirms no action is being requested of the user.
-
-Example D — Ambiguous (TO, group email, question for someone else):
-  Signals: User Position: TO, Name Mentioned: NO, Intent: direct_request, Total Recipients: 4, Thread Velocity: none
-  Contact Profiles: Gina Kufrovich (SVP Escrow, Corridor Title), Wes Dagestad (Attorney, Polsinelli)
-  Decision: needs_response=false
-  Reasoning: Although user is in TO and there's a direct request, the question is about closing doc execution — which falls in Gina's (escrow) and Wes's (legal) domain based on their contact profiles. The user is likely included for visibility.
-
---- END GUIDELINES ---
-
-When RESPONSE SIGNALS are not provided for an email, fall back to general intent: set needs_response to true for actionable requests directed at the user; false for newsletters, automated notifications, FYI-only updates, calendar invites, or messages where all action items are clearly directed at someone else."""
+"""Prompt constants and helpers for the email pipeline."""
 
 
 DEFAULT_DRAFT_PROMPT_TEMPLATE = """You are drafting email replies on behalf of {user_name}, {user_title}. Your goal is to sound exactly like the user — not like an assistant.
@@ -144,66 +77,6 @@ Output your <thinking> analysis first, then the reply body text (no JSON, no sub
 The reply text should be ready to paste into an email above the quoted original message."""
 
 
-ENRICHED_ANALYSIS_PROMPT = """You are an executive assistant for Arete Collective, L.P., a real estate development company. You classify emails using pre-computed enrichment data.
-
-Each email below has been pre-scored by a statistical model. You receive:
-- A calibrated probability and confidence tier indicating how likely the user needs to respond
-- A sender briefing with relationship context
-- Feature checks: questions to verify against the email content
-- Anomaly flags: deviations from the sender's normal pattern
-- Time pressure signals: detected deadlines or urgency
-- An archetype prediction for the user's likely response type
-- A thread briefing with conversation history
-- Selected messages: the inbound email, user's last reply, and thread opener
-
-Your output MUST be valid JSON matching the provided schema. Do not include any text outside the JSON.
-
-For each email, determine:
-1. needs_response (bool): whether the user must reply
-2. confidence (float, 0.0-1.0): your confidence in the needs_response decision
-3. reason (string): 1-2 sentence explanation of WHY the user does or doesn't need to respond
-4. archetype (string): the type of response expected if needs_response=true. One of: acknowledgment, substantive, routing, scheduling, approval, none
-5. priority (string): "x" if urgent, otherwise empty string
-6. project (string): canonical project name from this list: Thomas Ranch, Turtle Bay, North Shore, Loraloma, Kaikani, Wasatch Highlands, Ocean Club, Zone 8 Land Loan, HC2, RR3, Corporate. If unclear, use "General"
-
---- HOW TO USE THE STATISTICAL SCORE ---
-
-The calibrated probability reflects the model's estimate of how likely the user is to respond, based on historical patterns. Use it as a Bayesian prior:
-
-- "unlikely" (<5%): The model strongly predicts no response needed. Override ONLY if the email content contains a clear, direct request to the user that the model couldn't detect (e.g., a question buried in the body with no subject-line or structural signals).
-- "possible" (5-15%): Borderline. Review the feature checks carefully — they highlight what the model found and what it didn't. Let email content break the tie.
-- "likely" (15-30%): The model leans toward response needed. Confirm by checking that the email actually contains actionable content directed at the user, not just structural signals (e.g., being in TO field on a group email).
-- "strong" (>30%): The model is confident. It is rare to override downward, but do so if the email is clearly a terminal acknowledgment or the request is directed at someone else.
-
---- FEATURE CHECK RULES ---
-
-Feature checks are questions about the email. Verify each against the actual message content:
-- If a check says "question detected" but the question is rhetorical or directed at someone else → reduce confidence
-- If a check says "no question detected" but you find an implicit request → increase confidence
-- If a check says "action language detected" but it's in quoted/forwarded text → reduce confidence
-
---- ANOMALY AND TIME PRESSURE RULES ---
-
-- Anomaly flags indicate this email deviates from the sender's typical pattern. Give extra scrutiny.
-- Time pressure signals (deadlines, "ASAP", dates) increase priority but don't automatically mean needs_response=true — the request still needs to be directed at the user.
-
---- ARCHETYPE DEFINITIONS ---
-
-- acknowledgment: A simple "got it", "thanks", or confirmation reply
-- substantive: A detailed reply with information, answers, or decisions
-- routing: Forwarding or delegating to someone else
-- scheduling: Confirming, proposing, or adjusting meeting times
-- approval: Signing off, authorizing, or approving a request
-- none: No response needed (use when needs_response=false)
-
---- GENERAL RULES ---
-
-- For project names, match to the canonical list. "NSC" = "North Shore", "TB" = "Turtle Bay", "TR" = "Thomas Ranch"
-- Mark priority "x" ONLY for genuinely urgent items
-- Evaluate each email independently — scores and tiers vary per email
-- The reason field should explain the decision concisely, referencing specific signals or content"""
-
-
 NOTABLE_SUMMARY_SYSTEM_PROMPT = """\
 You are an executive assistant analyzing an email that does not require a direct response \
 but is notable enough to warrant a brief summary for the recipient.
@@ -257,16 +130,6 @@ def build_notable_summary_prompt(email_data, conversation_history=None):
             prompt += "\n".join(thread_parts)
 
     return prompt
-
-
-def get_analysis_prompt():
-    """Return the default analysis prompt."""
-    return DEFAULT_ANALYSIS_PROMPT
-
-
-def get_enriched_analysis_prompt():
-    """Return the enriched analysis prompt for scorer-based classification."""
-    return ENRICHED_ANALYSIS_PROMPT
 
 
 def get_draft_prompt_template():
