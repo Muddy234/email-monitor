@@ -417,9 +417,10 @@ def _build_contacts(response_events, global_rate, user_aliases):
         # Emails per month (normalized by full observation window)
         emails_per_month = round(total * 30 / obs_span_days, 1)
 
-        # Contact type
+        # Contact type — use sender_is_internal from response events
         domain = sender.split("@")[1] if "@" in sender else "unknown"
-        contact_type = "external"  # Refined by caller with user's domain
+        is_internal = any(e.get("sender_is_internal") for e in events)
+        contact_type = "internal_colleague" if is_internal else "external"
 
         # Typical subjects
         subject_counter = Counter()

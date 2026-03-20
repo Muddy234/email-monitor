@@ -240,11 +240,11 @@ def _build_contact_inputs(contact_freq, response_rates, extractions):
             "avg_response_time_hours": rates.get("avg_response_time_hours"),
         }
 
-    # Sort by email count, return top 50
+    # Sort by email count — profile all contacts (Sonnet handles ~100 easily)
     sorted_contacts = sorted(
         contacts.values(), key=lambda c: c["emails_received"], reverse=True
     )
-    return sorted_contacts[:50]
+    return sorted_contacts
 
 
 def _format_contact_prompt(contact_inputs):
