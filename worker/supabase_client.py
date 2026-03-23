@@ -273,25 +273,25 @@ class SupabaseWorkerClient:
     # Conversations
     # ------------------------------------------------------------------
 
-    def fetch_conversation_context(self, user_id, conversation_id):
-        """Fetch conversation messages for draft context.
+    def fetch_thread_emails(self, user_id, conversation_id, before_time=None, limit=10):
+        """Fetch prior emails in a conversation thread.
 
         Returns:
-            list[dict]: Message list from conversations.messages jsonb,
-                or empty list if not found.
+            list[dict]: Prior email rows ordered by received_time desc.
         """
-        result = (
-            self.client.table("conversations")
-            .select("messages")
+        query = (
+            self.client.table("emails")
+            .select("id, sender, sender_name, body, received_time, subject")
             .eq("user_id", user_id)
             .eq("conversation_id", conversation_id)
-            .limit(1)
-            .execute()
+            .order("received_time", desc=True)
+            .limit(limit)
         )
-        row = result.data[0] if result.data else None
-        if row and row.get("messages"):
-            return row["messages"]
-        return []
+        if before_time:
+            query = query.lt("received_time", before_time)
+
+        result = query.execute()
+        return result.data if result.data else []
 
     # ------------------------------------------------------------------
     # Pipeline runs

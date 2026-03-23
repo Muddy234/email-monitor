@@ -3,7 +3,7 @@
 import logging
 import re
 
-from .analyzer import _strip_quoted_content
+from .pre_process import isolate_new_content
 from .prompts import DEFAULT_DRAFT_PROMPT_TEMPLATE
 
 logger = logging.getLogger("worker")
@@ -35,7 +35,10 @@ class DraftGenerator:
         subject = email_data.get("subject", "(no subject)")
         sender_name = email_data.get("sender_name", "Unknown")
         sender = email_data.get("sender", "")
-        body = _strip_quoted_content(email_data.get("body", "") or "")
+        raw_body = email_data.get("body", "") or ""
+        thread_emails = action_context.get("thread_emails", [])
+        prior_bodies = [te["body"] for te in thread_emails if te.get("body")]
+        body = isolate_new_content(raw_body, prior_bodies)
         if len(body) > 4000:
             body = body[:4000] + "\n[... truncated]"
 
@@ -70,21 +73,30 @@ class DraftGenerator:
             if tb.get("summary"):
                 context_lines.append(f"Thread context: {tb['summary']}")
 
-        # Tone guidance from contact type
-        tone_lines = []
+        # Sender context from contact record
+        sender_context_lines = []
         sender_contact = email_data.get("sender_contact", {})
         if sender_contact:
             ctype = sender_contact.get("contact_type", "")
             org = sender_contact.get("organization", "")
-            if ctype:
-                tone_lines.append(f"Sender Type: {ctype}")
-            if org:
-                tone_lines.append(f"Sender Org: {org}")
+            role = sender_contact.get("role", "")
+            significance = sender_contact.get("relationship_significance", "")
+            summary = sender_contact.get("relationship_summary", "")
 
-        tone_block = ""
-        if tone_lines:
-            tone_block = "\n\nTONE GUIDANCE:\n" + "\n".join(tone_lines)
-            tone_block += "\nNote: Use a more formal tone for external_legal and external_lender contacts. Use a conversational but professional tone for internal colleagues."
+            if ctype and ctype != "unknown":
+                sender_context_lines.append(f"Contact type: {ctype}")
+            if org:
+                sender_context_lines.append(f"Organization: {org}")
+            if role:
+                sender_context_lines.append(f"Role: {role}")
+            if significance and significance != "medium":
+                sender_context_lines.append(f"Relationship significance: {significance}")
+            if summary:
+                sender_context_lines.append(f"Relationship: {summary}")
+
+        sender_context_block = ""
+        if sender_context_lines:
+            sender_context_block = "\n\nSENDER CONTEXT:\n" + "\n".join(sender_context_lines)
 
         context_block = "\n".join(context_lines)
 
@@ -98,7 +110,7 @@ class DraftGenerator:
         if behavioral_profile:
             behavioral_block = f"\n\nBEHAVIORAL PROFILE:\n{behavioral_profile}\n"
 
-        # Build thread context from enrichment messages or conversation_history
+        # Build thread context from enrichment messages or thread emails
         thread_block = self._build_thread_block(action_context, email_data)
 
         prompt = f"""Draft a reply to the following email:
@@ -109,7 +121,7 @@ SUBJECT: {subject}
 EMAIL BODY:
 {body}
 
-{context_block}{tone_block}{thread_block}{style_block}{behavioral_block}
+{context_block}{sender_context_block}{thread_block}{style_block}{behavioral_block}
 
 Generate the reply body text only (no subject, no headers)."""
 
@@ -121,11 +133,10 @@ Generate the reply body text only (no subject, no headers)."""
         return prompt
 
     def _build_thread_block(self, action_context, email_data):
-        """Build a THREAD CONTEXT block from enrichment messages or conversation_history.
+        """Build a THREAD CONTEXT block from enrichment messages or thread emails.
 
         Prefers curated enrichment messages (user_last, thread_opener) when
-        available. Falls back to extracting the same from raw conversation_history
-        for the signal pipeline which lacks enrichment data.
+        available. Falls back to thread_emails from the emails table.
         """
         enrichment = action_context.get("enrichment")
         messages = enrichment.get("messages", {}) if enrichment else {}
@@ -133,36 +144,43 @@ Generate the reply body text only (no subject, no headers)."""
         user_last = messages.get("user_last")
         thread_opener = messages.get("thread_opener")
 
-        # Fallback: build from raw conversation_history (signal pipeline)
+        # Fallback: build from real thread emails (signal pipeline)
         if not user_last and not thread_opener:
-            conv_history = action_context.get("conversation_history", [])
-            if conv_history:
+            thread_emails = action_context.get("thread_emails", [])
+            if thread_emails:
+                # thread_emails are ordered by received_time desc
                 sorted_msgs = sorted(
-                    conv_history, key=lambda m: m.get("received_time") or ""
+                    thread_emails, key=lambda m: m.get("received_time") or ""
                 )
                 # User's most recent message
                 user_email = (email_data.get("to_email") or "").lower()
                 user_msgs = [
                     m for m in sorted_msgs
-                    if (m.get("sender_email") or "").lower() == user_email
+                    if (m.get("sender") or "").lower() == user_email
                 ]
                 if user_msgs:
                     last = user_msgs[-1]
-                    body = (last.get("body") or "")[:1000]
+                    # Isolate new content from user's prior message
+                    raw = (last.get("body") or "")
+                    earlier = [m["body"] for m in sorted_msgs
+                               if m.get("received_time", "") < last.get("received_time", "")
+                               and m.get("body")]
+                    body = isolate_new_content(raw, earlier)[:1000]
                     if body:
                         user_last = {
                             "sender": "User",
                             "received_time": last.get("received_time"),
                             "body": body,
                         }
-                # Thread opener (first message if different from inbound)
+                # Thread opener (earliest message)
                 if sorted_msgs:
                     opener = sorted_msgs[0]
                     if opener.get("received_time") != email_data.get("received_time"):
-                        body = (opener.get("body") or "")[:500]
+                        raw = (opener.get("body") or "")
+                        body = isolate_new_content(raw, [])[:500]
                         if body:
                             thread_opener = {
-                                "sender": opener.get("sender_name") or opener.get("sender_email", ""),
+                                "sender": opener.get("sender_name") or opener.get("sender") or "",
                                 "received_time": opener.get("received_time"),
                                 "body": body,
                             }

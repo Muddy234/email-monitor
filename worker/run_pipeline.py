@@ -182,7 +182,8 @@ def filter_emails(db_client, emails, user_id, config):
 
 def process_classification_results(db_client, action_items, filtered_emails,
                                    user_id, config, draft_generator,
-                                   style_guide="", behavioral_profile=""):
+                                   style_guide="", behavioral_profile="",
+                                   contacts_map=None):
     """Write classification results to DB and collect draft candidates.
 
     Returns:
@@ -255,9 +256,19 @@ def process_classification_results(db_client, action_items, filtered_emails,
 
             conv_id = email_data.get("conversation_id")
             if conv_id:
-                conv_messages = db_client.fetch_conversation_context(user_id, conv_id)
-                if conv_messages:
-                    action_context["conversation_history"] = conv_messages
+                thread_emails = db_client.fetch_thread_emails(
+                    user_id, conv_id,
+                    before_time=email_data.get("received_time"),
+                )
+                if thread_emails:
+                    action_context["thread_emails"] = thread_emails
+
+            # Attach contact for draft tone/context
+            if contacts_map:
+                sender = (email_data.get("sender_email") or email_data.get("sender") or "").lower()
+                contact = contacts_map.get(sender)
+                if contact:
+                    email_data["sender_contact"] = contact
 
             draft_candidates.append({
                 "db_id": db_id,
@@ -540,6 +551,30 @@ def _fetch_batch_context(db, user_id, filtered_emails):
     return contacts_map, threads_map, topic_profile
 
 
+def _fetch_thread_emails_batch(db, user_id, filtered_emails):
+    """Fetch prior thread emails for all conversations in the batch.
+
+    Returns:
+        dict: conversation_id → list[dict] of prior email rows.
+    """
+    conv_ids = {
+        ed["conversation_id"]
+        for ed in filtered_emails
+        if ed.get("conversation_id")
+    }
+
+    thread_emails_map = {}
+    for conv_id in conv_ids:
+        try:
+            emails = db.fetch_thread_emails(user_id, conv_id)
+            if emails:
+                thread_emails_map[conv_id] = emails
+        except Exception as e:
+            logger.warning(f"  Failed to fetch thread emails for {conv_id}: {e}")
+
+    return thread_emails_map
+
+
 def _build_thread_info(email_data, thread_row, contact, user_aliases):
     """Build thread_info dict for the scorer from DB thread data.
 
@@ -665,6 +700,35 @@ def _resolve_user_domain(profile):
 
 
 # ---------------------------------------------------------------------------
+# Per-contact overrides (post-signal)
+# ---------------------------------------------------------------------------
+
+def _apply_contact_overrides(signals, contact):
+    """Apply per-contact overrides to signal extraction output.
+
+    Enforces is_vip, priority_override, and draft_preference from the
+    contacts table after Haiku's signal extraction has run.
+    """
+    if not contact:
+        return signals
+
+    if contact.get("is_vip"):
+        signals["pri"] = "high"
+
+    prio = contact.get("priority_override")
+    if prio in ("high", "med", "low"):
+        signals["pri"] = prio
+
+    draft_pref = contact.get("draft_preference")
+    if draft_pref == "always":
+        signals["draft"] = True
+    elif draft_pref == "never":
+        signals["draft"] = False
+
+    return signals
+
+
+# ---------------------------------------------------------------------------
 # Signal extraction pipeline (replaces scorer + classify)
 # ---------------------------------------------------------------------------
 
@@ -704,6 +768,7 @@ def process_user_batch_signals(db, user_id, profile, emails):
         # ── Stage 2: Pre-process + context fetch ─────────────────
         # Fetch batch context (contacts, threads)
         contacts_map, threads_map, _ = _fetch_batch_context(db, user_id, filtered)
+        thread_emails_map = _fetch_thread_emails_batch(db, user_id, filtered)
         domain_tiers = _get_domain_tiers(db)
         user_domain = _resolve_user_domain(profile)
 
@@ -733,8 +798,10 @@ def process_user_batch_signals(db, user_id, profile, emails):
             conv_id = ed.get("conversation_id")
             thread_row = threads_map.get(conv_id) if conv_id else None
 
-            # Pre-process body
-            clean_body = pre_process_email(ed)
+            # Pre-process body (use prior thread emails for content-aware isolation)
+            thread_emails = thread_emails_map.get(conv_id, []) if conv_id else []
+            prior_bodies = [te["body"] for te in thread_emails if te.get("body")]
+            clean_body = pre_process_email(ed, prior_bodies=prior_bodies)
 
             # Resolve sender tier
             sender_tier = resolve_sender_tier(
@@ -773,6 +840,8 @@ def process_user_batch_signals(db, user_id, profile, emails):
                 user_position=user_position,
                 to_field=ed.get("to_field") or "",
                 cc_field=ed.get("cc_field") or "",
+                contact_type=contact.get("contact_type", "") if contact else "",
+                significance=contact.get("relationship_significance", "") if contact else "",
             )
             batch_requests.append(req)
 
@@ -840,6 +909,8 @@ def process_user_batch_signals(db, user_id, profile, emails):
             ed = ctx["ed"]
             raw_text = batch_results.get(db_id)
             signals = parse_signal_response(raw_text)
+            contact = ctx["contact"]
+            signals = _apply_contact_overrides(signals, contact)
 
             # Build response_event for persistence
             event = {
@@ -875,7 +946,7 @@ def process_user_batch_signals(db, user_id, profile, emails):
                 "action": signals["reason"],
                 "context": signals["reason"],
                 "project": "",
-                "priority": 1 if signals["pri"] == "high" else 0,
+                "priority": {"high": 2, "med": 1, "low": 0}.get(signals["pri"], 0),
             }
             db.insert_classification(db_id, user_id, classification)
             db.update_email_status(db_id, "processed")
@@ -891,12 +962,10 @@ def process_user_batch_signals(db, user_id, profile, emails):
                         "context": signals["reason"],
                     }
 
-                    # Add conversation history for thread context
-                    conv_id = ed.get("conversation_id")
-                    if conv_id:
-                        conv_messages = db.fetch_conversation_context(user_id, conv_id)
-                        if conv_messages:
-                            action_context["conversation_history"] = conv_messages
+                    # Add thread emails for thread context
+                    te = thread_emails_map.get(conv_id, []) if conv_id else []
+                    if te:
+                        action_context["thread_emails"] = te
 
                     style_guide = profile.get("writing_style_guide") or ""
                     if style_guide:
@@ -905,6 +974,10 @@ def process_user_batch_signals(db, user_id, profile, emails):
                     behavioral_profile = profile.get("behavioral_profile") or ""
                     if behavioral_profile:
                         action_context["behavioral_profile"] = behavioral_profile
+
+                    # Attach contact for draft tone/context
+                    if contact:
+                        ed["sender_contact"] = contact
 
                     draft_candidates.append({
                         "db_id": db_id,
@@ -943,9 +1016,8 @@ def process_user_batch_signals(db, user_id, profile, emails):
             for candidate in notable_candidates:
                 ed = candidate["email_data"]
                 conv_id = candidate["conv_id"]
-                conv_history = None
-                if conv_id:
-                    conv_history = db.fetch_conversation_context(user_id, conv_id)
+                conv_history = thread_emails_map.get(conv_id, []) if conv_id else None
+                conv_history = conv_history or None
 
                 user_msg = build_notable_summary_prompt(ed, conv_history)
                 notable_requests.append({

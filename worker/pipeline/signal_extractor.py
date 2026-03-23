@@ -38,7 +38,9 @@ Key heuristics for target:
 - If body uses "all" / "everyone" / "team" language → target=all.
 
 Context fields:
-- tier: Sender importance. C=critical (lenders, investors, legal) → bias pri toward high. I=internal (colleagues) → normal. P=professional (vendors, consultants) → normal. U=unknown → bias pri toward low.
+- tier: Sender importance. C=critical → bias pri toward high. I=internal (colleagues) → normal. P=professional → normal. U=unknown → bias pri toward low.
+- contact_type: Sender's relationship type (internal_colleague, external_legal, external_lender, external_title_escrow, external_contractor, external_investor, external_vendor, external_government, personal, unknown). Use to inform priority and draft decisions.
+- significance: Relationship importance (critical, high, medium, low). critical/high senders → bias toward draft=true and higher priority.
 - thread_depth: Number of messages in this thread (1=new email). Higher depth in active threads may reduce urgency if others are already engaged.
 - unanswered: Whether USER has a prior message in this thread that went unanswered by the sender. true suggests a follow-up the user was waiting for → bias draft=true.
 
@@ -48,12 +50,12 @@ draft (bool): Whether USER should draft a response. True ONLY when the email req
 reason (string): Under 30 words. When draft=true, write a brief for what the reply should address. When draft=false, explain why no response is needed.
 
 Context format:
-Line 1 — Sender: sender_name sender_email|tier|thread_depth|unanswered
+Line 1 — Sender: sender_name sender_email|tier|contact_type|significance|thread_depth|unanswered
 Line 2 — User: USER user_name|user_email|position (TO or CC)
 Line 3 — Recipients: TO: addr1;addr2 | CC: addr1;addr2
 
 Example 1 (action for user — direct request with deadline):
-Input: Jane Smith jane@lender.com|C|1|false
+Input: Jane Smith jane@lender.com|C|external_lender|high|1|false
 USER: Bob Jones|bjones@company.com|TO
 TO: bjones@company.com | CC: (none)
 S:Draw Request #4 — Please Review
@@ -61,7 +63,7 @@ Bob, please review the attached draw request and approve by Friday.
 Output: {"mc":true,"ar":true,"ub":false,"dl":true,"rt":"act","target":"user","pri":"high","draft":true,"reason":"Lender requesting Bob to review and approve draw request by Friday."}
 
 Example 2 (action for someone else — USER is CC):
-Input: Gina Kufrovich gina@corridortitle.com|P|1|false
+Input: Gina Kufrovich gina@corridortitle.com|P|external_title_escrow|medium|1|false
 USER: Nate McBride|nmcbride@arete-collective.com|CC
 TO: wdagestad@polsinelli.com;tmills@arete-collective.com | CC: nmcbride@arete-collective.com
 S:CPL — 123 Main St
@@ -69,7 +71,7 @@ Wes please see attached CPL.
 Output: {"mc":false,"ar":true,"ub":false,"dl":false,"rt":"act","target":"other","pri":"low","draft":false,"reason":"Action directed at Wes (TO recipient), not USER who is CC-only. No response needed."}
 
 Example 3 (FYI / informational — no action needed):
-Input: Sarah Miller sarah@arete-collective.com|I|3|false
+Input: Sarah Miller sarah@arete-collective.com|I|internal_colleague|medium|3|false
 USER: Nate McBride|nmcbride@arete-collective.com|CC
 TO: tmills@arete-collective.com | CC: nmcbride@arete-collective.com;jcrigler@arete-collective.com
 S:Re: Turtle Bay Budget Update
@@ -77,7 +79,7 @@ Updated budget spreadsheet attached. Let me know if you have questions.
 Output: {"mc":false,"ar":false,"ub":false,"dl":false,"rt":"none","target":"user","pri":"low","draft":false,"reason":"Internal FYI update sent to another recipient. USER is CC for visibility only."}
 
 Example 4 (direct question to user — needs answer):
-Input: Dave Wittwer dave@lender.com|C|2|true
+Input: Dave Wittwer dave@lender.com|C|external_lender|critical|2|true
 USER: Nate McBride|nmcbride@arete-collective.com|TO
 TO: nmcbride@arete-collective.com | CC: tmills@arete-collective.com
 S:Re: Thomas Ranch Phase 2 — Rate Lock
@@ -85,7 +87,7 @@ Nate, can you confirm whether you want to lock the rate at 6.25% or float until 
 Output: {"mc":true,"ar":true,"ub":true,"dl":false,"rt":"dec","target":"user","pri":"high","draft":true,"reason":"Lender asking Nate to decide on rate lock vs float. Confirm preference and timeline."}
 
 Example 5 (terminal acknowledgment — no response needed):
-Input: Jim Crigler jim@contractor.com|P|4|false
+Input: Jim Crigler jim@contractor.com|P|external_contractor|medium|4|false
 USER: Nate McBride|nmcbride@arete-collective.com|TO
 TO: nmcbride@arete-collective.com | CC: (none)
 S:Re: Inspection Schedule
@@ -97,11 +99,14 @@ Output: {"mc":false,"ar":false,"ub":false,"dl":false,"rt":"none","target":"user"
 def build_signal_prompt(email_body, subject, sender_name, sender_email,
                         sender_tier, thread_depth, has_unanswered,
                         user_name="", user_email="", user_position="UNKNOWN",
-                        to_field="", cc_field=""):
+                        to_field="", cc_field="",
+                        contact_type="", significance=""):
     """Build the user message for the signal extraction call."""
     sender_line = (
         f"{sender_name} {sender_email}"
         f"|{sender_tier}"
+        f"|{contact_type or 'unknown'}"
+        f"|{significance or 'medium'}"
         f"|{thread_depth}"
         f"|{str(has_unanswered).lower()}"
     )
@@ -114,6 +119,7 @@ def extract_signals(email_body, subject, sender_name, sender_email,
                     sender_tier, thread_depth, has_unanswered,
                     user_name="", user_email="", user_position="UNKNOWN",
                     to_field="", cc_field="",
+                    contact_type="", significance="",
                     api_key=None):
     """Call Haiku to extract signals and decisions for a single email.
 
@@ -126,6 +132,7 @@ def extract_signals(email_body, subject, sender_name, sender_email,
         sender_tier, thread_depth, has_unanswered,
         user_name=user_name, user_email=user_email,
         user_position=user_position, to_field=to_field, cc_field=cc_field,
+        contact_type=contact_type, significance=significance,
     )
 
     try:
@@ -151,13 +158,15 @@ def extract_signals_batch_params(email_body, subject, sender_name,
                                  has_unanswered, custom_id,
                                  user_name="", user_email="",
                                  user_position="UNKNOWN",
-                                 to_field="", cc_field=""):
+                                 to_field="", cc_field="",
+                                 contact_type="", significance=""):
     """Build a Batches API request dict for signal extraction."""
     user_message = build_signal_prompt(
         email_body, subject, sender_name, sender_email,
         sender_tier, thread_depth, has_unanswered,
         user_name=user_name, user_email=user_email,
         user_position=user_position, to_field=to_field, cc_field=cc_field,
+        contact_type=contact_type, significance=significance,
     )
 
     return {

@@ -81,6 +81,109 @@ def strip_signatures(body):
 
 
 # ---------------------------------------------------------------------------
+# Content-aware body isolation (diff against prior thread emails)
+# ---------------------------------------------------------------------------
+
+_WHITESPACE_RE = re.compile(r'\s+')
+_QUOTE_PREFIX_RE = re.compile(r'^>+\s?', re.MULTILINE)
+
+# Minimum anchor length to avoid false substring matches
+_MIN_ANCHOR_LEN = 60
+
+
+def _normalize_for_match(text):
+    """Collapse whitespace and strip '>' quote prefixes for fuzzy matching."""
+    text = _QUOTE_PREFIX_RE.sub('', text)
+    return _WHITESPACE_RE.sub(' ', text).strip()
+
+
+def isolate_new_content(raw_body, prior_bodies):
+    """Extract only the new message by diffing against prior email bodies.
+
+    For each prior body (longest first), looks for its opening text as an
+    anchor in the current body. If found, returns everything before the
+    match position. Falls back to strip_reply_markers() when no prior
+    body matches.
+    """
+    if not raw_body:
+        return ""
+    if not prior_bodies:
+        return strip_reply_markers(raw_body)
+
+    norm_body = _normalize_for_match(raw_body)
+
+    # Try each prior body, longest first — longest match is most specific
+    sorted_priors = sorted(prior_bodies, key=len, reverse=True)
+
+    for prior in sorted_priors:
+        if not prior:
+            continue
+
+        norm_prior = _normalize_for_match(prior)
+        if len(norm_prior) < _MIN_ANCHOR_LEN:
+            continue
+
+        # Use the first N chars of the prior body as the anchor
+        anchor = norm_prior[:200]
+
+        pos = norm_body.find(anchor)
+        if pos <= 0:
+            continue
+
+        # Map normalized position back to raw body.
+        # Walk the raw body, skipping whitespace differences, to find
+        # the character position corresponding to the normalized offset.
+        raw_pos = _map_norm_pos_to_raw(raw_body, pos)
+
+        extracted = raw_body[:raw_pos].rstrip()
+        if len(extracted) >= 20:
+            logger.debug(f"isolate_new_content: matched prior anchor at raw pos {raw_pos}")
+            return extracted
+
+    # No prior body matched — fall back to regex stripping
+    return strip_reply_markers(raw_body)
+
+
+def _map_norm_pos_to_raw(raw_text, norm_pos):
+    """Map a character position in normalized text back to the raw text.
+
+    Walks through the raw text character by character, counting how many
+    normalized characters have been consumed (collapsing runs of whitespace
+    into a single space and skipping '>' quote prefixes at line starts).
+    Returns the raw position when norm_pos normalized chars have been seen.
+    """
+    norm_count = 0
+    i = 0
+    in_whitespace = False
+    at_line_start = True
+
+    while i < len(raw_text) and norm_count < norm_pos:
+        ch = raw_text[i]
+
+        # Skip '>' quote prefixes at line starts
+        if at_line_start and ch == '>':
+            i += 1
+            # Skip optional space after '>'
+            if i < len(raw_text) and raw_text[i] == ' ':
+                i += 1
+            continue
+
+        if ch in (' ', '\t', '\n', '\r'):
+            if not in_whitespace:
+                norm_count += 1  # collapsed whitespace = 1 space
+                in_whitespace = True
+            i += 1
+            at_line_start = ch in ('\n', '\r')
+        else:
+            norm_count += 1
+            in_whitespace = False
+            at_line_start = False
+            i += 1
+
+    return i
+
+
+# ---------------------------------------------------------------------------
 # Smart truncation
 # ---------------------------------------------------------------------------
 
@@ -188,17 +291,23 @@ def compute_thread_meta(thread_row, sender_email, user_aliases):
 # Full pre-processing pipeline
 # ---------------------------------------------------------------------------
 
-def pre_process_email(email_data):
+def pre_process_email(email_data, prior_bodies=None):
     """Run the full pre-processing pipeline on an email body.
 
     Args:
         email_data: dict with 'body' and 'subject' keys.
+        prior_bodies: Optional list of prior email body strings from the
+            same thread. When provided, uses content-aware diffing instead
+            of regex-based reply stripping.
 
     Returns:
         str: Cleaned, truncated email body ready for Haiku.
     """
     body = email_data.get("body") or ""
-    body = strip_reply_markers(body)
+    if prior_bodies:
+        body = isolate_new_content(body, prior_bodies)
+    else:
+        body = strip_reply_markers(body)
     body = strip_signatures(body)
     body = truncate_smart(body, max_tokens=1000)
     return body
