@@ -16,6 +16,8 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from statistics import median
 
+from pipeline.pre_process import strip_reply_markers
+
 logger = logging.getLogger("worker.onboarding")
 
 # ---------------------------------------------------------------------------
@@ -184,17 +186,12 @@ def _build_response_events(received, sent, user_aliases):
         user_position = _detect_user_position(email, user_aliases)
         total_recipients = _count_recipients(email)
 
-        # Detect user name mentions in body (before quoted text)
+        # Detect user name mentions in body (new content only)
         mentions_user_name = False
         if user_name_tokens:
-            check_body = body
-            for marker in ("From:", "-----Original Message", "________________________________"):
-                idx = check_body.find(marker)
-                if idx > 0:
-                    check_body = check_body[:idx]
-                    break
+            check_body = strip_reply_markers(body)[:2000]
             for token in user_name_tokens:
-                if re.search(rf'\b{re.escape(token)}\b', check_body[:2000], re.IGNORECASE):
+                if re.search(rf'\b{re.escape(token)}\b', check_body, re.IGNORECASE):
                     mentions_user_name = True
                     break
 
@@ -213,7 +210,7 @@ def _build_response_events(received, sent, user_aliases):
             "subject": subject[:200],
             "user_position": user_position,
             "total_recipients": total_recipients,
-            "has_question": "?" in body[:2000],
+            "has_question": "?" in strip_reply_markers(body)[:2000],
             "has_action_language": _has_action_language(body),
             "subject_type": _classify_subject_type(subject),
             "is_recurring": False,  # Set in _detect_recurring below
@@ -417,10 +414,10 @@ def _build_contacts(response_events, global_rate, user_aliases):
         # Emails per month (normalized by full observation window)
         emails_per_month = round(total * 30 / obs_span_days, 1)
 
-        # Contact type — use sender_is_internal from response events
+        # Contact type — use sender_is_internal, with domain-keyword fallback
         domain = sender.split("@")[1] if "@" in sender else "unknown"
         is_internal = any(e.get("sender_is_internal") for e in events)
-        contact_type = "internal_colleague" if is_internal else "external"
+        contact_type = "internal_colleague" if is_internal else _infer_external_type(domain)
 
         # Typical subjects
         subject_counter = Counter()
@@ -624,7 +621,7 @@ def _build_user_profile(received, sent, global_rate):
             hour_counts[t.hour] += 1
             day_counts[t.strftime("%A")] += 1
 
-    active_hours = [h for h, _ in hour_counts.most_common(3)]
+    active_hours = [h for h, _ in hour_counts.most_common(5)]
 
     total_day = sum(day_counts.values())
     active_days = [d for d, c in day_counts.items()
@@ -699,7 +696,7 @@ def _subject_similar(a, b):
     longer = max(len(a), len(b))
     if longer == 0:
         return True
-    if shorter / longer >= 0.6 and a[:min(20, shorter)] == b[:min(20, shorter)]:
+    if shorter / longer >= 0.6 and a[:min(30, shorter)] == b[:min(30, shorter)]:
         return True
     return False
 
@@ -744,10 +741,14 @@ def _count_recipients(email):
 
 
 def _has_action_language(body):
-    """Detect action-oriented language in email body."""
+    """Detect action-oriented language in email body (head + tail)."""
     if not body:
         return False
-    lower = body[:2000].lower()
+    stripped = strip_reply_markers(body)
+    # Check first 2000 chars + last 500 chars to catch closing action requests
+    check_zones = [stripped[:2000].lower()]
+    if len(stripped) > 2000:
+        check_zones.append(stripped[-500:].lower())
     patterns = [
         r'\bplease\s+(?:review|approve|confirm|sign|send|provide|update|let\s+me\s+know)',
         r'\bcould\s+you\b',
@@ -756,9 +757,10 @@ def _has_action_language(body):
         r'\baction\s+required\b',
         r'\bplease\s+(?:advise|respond)\b',
     ]
-    for p in patterns:
-        if re.search(p, lower):
-            return True
+    for zone in check_zones:
+        for p in patterns:
+            if re.search(p, zone):
+                return True
     return False
 
 
@@ -782,3 +784,25 @@ def _classify_response_type(sent_email):
     if re.match(r'^fw[d]?\s*:', subject):
         return "forward"
     return "reply"
+
+
+_DOMAIN_TYPE_KEYWORDS = {
+    "external_lender": ("bank", "capital", "lending", "mortgage", "funding", "loan"),
+    "external_legal": ("law", "legal", "polsinelli", "attorney"),
+    "external_title_escrow": ("title", "escrow", "fidelity", "stewart", "chicago"),
+    "external_insurance": ("insurance", "acrisure", "surety", "bonding"),
+    "external_government": ("gov", "county", "city", "state", "municipal"),
+}
+
+
+def _infer_external_type(domain):
+    """Infer external contact subtype from domain keywords.
+
+    Falls back to 'external' if no keyword matches.
+    """
+    name = domain.split(".")[0].lower() if domain else ""
+    for contact_type, keywords in _DOMAIN_TYPE_KEYWORDS.items():
+        for kw in keywords:
+            if kw in name:
+                return contact_type
+    return "external"
