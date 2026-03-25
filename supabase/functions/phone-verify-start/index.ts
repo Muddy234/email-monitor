@@ -25,6 +25,27 @@ Deno.serve(async (req) => {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
+    // --- IP rate limit ---
+    const clientIp =
+      req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      req.headers.get("cf-connecting-ip") ||
+      "unknown";
+
+    const { data: allowed, error: rlError } = await supabase.rpc(
+      "check_phone_verify_rate_limit",
+      { p_ip: clientIp, p_max_attempts: 10, p_window_minutes: 60 },
+    );
+
+    if (rlError) {
+      console.error("Rate limit check failed:", rlError);
+      // Fail open — don't block users if the check itself breaks
+    } else if (allowed === false) {
+      return new Response(
+        JSON.stringify({ error: "Too many verification requests. Please try again later." }),
+        { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
     const { userId, phone } = await req.json();
 
     if (!userId || !phone) {

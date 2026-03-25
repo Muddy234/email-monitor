@@ -49,9 +49,11 @@ _QUOTED_REPLY_RE = re.compile(
 _SIGNATURE_RE = re.compile(
     r"(?:^--|^___+|^Sent from my |^Get Outlook for )", re.MULTILINE | re.IGNORECASE
 )
-# Legal disclaimer blocks
+# Legal disclaimer blocks — require disclaimer-specific continuation to avoid
+# matching body content like "This email and the attached documents reflect..."
 _DISCLAIMER_RE = re.compile(
-    r"(?:^CONFIDENTIALITY|^DISCLAIMER|^This email and any)", re.MULTILINE | re.IGNORECASE
+    r"(?:^CONFIDENTIALITY|^DISCLAIMER|^This email and any .+(?:confidential|intended|privilege))",
+    re.MULTILINE | re.IGNORECASE,
 )
 
 
@@ -86,8 +88,14 @@ def collect_onboarding_emails(db, user_id, user_aliases, days=120, max_emails=No
         else:
             received.append(email)
 
+    # Filter empty-body sent emails before they enter sampling
+    sent_before = len(sent)
+    sent = [e for e in sent if len((e.get("body") or "").strip()) >= 10]
+    sent_filtered = sent_before - len(sent)
+
     # Pre-filter noise from received emails
     received, filtered_count = pre_filter_emails(received)
+    filtered_count += sent_filtered
 
     logger.info(
         f"Split: {len(received)} received, {len(sent)} sent, "
@@ -117,22 +125,28 @@ def pre_filter_emails(emails):
         body = email.get("body") or ""
 
         # Blacklist senders
-        if any(bl in sender for bl in BLACKLIST_SENDERS):
+        matched_bl = next((bl for bl in BLACKLIST_SENDERS if bl in sender), None)
+        if matched_bl:
+            logger.debug(f"Filtered sender '{sender}' — matched '{matched_bl}' | subject: {subject[:80]}")
             removed += 1
             continue
 
         # Blacklist subjects
-        if any(pat in subject for pat in BLACKLIST_SUBJECT_PATTERNS):
+        matched_subj = next((pat for pat in BLACKLIST_SUBJECT_PATTERNS if pat in subject), None)
+        if matched_subj:
+            logger.debug(f"Filtered subject '{subject[:80]}' — matched '{matched_subj}'")
             removed += 1
             continue
 
         # Empty body
         if len(body.strip()) < 10:
+            logger.debug(f"Filtered empty body | subject: {subject[:80]}")
             removed += 1
             continue
 
         # Calendar invites (iCalendar content)
         if "BEGIN:VCALENDAR" in body:
+            logger.debug(f"Filtered calendar invite | subject: {subject[:80]}")
             removed += 1
             continue
 
@@ -141,7 +155,7 @@ def pre_filter_emails(emails):
     return kept, removed
 
 
-def clean_email_body(body, max_chars=800):
+def clean_email_body(body, max_chars=1500):
     """Strip signatures, disclaimers, and quoted replies, then truncate.
 
     Args:
@@ -154,13 +168,18 @@ def clean_email_body(body, max_chars=800):
     if not body:
         return ""
 
-    # Find and truncate at signature marker
-    sig_match = _SIGNATURE_RE.search(body)
+    # Search for signature/disclaimer only in the last 40% of the body
+    # to avoid false positives on body content (e.g., "Sent from my
+    # perspective, this deal looks strong").
+    tail_start = max(0, int(len(body) * 0.6))
+
+    # Find and truncate at signature marker (tail only)
+    sig_match = _SIGNATURE_RE.search(body, pos=tail_start)
     if sig_match:
         body = body[:sig_match.start()]
 
-    # Find and truncate at disclaimer
-    disc_match = _DISCLAIMER_RE.search(body)
+    # Find and truncate at disclaimer (tail only)
+    disc_match = _DISCLAIMER_RE.search(body, pos=tail_start)
     if disc_match:
         body = body[:disc_match.start()]
 

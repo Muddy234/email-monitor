@@ -49,7 +49,7 @@ DEFAULT_PARAMETERS = {
         "recipient_bins": {"[1, 2)": 1.0, "[2, 4)": 1.0, "[4, 8)": 1.0,
                            "[8, 16)": 1.0, "[16, 999)": 1.0},
         "depth_bins": {"[1, 2)": 1.0, "[2, 4)": 1.0, "[4, 8)": 1.0,
-                       "[8, 999)": 1.0},
+                       "[8, 20)": 1.0, "[20, 999)": 1.0},
         "rate_x_to": {},
     },
     "iso_breakpoints": [],
@@ -169,6 +169,25 @@ def check_retrain_needed(db, user_id):
 # Feature importance
 # ---------------------------------------------------------------------------
 
+def _derive_event_features(ev):
+    """Derive boolean features for a single event without mutating it."""
+    return {
+        "user_in_to": ev.get("user_position") == "TO",
+        "user_sole_to": (
+            ev.get("user_position") == "TO"
+            and ev.get("total_recipients", 1) == 1
+        ),
+        "mentions_user_name": ev.get("mentions_user_name") or False,
+        "has_question": ev.get("has_question") or False,
+        "has_action_language": ev.get("has_action_language") or False,
+        "sender_is_internal": ev.get("sender_is_internal") or False,
+        "is_recurring": ev.get("is_recurring") or False,
+        "thread_user_initiated": ev.get("thread_user_initiated") or False,
+        "arrived_during_active_hours": ev.get("arrived_during_active_hours") or False,
+        "arrived_on_active_day": ev.get("arrived_on_active_day") or False,
+    }
+
+
 def _analyze_features(events, global_rate):
     """Compute univariate signal strength for boolean features."""
     results = {}
@@ -180,31 +199,17 @@ def _analyze_features(events, global_rate):
         "arrived_during_active_hours", "arrived_on_active_day",
     ]
 
-    # Derive boolean features from event data
-    for ev in events:
-        ev["user_in_to"] = ev.get("user_position") == "TO"
-        ev["user_sole_to"] = ev.get("user_position") == "TO" and ev.get("total_recipients", 1) == 1
-        # Use stored values from response_events; fall back to False for
-        # pre-migration rows that don't have these columns yet.
-        if ev.get("mentions_user_name") is None:
-            ev["mentions_user_name"] = False
-        if ev.get("sender_is_internal") is None:
-            ev["sender_is_internal"] = False
-        if ev.get("thread_user_initiated") is None:
-            ev["thread_user_initiated"] = False
-        if ev.get("arrived_during_active_hours") is None:
-            ev["arrived_during_active_hours"] = False
-        if ev.get("arrived_on_active_day") is None:
-            ev["arrived_on_active_day"] = False
+    # Derive boolean features without mutating event dicts
+    derived = [_derive_event_features(ev) for ev in events]
 
     for feat in bool_features:
-        true_rows = [e for e in events if e.get(feat) is True]
-        false_rows = [e for e in events if e.get(feat) is False]
-        if not true_rows or not false_rows:
+        true_idx = [i for i, d in enumerate(derived) if d.get(feat) is True]
+        false_idx = [i for i, d in enumerate(derived) if d.get(feat) is False]
+        if not true_idx or not false_idx:
             continue
 
-        rate_true = sum(1 for r in true_rows if r["responded"]) / len(true_rows)
-        rate_false = sum(1 for r in false_rows if r["responded"]) / len(false_rows)
+        rate_true = sum(1 for i in true_idx if events[i]["responded"]) / len(true_idx)
+        rate_false = sum(1 for i in false_idx if events[i]["responded"]) / len(false_idx)
         lift = rate_true / global_rate if global_rate > 0 else 0
         separation = rate_true - rate_false
 
@@ -214,7 +219,7 @@ def _analyze_features(events, global_rate):
             "rate_false": round(rate_false, 4),
             "lift": round(lift, 3),
             "separation": round(separation, 4),
-            "n_true": len(true_rows),
+            "n_true": len(true_idx),
         }
 
     # Message type analysis
@@ -440,6 +445,7 @@ def _detect_recurring_patterns(events):
 def _score_all_events(events, lift_factors, global_rate, recurring_patterns):
     """Score all events using derived lift factors."""
     sender_stats = _compute_sender_stats(events, global_rate)
+    recip_bins_parsed = _parse_bins(lift_factors.get("recipient_bins", {}))
     predictions = []
 
     for ev in events:
@@ -455,9 +461,12 @@ def _score_all_events(events, lift_factors, global_rate, recurring_patterns):
 
         score = base_rate
 
+        # Derive features without mutating event dict
+        feat_vals = _derive_event_features(ev)
+
         # Boolean lifts
         for feat, lift in lift_factors.get("boolean", {}).items():
-            if ev.get(feat):
+            if feat_vals.get(feat):
                 score *= lift
 
         # Message type lift
@@ -467,14 +476,14 @@ def _score_all_events(events, lift_factors, global_rate, recurring_patterns):
 
         # Recipient bin multiplier
         recip = ev.get("total_recipients", 1)
-        recip_mult = _lookup_bin(recip, lift_factors.get("recipient_bins", {}))
+        recip_mult = _lookup_bin(recip, recip_bins_parsed)
         score *= recip_mult
 
         # Rate × TO interaction
         sender_rate = stats.get("raw_rate", 0)
         rate_tier = _get_rate_tier(sender_rate)
         rate_to_data = lift_factors.get("rate_x_to", {}).get(rate_tier, {})
-        if ev.get("user_in_to"):
+        if feat_vals["user_in_to"]:
             score *= rate_to_data.get("to", 1.0)
         else:
             score *= rate_to_data.get("not_to", 1.0)
@@ -540,23 +549,29 @@ def _get_rate_tier(rate):
     return "30%+"
 
 
-def _lookup_bin(value, bin_dict):
-    """Lookup a value in a bin dictionary like {"[1, 2)": 1.5, ...}."""
-    if not bin_dict:
-        return 1.0
+def _parse_bins(bin_dict):
+    """Pre-parse a bin dictionary into a list of (lo, hi, lift) tuples."""
+    parsed = []
     for bin_label, lift in bin_dict.items():
         try:
             parts = bin_label.strip("[]()").split(",")
             lo = float(parts[0].strip())
             hi = float(parts[1].strip().rstrip(")"))
-            if lo <= value < hi:
-                return lift
+            parsed.append((lo, hi, lift))
         except (ValueError, IndexError):
             continue
+    return parsed
+
+
+def _lookup_bin(value, parsed_bins):
+    """Lookup a value in pre-parsed bin list of (lo, hi, lift) tuples."""
+    if not parsed_bins:
+        return 1.0
+    for lo, hi, lift in parsed_bins:
+        if lo <= value < hi:
+            return lift
     # Default: return last bin's lift if value exceeds all bins
-    if bin_dict:
-        return list(bin_dict.values())[-1]
-    return 1.0
+    return parsed_bins[-1][2]
 
 
 # ---------------------------------------------------------------------------

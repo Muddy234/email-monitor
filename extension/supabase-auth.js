@@ -61,7 +61,10 @@ async function supabaseRefreshToken(refreshToken) {
 /**
  * Returns a valid access token, refreshing if within 5 min of expiry.
  * Returns null if no session exists.
+ * Uses a shared promise to prevent concurrent refresh races.
  */
+let _refreshPromise = null;
+
 async function getValidAccessToken() {
   const result = await chrome.storage.local.get("supabaseSession");
   const session = result.supabaseSession;
@@ -76,12 +79,26 @@ async function getValidAccessToken() {
 
   // Needs refresh
   if (!session.refresh_token) return null;
+
+  // If a refresh is already in flight, reuse it
+  if (_refreshPromise) {
+    try {
+      const refreshed = await _refreshPromise;
+      return refreshed.access_token;
+    } catch (_) {
+      return null;
+    }
+  }
+
   try {
-    const refreshed = await supabaseRefreshToken(session.refresh_token);
+    _refreshPromise = supabaseRefreshToken(session.refresh_token);
+    const refreshed = await _refreshPromise;
     return refreshed.access_token;
   } catch (err) {
     if (DEBUG) console.warn("Supabase token refresh failed:", err.message);
     return null;
+  } finally {
+    _refreshPromise = null;
   }
 }
 

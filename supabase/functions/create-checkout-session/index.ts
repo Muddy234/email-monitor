@@ -57,6 +57,8 @@ Deno.serve(async (req) => {
       .eq("user_id", user.id)
       .single();
 
+    const appBaseUrl = Deno.env.get("APP_BASE_URL") || "https://clarion.ai";
+
     if (sub?.status === "active" && sub?.stripe_customer_id) {
       // Create a portal session instead
       const portalResp = await fetch(
@@ -69,7 +71,7 @@ Deno.serve(async (req) => {
           },
           body: new URLSearchParams({
             customer: sub.stripe_customer_id,
-            return_url: `${req.headers.get("origin") || "https://clarion.ai"}/app/dashboard`,
+            return_url: `${appBaseUrl}/app/dashboard`,
           }),
         },
       );
@@ -88,8 +90,8 @@ Deno.serve(async (req) => {
       "line_items[0][price]": priceId,
       "line_items[0][quantity]": "1",
       "client_reference_id": user.id,
-      "success_url": `${req.headers.get("origin") || "https://clarion.ai"}/app/dashboard?checkout=success`,
-      "cancel_url": `${req.headers.get("origin") || "https://clarion.ai"}/app/dashboard?checkout=canceled`,
+      "success_url": `${appBaseUrl}/app/dashboard?checkout=success`,
+      "cancel_url": `${appBaseUrl}/app/dashboard?checkout=canceled`,
     };
 
     // Reuse existing Stripe customer if available, otherwise pre-fill email

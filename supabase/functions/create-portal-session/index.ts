@@ -58,6 +58,8 @@ Deno.serve(async (req) => {
       );
     }
 
+    const appBaseUrl = Deno.env.get("APP_BASE_URL") || "https://clarion.ai";
+
     const portalResp = await fetch(
       "https://api.stripe.com/v1/billing_portal/sessions",
       {
@@ -68,7 +70,7 @@ Deno.serve(async (req) => {
         },
         body: new URLSearchParams({
           customer: sub.stripe_customer_id,
-          return_url: `${req.headers.get("origin") || "https://clarion.ai"}/app/dashboard`,
+          return_url: `${appBaseUrl}/app/dashboard`,
         }),
       },
     );

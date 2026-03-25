@@ -165,6 +165,19 @@ async function owaFetch(action, body) {
     throw new Error("TOKEN_EXPIRED");
   }
 
+  if (!resp.ok) {
+    let detail = `OWA ${resp.status}`;
+    try {
+      const body = await resp.text();
+      // OWA sometimes returns JSON errors, sometimes HTML — extract what we can
+      if (body.startsWith("{")) {
+        const json = JSON.parse(body);
+        detail = json.ErrorCode || json.message || detail;
+      }
+    } catch (_) {}
+    throw new Error(detail);
+  }
+
   return resp.json();
 }
 
@@ -226,6 +239,7 @@ function parseGetItemMessage(item) {
     conversation_topic: item.ConversationTopic || null,
     email_ref: item.ItemId?.Id || "",
     importance: IMPORTANCE_MAP[item.Importance] ?? 1,
+    is_read: item.IsRead ?? true,
     to_field: toRecips.map((r) => r.EmailAddress).filter(Boolean).join("; "),
     cc_field: ccRecips.map((r) => r.EmailAddress).filter(Boolean).join("; "),
     recipients: recipients,
@@ -332,6 +346,7 @@ async function handleGetItemBatch(emails) {
     { __type: "PropertyUri:#Exchange", FieldURI: "Flag" },
     { __type: "PropertyUri:#Exchange", FieldURI: "ConversationId" },
     { __type: "PropertyUri:#Exchange", FieldURI: "ConversationTopic" },
+    { __type: "PropertyUri:#Exchange", FieldURI: "IsRead" },
   ];
 
   const itemIds = emails.map((e) => {
@@ -652,6 +667,7 @@ async function syncEmailsToSupabase() {
           to_field: e.to_field || "",
           cc_field: e.cc_field || "",
           importance: ["Low", "Normal", "High"][e.importance] || "Normal",
+          is_read: e.is_read ?? true,
           recipients: e.recipients || [],
           // NOTE: status is intentionally omitted here. The DB column defaults to
           // "unprocessed" on INSERT, and merge-duplicates upsert must NOT overwrite
@@ -700,6 +716,7 @@ async function syncEmailsToSupabase() {
           to_field: e.to_field || "",
           cc_field: e.cc_field || "",
           importance: ["Low", "Normal", "High"][e.importance] || "Normal",
+          is_read: e.is_read ?? true,
           recipients: e.recipients || [],
           status: "completed",
         }));

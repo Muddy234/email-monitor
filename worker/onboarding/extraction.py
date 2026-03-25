@@ -19,6 +19,7 @@ from onboarding.prompts import (
     HAIKU_BEHAVIORAL_EXTRACTION_PROMPT,
 )
 from onboarding.retry import call_with_retry
+from onboarding.stats_extraction import _infer_external_type
 
 logger = logging.getLogger("worker.onboarding")
 
@@ -41,7 +42,16 @@ def _parse_json_response(text):
     try:
         return json.loads(stripped)
     except json.JSONDecodeError:
-        return None
+        pass
+    # Fallback: find first { and last } to handle preamble/postamble text
+    first_brace = stripped.find("{")
+    last_brace = stripped.rfind("}")
+    if first_brace != -1 and last_brace > first_brace:
+        try:
+            return json.loads(stripped[first_brace:last_brace + 1])
+        except json.JSONDecodeError:
+            pass
+    return None
 
 
 def extract_email_features(received, contact_freq):
@@ -61,8 +71,8 @@ def extract_email_features(received, contact_freq):
     selected = _select_emails_for_extraction(received, contact_freq)
     logger.info(f"Selected {len(selected)} emails for Haiku extraction")
 
-    # Prepare batches
-    batches = _prepare_batches(selected, BATCH_SIZE)
+    # Prepare batches (no To/CC — topic keywords come from subject + body)
+    batches = _prepare_batches(selected, BATCH_SIZE, include_recipients=False)
     total_batches = len(batches)
     completed_batches = 0
     all_extractions = []
@@ -162,7 +172,9 @@ def extract_writing_styles(sent_emails, pre_sampled=None):
         dict with 'style_features' (list) and 'sample_count' (int),
         or None if extraction fails.
     """
-    sampled = pre_sampled if pre_sampled is not None else _sample_sent_emails(sent_emails, max_count=100)
+    if pre_sampled is None:
+        raise ValueError("pre_sampled is required (use sample_unified_sent_emails)")
+    sampled = pre_sampled
     logger.info(f"Sampled {len(sampled)} sent emails for style extraction")
 
     if not sampled:
@@ -201,6 +213,8 @@ def extract_writing_styles(sent_emails, pre_sampled=None):
     }
 
 
+# Smaller than BATCH_SIZE because each behavioral pair includes parent body +
+# sent body + metadata context — significantly more tokens per item.
 BEHAVIORAL_BATCH_SIZE = 10
 BEHAVIORAL_MAX_SAMPLE = 160
 PARENT_TRUNCATION = 1500
@@ -247,11 +261,9 @@ def extract_behavioral_features(sent_emails, response_events, received_emails,
         if eid:
             sent_by_id[eid] = email
 
-    # Sample sent emails (use pre-sampled if provided by unified sampler)
-    sampled = pre_sampled if pre_sampled is not None else _sample_behavioral_emails(
-        sent_emails, sent_to_parent, sent_by_id,
-        user_domain, max_count=BEHAVIORAL_MAX_SAMPLE,
-    )
+    if pre_sampled is None:
+        raise ValueError("pre_sampled is required (use sample_unified_sent_emails)")
+    sampled = pre_sampled
     logger.info(f"Sampled {len(sampled)} sent emails for behavioral extraction")
 
     if not sampled:
@@ -331,52 +343,34 @@ def _select_emails_for_extraction(received, contact_freq, max_emails=300):
     return priority[:max_emails]
 
 
-def _sample_sent_emails(sent_emails, max_count=50):
-    """Stratified sample of sent emails by body length."""
-    if len(sent_emails) <= max_count:
-        return sent_emails
 
-    # Stratify: short (<100 chars), medium (100-500), long (500+)
-    short, medium, long_ = [], [], []
-    for email in sent_emails:
-        body_len = len(email.get("body") or "")
-        if body_len < 100:
-            short.append(email)
-        elif body_len < 500:
-            medium.append(email)
-        else:
-            long_.append(email)
+def _prepare_batches(emails, batch_size, include_recipients=True):
+    """Split emails into batches and format for LLM input.
 
-    # Allocate proportionally, minimum 5 per bucket if available
-    result = []
-    for bucket in (short, medium, long_):
-        random.shuffle(bucket)
-        share = max(5, int(max_count * len(bucket) / len(sent_emails)))
-        result.extend(bucket[:share])
-
-    random.shuffle(result)
-    return result[:max_count]
-
-
-def _prepare_batches(emails, batch_size):
-    """Split emails into batches and format for LLM input."""
+    Args:
+        include_recipients: Include To/CC fields. False for Phase 3 topic
+            extraction where recipients don't affect keyword quality.
+    """
     batches = []
     for i in range(0, len(emails), batch_size):
         chunk = emails[i:i + batch_size]
         formatted = []
         for j, email in enumerate(chunk):
             body = clean_email_body(email.get("body") or "")
-            text = (
-                f"--- EMAIL {j + 1} ---\n"
-                f"From: {email.get('sender_email') or email.get('sender', 'unknown')}\n"
-                f"To: {email.get('to_field', '')}\n"
-                f"CC: {email.get('cc_field', '')}\n"
-                f"Subject: {email.get('subject', '(no subject)')}\n"
-                f"Date: {email.get('received_time', '')}\n"
-                f"Body:\n{body}\n"
-            )
-            formatted.append(text)
-        batches.append("\n".join(formatted))
+            lines = [
+                f"--- EMAIL {j + 1} ---",
+                f"From: {email.get('sender_email') or email.get('sender', 'unknown')}",
+            ]
+            if include_recipients:
+                lines.append(f"To: {email.get('to_field', '')}")
+                lines.append(f"CC: {email.get('cc_field', '')}")
+            lines.extend([
+                f"Subject: {email.get('subject', '(no subject)')}",
+                f"Date: {email.get('received_time', '')}",
+                f"Body:\n{body}",
+            ])
+            formatted.append("\n".join(lines))
+        batches.append("\n\n".join(formatted))
     return batches
 
 
@@ -429,64 +423,19 @@ def _run_style_batch(batch_text, batch_idx):
 def _infer_contact_type(email_addr, user_domain):
     """Domain-based contact_type heuristic (approximate).
 
-    Same org domain = internal, different = external.
+    Same org domain = internal_colleague, different = external subtype
+    inferred from domain keywords (external_lender, external_legal, etc.).
     """
     if not email_addr or not user_domain:
         return "external"
     try:
         domain = email_addr.split("@")[1].lower()
-        return "internal" if domain == user_domain.lower() else "external"
+        if domain == user_domain.lower():
+            return "internal_colleague"
+        return _infer_external_type(domain)
     except (IndexError, AttributeError):
         return "external"
 
-
-def _sample_behavioral_emails(sent_emails, sent_to_parent, sent_by_id,
-                              user_domain, max_count=160):
-    """Stratified sample of sent emails by contact_type, then recency."""
-    if len(sent_emails) <= max_count:
-        return sent_emails
-
-    # Bucket by contact_type
-    buckets = {}
-    for email in sent_emails:
-        # Determine contact type from recipient
-        to_field = (email.get("to_field") or "").lower()
-        # Extract first recipient email
-        import re as _re
-        addrs = _re.findall(r"[\w.+-]+@[\w.-]+\.\w+", to_field)
-        first_addr = addrs[0] if addrs else ""
-        ctype = _infer_contact_type(first_addr, user_domain)
-        buckets.setdefault(ctype, []).append(email)
-
-    # Sort each bucket by recency (newest first)
-    for bucket in buckets.values():
-        bucket.sort(
-            key=lambda e: e.get("received_time") or "",
-            reverse=True,
-        )
-
-    # Allocate proportionally, minimum 3 per bucket
-    result = []
-    for ctype, emails in buckets.items():
-        share = max(3, int(max_count * len(emails) / len(sent_emails)))
-        result.extend(emails[:share])
-
-    # If under max, fill with remaining recent emails
-    if len(result) < max_count:
-        seen = {id(e) for e in result}
-        all_by_recency = sorted(
-            sent_emails,
-            key=lambda e: e.get("received_time") or "",
-            reverse=True,
-        )
-        for email in all_by_recency:
-            if id(email) not in seen:
-                result.append(email)
-                seen.add(id(email))
-                if len(result) >= max_count:
-                    break
-
-    return result[:max_count]
 
 
 def _prepare_behavioral_batches(sampled, sent_to_parent, sent_by_id,
