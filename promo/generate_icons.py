@@ -16,11 +16,33 @@ def draw_icon(size: int) -> Image.Image:
     img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
-    # Background: rounded rect with brand gradient approximation
-    # Use solid brand blue (#2563EB) for clean rendering at small sizes
-    bg_color = (37, 99, 235, 255)
+    # Background: rounded rect with brand gradient matching promo tiles
+    # linear-gradient(135deg, #1E3A5F 0%, #2563EB 60%, #3B82F6 100%)
     corner_r = int(s * 0.18)
-    draw.rounded_rectangle([0, 0, s - 1, s - 1], radius=corner_r, fill=bg_color)
+    # Draw gradient manually: iterate rows and interpolate colors
+    for y in range(s):
+        for x in range(s):
+            # Project (x, y) onto the 135-degree gradient axis
+            t = ((x + y) / (2 * s))  # normalized 0..1 along 135deg
+            t = max(0.0, min(1.0, t))
+            if t < 0.6:
+                # Interpolate #1E3A5F → #2563EB
+                f = t / 0.6
+                r = int(30 + (37 - 30) * f)
+                g = int(58 + (99 - 58) * f)
+                b = int(95 + (235 - 95) * f)
+            else:
+                # Interpolate #2563EB → #3B82F6
+                f = (t - 0.6) / 0.4
+                r = int(37 + (59 - 37) * f)
+                g = int(99 + (130 - 99) * f)
+                b = int(235 + (246 - 235) * f)
+            img.putpixel((x, y), (r, g, b, 255))
+    # Apply rounded corners by masking
+    mask = Image.new("L", (s, s), 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.rounded_rectangle([0, 0, s - 1, s - 1], radius=corner_r, fill=255)
+    img.putalpha(mask)
 
     # --- Envelope ---
     # Envelope body proportions (relative to canvas)
@@ -101,7 +123,8 @@ def draw_icon(size: int) -> Image.Image:
 if __name__ == "__main__":
     from pathlib import Path
 
-    out_dir = Path(__file__).parent
+    out_dir = Path(__file__).parent.parent / "extension" / "icons"
+    out_dir.mkdir(parents=True, exist_ok=True)
     for sz in (16, 48, 128):
         icon = draw_icon(sz)
         path = out_dir / f"icon{sz}.png"
