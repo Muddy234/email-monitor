@@ -822,8 +822,8 @@ class SupabaseWorkerClient:
     # Domain tiers (for signal extraction sender tier resolution)
     # ------------------------------------------------------------------
 
-    def fetch_domain_tiers(self):
-        """Load all domain → tier mappings.
+    def fetch_domain_tiers(self, user_id):
+        """Load domain → tier mappings for a specific user.
 
         Returns:
             dict: {domain: tier_letter} e.g. {'zionsbank.com': 'C'}
@@ -831,6 +831,7 @@ class SupabaseWorkerClient:
         result = (
             self.client.table("domain_tiers")
             .select("domain, tier")
+            .eq("user_id", user_id)
             .execute()
         )
         return {row["domain"]: row["tier"] for row in (result.data or [])}

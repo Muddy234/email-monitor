@@ -678,21 +678,23 @@ def _update_contact_stats(db, user_id, filtered_emails, contacts_map,
 # Domain tiers cache (module-level, refreshed per worker cycle)
 # ---------------------------------------------------------------------------
 
-_domain_tiers_cache = {}
-_domain_tiers_loaded_at = 0
-_DOMAIN_TIERS_TTL = 300  # 5 min
+_domain_tiers_cache = {}   # {user_id: {domain: tier}}
+_domain_tiers_ts = {}      # {user_id: loaded_at}
+_DOMAIN_TIERS_TTL = 300    # 5 min
 
 
-def _get_domain_tiers(db):
-    """Load domain tiers with 5-min cache."""
+def _get_domain_tiers(db, user_id):
+    """Load domain tiers for a user with 5-min cache."""
     import time
-    global _domain_tiers_cache, _domain_tiers_loaded_at
+    global _domain_tiers_cache, _domain_tiers_ts
     now = time.time()
-    if _domain_tiers_cache and (now - _domain_tiers_loaded_at) < _DOMAIN_TIERS_TTL:
-        return _domain_tiers_cache
-    _domain_tiers_cache = db.fetch_domain_tiers()
-    _domain_tiers_loaded_at = now
-    return _domain_tiers_cache
+    cached = _domain_tiers_cache.get(user_id)
+    if cached and (now - _domain_tiers_ts.get(user_id, 0)) < _DOMAIN_TIERS_TTL:
+        return cached
+    tiers = db.fetch_domain_tiers(user_id)
+    _domain_tiers_cache[user_id] = tiers
+    _domain_tiers_ts[user_id] = now
+    return tiers
 
 
 def _resolve_user_domain(profile):
@@ -778,7 +780,7 @@ def process_user_batch_signals(db, user_id, profile, emails):
         # Fetch batch context (contacts, threads)
         contacts_map, threads_map, _ = _fetch_batch_context(db, user_id, filtered)
         thread_emails_map = _fetch_thread_emails_batch(db, user_id, filtered)
-        domain_tiers = _get_domain_tiers(db)
+        domain_tiers = _get_domain_tiers(db, user_id)
         user_domain = _resolve_user_domain(profile)
 
         # Upsert contact stats for unknown senders
