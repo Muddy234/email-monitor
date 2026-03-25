@@ -67,7 +67,11 @@ CREATE TRIGGER seed_domain_tiers_on_profile
     FOR EACH ROW
     EXECUTE FUNCTION seed_domain_tiers_for_user();
 
--- 4. Backfill existing users via the same helper function
+-- 4. Delete old global rows FIRST (PK is still (domain), so backfill
+--    would conflict with existing rows if we insert before deleting)
+DELETE FROM domain_tiers WHERE user_id IS NULL;
+
+-- 5. Backfill existing users via the same helper function
 DO $$
 DECLARE
     r RECORD;
@@ -77,9 +81,6 @@ BEGIN
     END LOOP;
 END;
 $$;
-
--- 5. Delete old global rows (no user_id)
-DELETE FROM domain_tiers WHERE user_id IS NULL;
 
 -- 6. Make user_id NOT NULL
 ALTER TABLE domain_tiers ALTER COLUMN user_id SET NOT NULL;
