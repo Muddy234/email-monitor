@@ -1,6 +1,6 @@
 # Clarion AI — Marketing Storyboard
 
-**Brand:** Clarion AI by Arete Collective, L.P.
+**Brand:** Clarion AI
 **Tagline:** Your inbox, handled. Before your first meeting.
 **Target audience:** Real estate, finance, consulting, and legal professionals
 **Tone:** Confident, warm, professional. No jargon. Emphasize time reclaimed, not technology.
@@ -158,7 +158,7 @@ Quick montage: Open draft. Skim. Send. Open draft. Small edit. Send. Open draft.
 ## Brand Guidelines for Materials
 
 - **Product name:** Clarion AI (always capitalized, always with "AI")
-- **Company:** Arete Collective, L.P.
+- **Company:** Clarion AI
 - **Never say:** "reads your email for you" (implies surveillance) — instead say "analyzes" or "understands"
 - **Never say:** "AI writes your emails" — instead say "drafts replies in your voice for your review"
 - **Always emphasize:** The human stays in control. Review, edit, send — or discard

@@ -113,8 +113,7 @@ def build_config_from_profile(profile):
             "hc2",
             "rr3",
         ],
-        "filter_auto_important_patterns": ["/o=exchangelabs/"],
-        "filter_direct_recipient": "",
+        "filter_auto_important_patterns": [],
     }
 
     return config
@@ -136,17 +135,17 @@ def filter_emails(db_client, emails, user_id, config):
     for email in emails:
         email_data = supabase_row_to_email_data(email)
         email_data["signals"] = build_signals(email_data, user_aliases)
-        classification = email_filter.classify(email_data)
+        classification, filter_reason = email_filter.classify(email_data)
 
         if classification == "skip":
-            logger.info(f"  Skipped (filter): {email_data.get('subject', '?')[:60]}")
+            logger.info(f"  Skipped ({filter_reason}): {email_data.get('subject', '?')[:60]}")
             skip_ids.append(email["id"])
             skip_classifications.append({
                 "email_id": email["id"],
                 "user_id": user_id,
                 "needs_response": False,
                 "action": "skip",
-                "context": "Filtered out by rules",
+                "context": f"Filter: {filter_reason}",
                 "project": "",
                 "priority": 0,
             })
@@ -493,10 +492,6 @@ def _should_auto_skip(email_data, signals):
     if signals.get("terminal_acknowledgment") is True:
         return "terminal acknowledgment"
 
-    sender = (email_data.get("sender", "") or "").lower()
-    if "/o=exchangelabs/" in sender:
-        return "automated Exchange system message"
-
     if (
         signals.get("fyi_language_detected") is True
         and signals.get("intent_category") in ("informational", "acknowledgment")
@@ -576,7 +571,7 @@ def _fetch_thread_emails_batch(db, user_id, filtered_emails):
 
 
 def _build_thread_info(email_data, thread_row, contact, user_aliases):
-    """Build thread_info dict for the scorer from DB thread data.
+    """Build thread_info dict from DB thread data.
 
     Args:
         email_data: dict from supabase_row_to_email_data().
@@ -585,7 +580,7 @@ def _build_thread_info(email_data, thread_row, contact, user_aliases):
         user_aliases: list[str] of user email addresses.
 
     Returns:
-        dict: thread_info for score_email().
+        dict: thread_info with participation stats.
     """
     info = {
         "total_messages": 1,
@@ -645,7 +640,8 @@ def _update_response_labels(db, user_id, threads_map, user_aliases):
             logger.warning(f"  Failed to label response_events: {e}")
 
 
-def _update_contact_stats(db, user_id, filtered_emails, contacts_map):
+def _update_contact_stats(db, user_id, filtered_emails, contacts_map,
+                          user_domain=""):
     """Create/update contact records for senders not yet in contacts table."""
     seen = {}
     for ed in filtered_emails:
@@ -653,7 +649,20 @@ def _update_contact_stats(db, user_id, filtered_emails, contacts_map):
         if sender and sender not in contacts_map:
             rt = ed.get("received_time")
             if sender not in seen or (rt and rt > seen[sender]["received_time"]):
-                seen[sender] = {"email": sender, "received_time": rt}
+                sender_name = ed.get("sender_name") or ""
+                # Infer contact_type from domain match
+                domain = sender.split("@")[1] if "@" in sender else ""
+                contact_type = (
+                    "internal_colleague"
+                    if domain and user_domain and domain == user_domain
+                    else "unknown"
+                )
+                seen[sender] = {
+                    "email": sender,
+                    "received_time": rt,
+                    "name": sender_name or None,
+                    "contact_type": contact_type,
+                }
 
     new_senders = list(seen.values())
     if new_senders:
@@ -773,7 +782,7 @@ def process_user_batch_signals(db, user_id, profile, emails):
         user_domain = _resolve_user_domain(profile)
 
         # Upsert contact stats for unknown senders
-        _update_contact_stats(db, user_id, filtered, contacts_map)
+        _update_contact_stats(db, user_id, filtered, contacts_map, user_domain)
 
         # Retroactive response labeling
         _update_response_labels(db, user_id, threads_map, user_aliases)
@@ -810,7 +819,8 @@ def process_user_batch_signals(db, user_id, profile, emails):
 
             # Thread metadata
             thread_depth, has_unanswered = compute_thread_meta(
-                thread_row, sender_email, user_aliases
+                thread_row, sender_email, user_aliases,
+                thread_emails=thread_emails,
             )
 
             # Compute user position (TO vs CC) for this email
@@ -960,6 +970,7 @@ def process_user_batch_signals(db, user_id, profile, emails):
                         "reason": signals["reason"],
                         "action": signals["reason"],
                         "context": signals["reason"],
+                        "user_aliases": user_aliases,
                     }
 
                     # Add thread emails for thread context
@@ -1113,18 +1124,17 @@ def process_user_batch_signals(db, user_id, profile, emails):
                 draft_body = draft_results.get(db_id)
 
                 if not draft_body:
-                    draft_body, fallback_usage = draft_generator.generate_draft(
+                    cleaned, fallback_usage, thinking = draft_generator.generate_draft(
                         candidate["email_data"], candidate["action_context"]
                     )
                     if fallback_usage:
                         db.record_token_usage(user_id, "sonnet", "draft", fallback_usage)
-
-                # Extract thinking before validation strips it
-                thinking = DraftGenerator._extract_thinking(draft_body) if draft_body else None
-
-                cleaned = draft_generator._validate_output(
-                    draft_body, candidate["email_data"]
-                ) if draft_body else None
+                else:
+                    # Batch path: extract thinking before validation strips it
+                    thinking = DraftGenerator._extract_thinking(draft_body)
+                    cleaned = draft_generator._validate_output(
+                        draft_body, candidate["email_data"]
+                    )
                 if cleaned:
                     db.insert_draft(db_id, user_id, cleaned)
                     drafts_generated += 1

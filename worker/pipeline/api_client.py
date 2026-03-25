@@ -20,6 +20,13 @@ MODEL_MAP = {
     "haiku": "claude-haiku-4-5-20251001",
 }
 
+_USAGE_FIELDS = (
+    "input_tokens",
+    "output_tokens",
+    "cache_read_input_tokens",
+    "cache_creation_input_tokens",
+)
+
 
 def resolve_model(short_name: str) -> str:
     """Map a short config name ('sonnet') to a full model ID.
@@ -34,20 +41,23 @@ def _extract_usage(message) -> dict:
     """Extract token usage from an Anthropic API response."""
     usage = getattr(message, "usage", None)
     if not usage:
+        logger.debug("API response missing usage object entirely")
         return {}
-    return {
-        "input_tokens": getattr(usage, "input_tokens", 0) or 0,
-        "output_tokens": getattr(usage, "output_tokens", 0) or 0,
-        "cache_read_input_tokens": getattr(usage, "cache_read_input_tokens", 0) or 0,
-        "cache_creation_input_tokens": getattr(usage, "cache_creation_input_tokens", 0) or 0,
-    }
+    result = {}
+    for field in _USAGE_FIELDS:
+        value = getattr(usage, field, None)
+        if value is None:
+            logger.debug(f"Usage field '{field}' missing from API response")
+            value = 0
+        result[field] = value or 0
+    return result
 
 
 def call_claude(
     prompt: str,
     system_prompt: str = "",
     model: str = "claude-sonnet-4-20250514",
-    max_tokens: int = 8192,
+    max_tokens: int = 1024,
     timeout: int = 120,
     api_key: str = None,
     temperature: float = None,
@@ -125,9 +135,12 @@ def poll_batch_until_done(batch_id, api_key=None, timeout=120,
                           poll_interval=3, max_wait=900):
     """Poll a batch until processing_status == 'ended'.
 
+    Uses exponential backoff: starts at poll_interval, multiplies by 1.5
+    each cycle, caps at 30s.
+
     Args:
         batch_id: The batch ID from create_message_batch().
-        poll_interval: Seconds between status checks.
+        poll_interval: Initial seconds between status checks.
         max_wait: Maximum seconds to wait before raising TimeoutError.
 
     Returns:
@@ -135,12 +148,14 @@ def poll_batch_until_done(batch_id, api_key=None, timeout=120,
     """
     client = anthropic.Anthropic(api_key=api_key, timeout=timeout)
     deadline = time.time() + max_wait
+    interval = poll_interval
 
     while time.time() < deadline:
         batch = client.messages.batches.retrieve(batch_id)
         if batch.processing_status == "ended":
             return batch
-        time.sleep(poll_interval)
+        time.sleep(interval)
+        interval = min(interval * 1.5, 30)
 
     raise TimeoutError(f"Batch {batch_id} did not complete within {max_wait}s")
 
@@ -155,12 +170,7 @@ def get_batch_results(batch_id, api_key=None, timeout=120):
     """
     client = anthropic.Anthropic(api_key=api_key, timeout=timeout)
     results = {}
-    total_usage = {
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "cache_read_input_tokens": 0,
-        "cache_creation_input_tokens": 0,
-    }
+    total_usage = {k: 0 for k in _USAGE_FIELDS}
 
     for result in client.messages.batches.results(batch_id):
         if result.result.type == "succeeded":
@@ -181,7 +191,7 @@ def get_batch_results(batch_id, api_key=None, timeout=120):
     return results, total_usage
 
 
-DIRECT_API_THRESHOLD = int(os.environ.get("DIRECT_API_THRESHOLD", "2"))
+DIRECT_API_THRESHOLD = int(os.environ.get("DIRECT_API_THRESHOLD", "5"))
 
 
 def _submit_direct(requests, api_key=None, timeout=120):
@@ -192,12 +202,7 @@ def _submit_direct(requests, api_key=None, timeout=120):
     """
     client = anthropic.Anthropic(api_key=api_key, timeout=timeout)
     results = {}
-    total_usage = {
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "cache_read_input_tokens": 0,
-        "cache_creation_input_tokens": 0,
-    }
+    total_usage = {k: 0 for k in _USAGE_FIELDS}
 
     for req in requests:
         custom_id = req["custom_id"]
@@ -211,7 +216,7 @@ def _submit_direct(requests, api_key=None, timeout=120):
             usage = _extract_usage(message)
             for k in total_usage:
                 total_usage[k] += usage.get(k, 0)
-        except Exception as e:
+        except anthropic.APIError as e:
             logger.warning(f"  Direct API call failed for {custom_id}: {e}")
             results[custom_id] = None
 

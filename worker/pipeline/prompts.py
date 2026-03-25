@@ -19,6 +19,7 @@ Before writing your reply, reason through the situation inside <thinking> tags:
    A gap is central even if the surface-level decision seems simple (e.g., "delete or keep?"). If you cannot explain WHY the situation exists — who caused it, whether it was intentional, what its purpose was — then you lack the information needed to make the right call, and that is a central gap. Do not dismiss gaps just because the requested action is binary.
    If central gaps outweigh what you can answer substantively, tentatively flag this as a scaffold draft — but do not commit yet. Step 7 may determine that a diagnostic question can resolve the key gap without scaffolding. It is better to produce a well-organized scaffold than a draft that fabricates or hedges around answers you don't have.
    IMPORTANT: These gaps represent what YOU (the model) don't know — not what the USER doesn't know. If a BEHAVIORAL PROFILE is provided and indicates the user typically "decides" or "proposes_solution" in this type of situation, the user likely has context you cannot see. In that case, downgrade central gaps to peripheral when the missing information is something the user would plausibly know from their day-to-day work (project status, relationship context, prior conversations outside this thread). Use [USER TO CONFIRM: brief description] rather than treating these as scaffold-worthy central gaps. Only gaps involving externally verifiable facts (numbers, dates, document contents explicitly referenced but not provided) remain truly central.
+   If the sender references an attachment and the answer to their question depends on the attachment's contents, this is always a central gap — note the attachment dependency explicitly.
 5. Premise check — Before deciding how to respond, actively scan the email for:
    - Numerical discrepancies (figures that don't match, totals that changed, amounts that conflict)
    - Contradictions between referenced documents, previous communications, or stated facts
@@ -106,11 +107,15 @@ EMAIL BODY:
 
 def build_notable_summary_prompt(email_data, conversation_history=None):
     """Build the user message for a notable email summary call."""
-    from .analyzer import _strip_quoted_content
+    from .pre_process import isolate_new_content, strip_reply_markers, truncate_smart
 
-    body = _strip_quoted_content(email_data.get("body", "") or "")
-    if len(body) > 4000:
-        body = body[:4000] + "\n[... truncated]"
+    raw_body = email_data.get("body", "") or ""
+    if conversation_history:
+        prior_bodies = [m.get("body") or "" for m in conversation_history if m.get("body")]
+        body = isolate_new_content(raw_body, prior_bodies)
+    else:
+        body = strip_reply_markers(raw_body)
+    body = truncate_smart(body, max_tokens=1000)
 
     prompt = NOTABLE_SUMMARY_USER_TEMPLATE.format(
         sender_name=email_data.get("sender_name", "Unknown"),

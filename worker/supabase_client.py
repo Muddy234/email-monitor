@@ -751,13 +751,18 @@ class SupabaseWorkerClient:
         now = datetime.utcnow().isoformat()
         rows = []
         for stat in sender_stats:
-            rows.append({
+            row = {
                 "user_id": user_id,
                 "email": stat["email"],
                 "total_received": 1,
                 "last_interaction_at": stat.get("received_time") or now,
                 "updated_at": now,
-            })
+            }
+            if stat.get("name"):
+                row["name"] = stat["name"]
+            if stat.get("contact_type") and stat["contact_type"] != "unknown":
+                row["contact_type"] = stat["contact_type"]
+            rows.append(row)
         if rows:
             # Supabase upsert with on_conflict handles the atomic increment
             # via a Postgres function. For the SDK, we do a raw RPC or

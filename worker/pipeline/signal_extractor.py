@@ -3,6 +3,19 @@
 Replaces both the old regex-based scorer.py and the Haiku classify call.
 Returns 5 explanatory signals (mc, ar, ub, dl, rt) plus 3 decision fields
 (pri, draft, reason) that drive the pipeline directly.
+
+Signal abbreviation reference (used in Haiku prompt for token efficiency):
+    mc  → has_material_consequence   (bool)  Financial/legal/deal impact
+    ar  → has_action_request         (bool)  Sender needs recipient to act
+    ub  → user_is_bottleneck         (bool)  Someone blocked waiting on user
+    dl  → has_deadline               (bool)  Time constraint on request
+    rt  → response_type              (enum)  none|ack|ans|act|dec
+
+Decision fields:
+    target  → action_target           (enum)  user|other|all|unclear
+    pri     → priority                (enum)  high|med|low
+    draft   → needs_draft             (bool)  Whether user should respond
+    reason  → classification_reason   (str)   Why draft is true/false
 """
 
 import json
@@ -33,7 +46,9 @@ When ar=false, set target="user" (default, ignored).
 
 Key heuristics for target:
 - If body addresses someone by name ("Wes please...", "John, can you...") and that name is NOT USER → target=other.
-- If USER is in CC (not TO) and the action doesn't reference USER → target=other.
+- If USER is in CC (not TO):
+  - If the email content is clearly relevant to USER's work (financial terms, project details, deals USER would manage) AND significance is high or critical → target=user or target=unclear, NOT target=other. CC does not mean uninvolved.
+  - Otherwise, if the action doesn't reference USER → target=other.
 - If USER is sole TO recipient → target=user.
 - If body uses "all" / "everyone" / "team" language → target=all.
 
@@ -92,7 +107,15 @@ USER: Nate McBride|nmcbride@arete-collective.com|TO
 TO: nmcbride@arete-collective.com | CC: (none)
 S:Re: Inspection Schedule
 Thanks Nate, got it. We'll be there Monday at 9am.
-Output: {"mc":false,"ar":false,"ub":false,"dl":false,"rt":"none","target":"user","pri":"low","draft":false,"reason":"Terminal acknowledgment confirming receipt. No response needed."}\
+Output: {"mc":false,"ar":false,"ub":false,"dl":false,"rt":"none","target":"user","pri":"low","draft":false,"reason":"Terminal acknowledgment confirming receipt. No response needed."}
+
+Example 6 (USER is CC but content requires their involvement):
+Input: William Walker wwalker@acrisure.com|P|external|high|3|false
+USER: Nate McBride|nmcbride@arete-collective.com|CC
+TO: tlutz@acrisure.com | CC: nmcbride@arete-collective.com;tmills@arete-collective.com
+S:Re: Limestone Springs — Deposit Bond
+Tyler, can you get on a call this week to discuss the deposit structure and funding timeline?
+Output: {"mc":true,"ar":true,"ub":false,"dl":false,"rt":"ans","target":"user","pri":"med","draft":true,"reason":"Deposit bond discussion involves financial terms USER manages. CC position doesn't override substantive relevance."}\
 """
 
 
@@ -226,7 +249,9 @@ def _coerce_signals(data):
     target = _coerce_target(data.get("target"))
     draft = _coerce_bool(data.get("draft"))
 
-    # Safety net: if action targets someone else, override draft to False
+    # Safety net: if action targets someone else, override draft to False.
+    # Only fires on target=other; CC emails with high-significance senders
+    # should produce target=user or target=unclear, bypassing this gate.
     if ar and target == "other":
         draft = False
 

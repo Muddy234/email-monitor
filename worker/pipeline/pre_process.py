@@ -65,6 +65,10 @@ def strip_signatures(body):
     if not body:
         return ""
 
+    # Short emails: signature and content are inseparable, don't strip
+    if len(body) < 200:
+        return body
+
     # Only search in the last 40% of the body to avoid false positives
     search_start = max(0, int(len(body) * 0.6))
     tail = body[search_start:]
@@ -90,6 +94,10 @@ _QUOTE_PREFIX_RE = re.compile(r'^>+\s?', re.MULTILINE)
 # Minimum anchor length to avoid false substring matches
 _MIN_ANCHOR_LEN = 60
 
+# Anchor window offsets — tries multiple starting positions to avoid
+# false matches when prior bodies share common greetings (e.g. "Hi Nate,").
+_ANCHOR_OFFSETS = (0, 100, 200)
+
 
 def _normalize_for_match(text):
     """Collapse whitespace and strip '>' quote prefixes for fuzzy matching."""
@@ -100,10 +108,10 @@ def _normalize_for_match(text):
 def isolate_new_content(raw_body, prior_bodies):
     """Extract only the new message by diffing against prior email bodies.
 
-    For each prior body (longest first), looks for its opening text as an
-    anchor in the current body. If found, returns everything before the
-    match position. Falls back to strip_reply_markers() when no prior
-    body matches.
+    For each prior body (longest first), tries multiple anchor windows
+    from its opening text. If found, returns everything before the match
+    position. Falls back to strip_reply_markers() when no prior body
+    matches.
     """
     if not raw_body:
         return ""
@@ -123,21 +131,43 @@ def isolate_new_content(raw_body, prior_bodies):
         if len(norm_prior) < _MIN_ANCHOR_LEN:
             continue
 
-        # Use the first N chars of the prior body as the anchor
-        anchor = norm_prior[:200]
+        # Try multiple anchor windows — common greetings in the first
+        # 200 chars can cause false matches in threads with repeated
+        # participants. Offset anchors find unique match points.
+        for anchor_start in _ANCHOR_OFFSETS:
+            if len(norm_prior) < anchor_start + _MIN_ANCHOR_LEN:
+                break
+            anchor = norm_prior[anchor_start:anchor_start + 200]
 
-        pos = norm_body.find(anchor)
-        if pos <= 0:
-            continue
+            pos = norm_body.find(anchor)
+            if pos < 0:
+                continue
+            if pos == 0:
+                # Entire body is quoted content — no new message
+                return ""
 
-        # Map normalized position back to raw body.
-        # Walk the raw body, skipping whitespace differences, to find
-        # the character position corresponding to the normalized offset.
-        raw_pos = _map_norm_pos_to_raw(raw_body, pos)
+            raw_pos = _map_norm_pos_to_raw(raw_body, pos)
+            extracted = raw_body[:raw_pos].rstrip()
 
-        extracted = raw_body[:raw_pos].rstrip()
-        if len(extracted) >= 20:
-            logger.debug(f"isolate_new_content: matched prior anchor at raw pos {raw_pos}")
+            if len(extracted) < 20:
+                continue
+
+            # Debug: check for position-mapping drift — if the tail of
+            # extracted text overlaps with the prior body's anchor, the
+            # cut point was too late and includes quoted content.
+            if logger.isEnabledFor(logging.DEBUG):
+                norm_extracted = _normalize_for_match(extracted)
+                check = norm_prior[:100]
+                if len(check) >= _MIN_ANCHOR_LEN and check in norm_extracted[-200:]:
+                    logger.warning(
+                        "isolate_new_content: possible position-mapping drift — "
+                        "extracted text tail overlaps with prior body anchor"
+                    )
+
+            logger.debug(
+                f"isolate_new_content: matched prior anchor "
+                f"(offset={anchor_start}) at raw pos {raw_pos}"
+            )
             return extracted
 
     # No prior body matched — fall back to regex stripping
@@ -263,13 +293,17 @@ def resolve_sender_tier(sender_email, contact, user_domain, domain_tiers_cache):
 # Thread metadata
 # ---------------------------------------------------------------------------
 
-def compute_thread_meta(thread_row, sender_email, user_aliases):
+def compute_thread_meta(thread_row, sender_email, user_aliases,
+                        thread_emails=None):
     """Compute thread depth and unanswered flag for the context line.
 
     Args:
         thread_row: dict from threads table (or None).
         sender_email: Current email's sender (lowercase).
         user_aliases: list[str] of user email addresses (lowercase).
+        thread_emails: Optional list of prior email dicts (ordered by
+            received_time desc). When available, used for more accurate
+            has_unanswered detection by checking the last message sender.
 
     Returns:
         tuple: (depth: int, has_unanswered: bool)
@@ -279,10 +313,15 @@ def compute_thread_meta(thread_row, sender_email, user_aliases):
 
     depth = thread_row.get("total_messages", 1)
 
-    # has_unanswered: sender has a prior message the user hasn't replied to
-    # Approximation: user_messages == 0 and total > 1 means unanswered
-    user_msgs = thread_row.get("user_messages", 0)
-    has_unanswered = depth > 1 and user_msgs == 0
+    # has_unanswered: is the most recent prior message from someone other
+    # than the user? If so, the user hasn't replied yet.
+    if thread_emails:
+        last_sender = (thread_emails[0].get("sender") or "").lower()
+        has_unanswered = last_sender not in user_aliases
+    else:
+        # Fallback: no thread emails available, use aggregate counts
+        user_msgs = thread_row.get("user_messages", 0)
+        has_unanswered = depth > 1 and user_msgs == 0
 
     return depth, has_unanswered
 

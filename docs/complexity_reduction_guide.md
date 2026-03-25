@@ -204,7 +204,7 @@ After removing Sonnet synthesis, **every** contact hits the `domain.split(".")[0
 - `"Yahoo"` for yahoo.com
 - `"Zionsbank"` for zionsbank.com (no space, no proper casing)
 
-When Tyler or Gina show up in the enrichment briefing as "Gmail" instead of "Arete Collective," that's a noticeable regression in what Haiku sees.
+When Tyler or Gina show up in the enrichment briefing as "Gmail" instead of "Clarion AI," that's a noticeable regression in what Haiku sees.
 
 **Not a blocker for the removal**, but worth a cheap Python-side improvement as a fast follow:
 

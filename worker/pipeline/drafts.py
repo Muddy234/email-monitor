@@ -3,7 +3,7 @@
 import logging
 import re
 
-from .pre_process import isolate_new_content
+from .pre_process import isolate_new_content, truncate_smart
 from .prompts import DEFAULT_DRAFT_PROMPT_TEMPLATE
 
 logger = logging.getLogger("worker")
@@ -39,8 +39,7 @@ class DraftGenerator:
         thread_emails = action_context.get("thread_emails", [])
         prior_bodies = [te["body"] for te in thread_emails if te.get("body")]
         body = isolate_new_content(raw_body, prior_bodies)
-        if len(body) > 4000:
-            body = body[:4000] + "\n[... truncated]"
+        body = truncate_smart(body, max_tokens=1000)
 
         # Check for enrichment data
         enrichment = action_context.get("enrichment")
@@ -85,6 +84,8 @@ class DraftGenerator:
 
             if ctype and ctype != "unknown":
                 sender_context_lines.append(f"Contact type: {ctype}")
+            elif not ctype or ctype == "unknown":
+                sender_context_lines.append("Contact type: unknown (not yet classified)")
             if org:
                 sender_context_lines.append(f"Organization: {org}")
             if role:
@@ -153,10 +154,10 @@ Generate the reply body text only (no subject, no headers)."""
                     thread_emails, key=lambda m: m.get("received_time") or ""
                 )
                 # User's most recent message
-                user_email = (email_data.get("to_email") or "").lower()
+                user_aliases = action_context.get("user_aliases", [])
                 user_msgs = [
                     m for m in sorted_msgs
-                    if (m.get("sender") or "").lower() == user_email
+                    if (m.get("sender") or "").lower() in user_aliases
                 ]
                 if user_msgs:
                     last = user_msgs[-1]
@@ -219,7 +220,7 @@ Generate the reply body text only (no subject, no headers)."""
             "custom_id": custom_id,
             "params": {
                 "model": resolve_model(self.model),
-                "max_tokens": 4096,
+                "max_tokens": 2048,
                 "temperature": 0.3,
                 "system": [
                     {"type": "text", "text": self.system_prompt, "cache_control": {"type": "ephemeral"}}
@@ -229,7 +230,12 @@ Generate the reply body text only (no subject, no headers)."""
         }
 
     def generate_draft(self, email_data, action_context):
-        """Generate a draft via the Anthropic Messages API."""
+        """Generate a draft via the Anthropic Messages API.
+
+        Returns:
+            tuple: (cleaned_draft, usage_dict, thinking_text)
+                thinking_text is the raw chain-of-thought or None.
+        """
         from .api_client import call_claude, resolve_model
 
         prompt_text = self._build_draft_prompt(email_data, action_context)
@@ -239,7 +245,7 @@ Generate the reply body text only (no subject, no headers)."""
                 prompt=prompt_text,
                 system_prompt=self.system_prompt,
                 model=resolve_model(self.model),
-                max_tokens=4096,
+                max_tokens=2048,
                 timeout=self.timeout,
                 api_key=self.api_key,
                 temperature=0.3,
@@ -248,10 +254,15 @@ Generate the reply body text only (no subject, no headers)."""
         except Exception as e:
             subject = email_data.get("subject", "unknown")
             logger.error(f"  Draft generation API call failed for '{subject}': {e}")
-            return None, {}
+            return None, {}, None
+
+        # Extract thinking before validation strips it
+        thinking = self._extract_thinking(raw_output)
+        if thinking:
+            logger.debug(f"  Draft thinking ({len(thinking)} chars)")
 
         result = self._validate_output(raw_output, email_data)
-        return result, usage
+        return result, usage, thinking
 
     @staticmethod
     def _extract_thinking(raw_output):
@@ -294,10 +305,18 @@ Generate the reply body text only (no subject, no headers)."""
             logger.warning(f"  Draft too short for '{subject}' ({len(cleaned)} chars)")
             return None
 
-        error_prefixes = ["Error", "Usage:", "claude:", "CRITICAL:", "WARNING:"]
+        # Check for API error messages masquerading as drafts.
+        # Require both an error-like prefix AND no greeting/sign-off
+        # to avoid false positives on drafts like "Error-free closing..."
+        error_prefixes = ["Error:", "Error -", "Usage:", "claude:", "CRITICAL:", "WARNING:"]
         if any(cleaned.startswith(prefix) for prefix in error_prefixes):
-            subject = email_data.get("subject", "unknown")
-            logger.warning(f"  Draft appears to be an error message for '{subject}'")
-            return None
+            has_sign_off = bool(re.search(
+                r'(?:regards|thanks|best|sincerely|cheers)\s*[,.]?\s*\n',
+                cleaned, re.IGNORECASE,
+            ))
+            if not has_sign_off:
+                subject = email_data.get("subject", "unknown")
+                logger.warning(f"  Draft appears to be an error message for '{subject}'")
+                return None
 
         return cleaned
