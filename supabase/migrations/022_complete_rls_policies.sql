@@ -83,11 +83,8 @@ CREATE POLICY "subscriptions_update_own" ON subscriptions
 CREATE POLICY "subscriptions_delete_own" ON subscriptions
     FOR DELETE USING (auth.uid() = user_id);
 
--- ── feedback (missing UPDATE, DELETE) ────────────────────────────────
-CREATE POLICY "feedback_update_own" ON feedback
-    FOR UPDATE USING (auth.uid() = user_id);
-CREATE POLICY "feedback_delete_own" ON feedback
-    FOR DELETE USING (auth.uid() = user_id);
+-- ── feedback — table does not exist in DB yet (migration 014 never ran)
+-- Policies will be added when the table is created.
 
 -- ── drafts (missing INSERT, DELETE) ──────────────────────────────────
 CREATE POLICY "drafts_insert_own" ON drafts
