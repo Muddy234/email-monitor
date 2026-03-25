@@ -67,11 +67,13 @@ CREATE TRIGGER seed_domain_tiers_on_profile
     FOR EACH ROW
     EXECUTE FUNCTION seed_domain_tiers_for_user();
 
--- 4. Delete old global rows FIRST (PK is still (domain), so backfill
---    would conflict with existing rows if we insert before deleting)
+-- 4. Delete old global rows
 DELETE FROM domain_tiers WHERE user_id IS NULL;
 
--- 5. Backfill existing users via the same helper function
+-- 5. Drop old PK before backfill (PK on (domain) would block multi-user inserts)
+ALTER TABLE domain_tiers DROP CONSTRAINT domain_tiers_pkey;
+
+-- 6. Backfill existing users via the same helper function
 DO $$
 DECLARE
     r RECORD;
@@ -82,11 +84,8 @@ BEGIN
 END;
 $$;
 
--- 6. Make user_id NOT NULL
+-- 7. Make user_id NOT NULL + add new composite PK
 ALTER TABLE domain_tiers ALTER COLUMN user_id SET NOT NULL;
-
--- 7. Replace PK: (domain) → (user_id, domain)
-ALTER TABLE domain_tiers DROP CONSTRAINT domain_tiers_pkey;
 ALTER TABLE domain_tiers ADD PRIMARY KEY (user_id, domain);
 
 -- 8. Drop old global-read RLS policy
