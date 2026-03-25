@@ -40,12 +40,12 @@ def synthesize_contacts(contact_freq, response_rates, extractions):
 
     if not contact_inputs:
         logger.warning("No contacts to synthesize")
-        return []
+        return [], {}
 
     # Format for Sonnet
     prompt_text = _format_contact_prompt(contact_inputs)
 
-    response, _usage = call_with_retry(
+    response, usage = call_with_retry(
         prompt=prompt_text,
         system_prompt=SONNET_CONTACT_PROFILE_PROMPT,
         model="sonnet",
@@ -56,15 +56,15 @@ def synthesize_contacts(contact_freq, response_rates, extractions):
 
     if not response:
         logger.error("Contact synthesis: no response from Sonnet")
-        return None
+        return None, usage
 
     data = _parse_json_response(response)
     if data is None:
         logger.error(f"Contact synthesis: invalid JSON from Sonnet — {response[:200]}")
-        return None
+        return None, usage
     profiles = data.get("contact_profiles", [])
     logger.info(f"Synthesized {len(profiles)} contact profiles")
-    return profiles
+    return profiles, usage
 
 
 def synthesize_topics(keyword_frequencies):
@@ -78,7 +78,7 @@ def synthesize_topics(keyword_frequencies):
     """
     if not keyword_frequencies:
         logger.warning("No keywords to cluster")
-        return {"domains": [], "high_signal_keywords": []}
+        return {"domains": [], "high_signal_keywords": []}, {}
 
     # Format ranked keyword list
     sorted_kw = sorted(keyword_frequencies.items(), key=lambda x: x[1], reverse=True)
@@ -87,7 +87,7 @@ def synthesize_topics(keyword_frequencies):
     header = f"Ranked keywords by frequency (top 150 of {total_count}):\n" if total_count > 150 else "Ranked keywords by frequency:\n"
     prompt_text = header + "\n".join(lines)
 
-    response, _usage = call_with_retry(
+    response, usage = call_with_retry(
         prompt=prompt_text,
         system_prompt=SONNET_TOPIC_CLUSTERING_PROMPT,
         model="sonnet",
@@ -98,16 +98,16 @@ def synthesize_topics(keyword_frequencies):
 
     if not response:
         logger.error("Topic synthesis: no response from Sonnet")
-        return None
+        return None, usage
 
     data = _parse_json_response(response)
     if data is None:
         logger.error(f"Topic synthesis: invalid JSON from Sonnet — {response[:200]}")
-        return None
+        return None, usage
     domains = data.get("domains", [])
     high_signal = data.get("high_signal_keywords", [])
     logger.info(f"Clustered into {len(domains)} domains, {len(high_signal)} high-signal keywords")
-    return {"domains": domains, "high_signal_keywords": high_signal}
+    return {"domains": domains, "high_signal_keywords": high_signal}, usage
 
 
 def synthesize_style_guide(style_features, contact_profiles):
@@ -124,7 +124,7 @@ def synthesize_style_guide(style_features, contact_profiles):
     """
     if not style_features:
         logger.warning("No style features to synthesize")
-        return None
+        return None, {}
 
     # Build contact_type lookup from profiles
     contact_type_map = {}
@@ -147,7 +147,7 @@ def synthesize_style_guide(style_features, contact_profiles):
         + json.dumps(enriched)
     )
 
-    response, _usage = call_with_retry(
+    response, usage = call_with_retry(
         prompt=prompt_text,
         system_prompt=SONNET_STYLE_GUIDE_PROMPT,
         model="sonnet",
@@ -158,11 +158,11 @@ def synthesize_style_guide(style_features, contact_profiles):
 
     if not response:
         logger.error("Style guide synthesis: no response from Sonnet")
-        return None
+        return None, usage
 
     cleaned = _clean_synthesis_output(response)
     logger.info(f"Generated style guide ({len(cleaned)} chars)")
-    return cleaned
+    return cleaned, usage
 
 
 def synthesize_behavioral_profile(behavioral_features, contact_profiles):
@@ -180,7 +180,7 @@ def synthesize_behavioral_profile(behavioral_features, contact_profiles):
     """
     if not behavioral_features:
         logger.warning("No behavioral features to synthesize")
-        return None
+        return None, {}
 
     # Format authoritative contact profiles for reconciliation
     profile_lines = []
@@ -206,7 +206,7 @@ def synthesize_behavioral_profile(behavioral_features, contact_profiles):
         + profiles_block
     )
 
-    response, _usage = call_with_retry(
+    response, usage = call_with_retry(
         prompt=prompt_text,
         system_prompt=SONNET_BEHAVIORAL_PROFILE_PROMPT,
         model="sonnet",
@@ -217,11 +217,11 @@ def synthesize_behavioral_profile(behavioral_features, contact_profiles):
 
     if not response:
         logger.error("Behavioral profile synthesis: no response from Sonnet")
-        return None
+        return None, usage
 
     cleaned = _clean_synthesis_output(response)
     logger.info(f"Generated behavioral profile ({len(cleaned)} chars)")
-    return cleaned
+    return cleaned, usage
 
 
 # ---------------------------------------------------------------------------

@@ -35,6 +35,7 @@ from onboarding.extraction import (
     extract_writing_styles,
     extract_behavioral_features,
     sample_unified_sent_emails,
+    _merge_usage,
 )
 from onboarding.stats_extraction import extract_all
 from onboarding.model_trainer import train_user_model
@@ -74,7 +75,7 @@ def run_onboarding(db, user_id, profile):
 
         # ── Phase 1: Collect ─────────────────────────────────────
         db.update_onboarding_status(user_id, "collecting")
-        email_data = collect_onboarding_emails(db, user_id, aliases, days=120, max_emails=400)
+        email_data = collect_onboarding_emails(db, user_id, aliases, days=180, max_emails=500)
         received = email_data["received"]
         sent = email_data["sent"]
 
@@ -221,16 +222,27 @@ def run_onboarding(db, user_id, profile):
             db.update_onboarding_status(user_id, "failed")
             return False
 
+        # Record Haiku usage from all three extraction phases
+        haiku_usage = {}
+        _merge_usage(haiku_usage, extraction_result.get("usage", {}))
+        if style_result:
+            _merge_usage(haiku_usage, style_result.get("usage", {}))
+        if behavioral_result:
+            _merge_usage(haiku_usage, behavioral_result.get("usage", {}))
+        db.record_token_usage(user_id, "haiku", "onboarding_extraction", haiku_usage)
+
         logger.info("Phase 3 + 4C-1 + 4C-1b complete: Haiku extraction done")
 
         # ── Phase 4A: Contact profile synthesis ──────────────────
         db.update_onboarding_status(user_id, "synthesizing")
 
-        contact_profiles = synthesize_contacts(
+        contact_profiles, contacts_usage = synthesize_contacts(
             stats["contact_frequencies"],
             stats["response_rates"],
             extraction_result.get("extractions", []),
         )
+        sonnet_usage = {}
+        _merge_usage(sonnet_usage, contacts_usage)
 
         if contact_profiles is None:
             # Fallback: use Python-only stats without Sonnet enrichment
@@ -276,10 +288,13 @@ def run_onboarding(db, user_id, profile):
                 behavioral_result.get("behavioral_features", []) if behavioral_result else [],
                 contact_profiles,
             )
-            topic_result = f_topics.result()
-            style_guide = f_guide.result()
+            topic_result, topic_usage = f_topics.result()
+            _merge_usage(sonnet_usage, topic_usage)
+            style_guide, style_usage = f_guide.result()
+            _merge_usage(sonnet_usage, style_usage)
             try:
-                behavioral_profile = f_behavioral.result()
+                behavioral_profile, behavioral_usage = f_behavioral.result()
+                _merge_usage(sonnet_usage, behavioral_usage)
             except Exception:
                 logger.exception("Phase 4C-3: behavioral profile synthesis raised")
 
@@ -288,12 +303,16 @@ def run_onboarding(db, user_id, profile):
         if not behavioral_profile and behavioral_result:
             logger.info("Retrying behavioral profile synthesis (1 of 1)...")
             try:
-                behavioral_profile = synthesize_behavioral_profile(
+                behavioral_profile, retry_usage = synthesize_behavioral_profile(
                     behavioral_result.get("behavioral_features", []),
                     contact_profiles,
                 )
+                _merge_usage(sonnet_usage, retry_usage)
             except Exception:
                 logger.exception("Phase 4C-3: behavioral profile retry also failed")
+
+        # Record Sonnet usage from all synthesis phases (4A + 4B + 4C-2 + 4C-3)
+        db.record_token_usage(user_id, "sonnet", "onboarding_synthesis", sonnet_usage)
 
         if topic_result is None:
             topic_result = {"domains": [], "high_signal_keywords": []}

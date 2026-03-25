@@ -27,6 +27,16 @@ BATCH_SIZE = 20
 MAX_WORKERS = 5
 
 
+def _merge_usage(total, new):
+    """Accumulate token usage dicts."""
+    if not new:
+        return total
+    for key in ("input_tokens", "output_tokens",
+                "cache_read_input_tokens", "cache_creation_input_tokens"):
+        total[key] = total.get(key, 0) + (new.get(key, 0) or 0)
+    return total
+
+
 def _parse_json_response(text):
     """Parse JSON from an LLM response, stripping markdown fences if present."""
     if not text:
@@ -77,6 +87,7 @@ def extract_email_features(received, contact_freq):
     completed_batches = 0
     all_extractions = []
     failed_batches = 0
+    total_usage = {}
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = {
@@ -87,7 +98,8 @@ def extract_email_features(received, contact_freq):
         for future in as_completed(futures):
             batch_idx = futures[future]
             try:
-                result = future.result()
+                result, usage = future.result()
+                _merge_usage(total_usage, usage)
                 if result:
                     all_extractions.extend(result)
                 else:
@@ -119,6 +131,7 @@ def extract_email_features(received, contact_freq):
     return {
         "extractions": all_extractions,
         "keyword_frequencies": dict(keyword_freq.most_common(200)),
+        "usage": total_usage,
     }
 
 
@@ -183,6 +196,7 @@ def extract_writing_styles(sent_emails, pre_sampled=None):
     batches = _prepare_batches(sampled, BATCH_SIZE)
     all_features = []
     failed_batches = 0
+    total_usage = {}
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = {
@@ -192,7 +206,8 @@ def extract_writing_styles(sent_emails, pre_sampled=None):
 
         for future in as_completed(futures):
             try:
-                result = future.result()
+                result, usage = future.result()
+                _merge_usage(total_usage, usage)
                 if result:
                     all_features.extend(result)
                 else:
@@ -210,6 +225,7 @@ def extract_writing_styles(sent_emails, pre_sampled=None):
     return {
         "style_features": all_features,
         "sample_count": len(sampled),
+        "usage": total_usage,
     }
 
 
@@ -276,6 +292,7 @@ def extract_behavioral_features(sent_emails, response_events, received_emails,
     )
     all_features = []
     failed_batches = 0
+    total_usage = {}
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = {
@@ -285,7 +302,8 @@ def extract_behavioral_features(sent_emails, response_events, received_emails,
 
         for future in as_completed(futures):
             try:
-                result = future.result()
+                result, usage = future.result()
+                _merge_usage(total_usage, usage)
                 if result:
                     all_features.extend(result)
                 else:
@@ -303,6 +321,7 @@ def extract_behavioral_features(sent_emails, response_events, received_emails,
     return {
         "behavioral_features": all_features,
         "sample_count": len(sampled),
+        "usage": total_usage,
     }
 
 
@@ -375,8 +394,8 @@ def _prepare_batches(emails, batch_size, include_recipients=True):
 
 
 def _run_extraction_batch(batch_text, batch_idx):
-    """Run a single Haiku extraction batch. Returns list of extractions."""
-    response, _usage = call_with_retry(
+    """Run a single Haiku extraction batch. Returns (list of extractions, usage)."""
+    response, usage = call_with_retry(
         prompt=batch_text,
         system_prompt=HAIKU_EXTRACTION_PROMPT,
         model="haiku",
@@ -386,18 +405,18 @@ def _run_extraction_batch(batch_text, batch_idx):
     )
     if not response:
         logger.warning(f"Extraction batch {batch_idx}: no response")
-        return None
+        return None, usage
 
     data = _parse_json_response(response)
     if data is None:
         logger.warning(f"Extraction batch {batch_idx}: invalid JSON — {response[:200]}")
-        return None
-    return data.get("extractions", [])
+        return None, usage
+    return data.get("extractions", []), usage
 
 
 def _run_style_batch(batch_text, batch_idx):
-    """Run a single Haiku style extraction batch. Returns list of features."""
-    response, _usage = call_with_retry(
+    """Run a single Haiku style extraction batch. Returns (list of features, usage)."""
+    response, usage = call_with_retry(
         prompt=batch_text,
         system_prompt=HAIKU_STYLE_EXTRACTION_PROMPT,
         model="haiku",
@@ -407,13 +426,13 @@ def _run_style_batch(batch_text, batch_idx):
     )
     if not response:
         logger.warning(f"Style batch {batch_idx}: no response")
-        return None
+        return None, usage
 
     data = _parse_json_response(response)
     if data is None:
         logger.warning(f"Style batch {batch_idx}: invalid JSON — {response[:200]}")
-        return None
-    return data.get("extractions", [])
+        return None, usage
+    return data.get("extractions", []), usage
 
 
 # ---------------------------------------------------------------------------
@@ -521,8 +540,8 @@ def _prepare_behavioral_batches(sampled, sent_to_parent, sent_by_id,
 
 
 def _run_behavioral_batch(batch_text, batch_idx):
-    """Run a single Haiku behavioral extraction batch."""
-    response, _usage = call_with_retry(
+    """Run a single Haiku behavioral extraction batch. Returns (list of features, usage)."""
+    response, usage = call_with_retry(
         prompt=batch_text,
         system_prompt=HAIKU_BEHAVIORAL_EXTRACTION_PROMPT,
         model="haiku",
@@ -532,10 +551,10 @@ def _run_behavioral_batch(batch_text, batch_idx):
     )
     if not response:
         logger.warning(f"Behavioral batch {batch_idx}: no response")
-        return None
+        return None, usage
 
     data = _parse_json_response(response)
     if data is None:
         logger.warning(f"Behavioral batch {batch_idx}: invalid JSON — {response[:200]}")
-        return None
-    return data.get("extractions", [])
+        return None, usage
+    return data.get("extractions", []), usage
