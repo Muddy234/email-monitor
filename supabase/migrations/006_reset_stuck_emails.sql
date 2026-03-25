@@ -1,4 +1,3 @@
--- NOTE: Shares 006 prefix with 006_trace_scoring_columns.sql. Both are idempotent.
 -- Fix: Reset emails stuck in "processing" status back to "unprocessed"
 -- so the worker can re-claim and process them.
 --

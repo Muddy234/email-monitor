@@ -1,4 +1,3 @@
--- NOTE: Shares 007 prefix with 007_profile_display_name.sql. Both are idempotent.
 -- Add feature columns to response_events for full model training.
 --
 -- These columns were previously either hardcoded (mentions_user_name,

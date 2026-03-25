@@ -547,25 +547,41 @@ def _fetch_batch_context(db, user_id, filtered_emails):
 
 
 def _fetch_thread_emails_batch(db, user_id, filtered_emails):
-    """Fetch prior thread emails for all conversations in the batch.
+    """Fetch prior thread emails for all conversations in a single query.
 
     Returns:
         dict: conversation_id → list[dict] of prior email rows.
     """
-    conv_ids = {
+    conv_ids = list({
         ed["conversation_id"]
         for ed in filtered_emails
         if ed.get("conversation_id")
-    }
+    })
+    if not conv_ids:
+        return {}
+
+    try:
+        result = (
+            db.client.table("emails")
+            .select("id, conversation_id, sender, sender_name, body, received_time, subject")
+            .eq("user_id", user_id)
+            .in_("conversation_id", conv_ids)
+            .order("received_time", desc=True)
+            .limit(1000)
+            .execute()
+        )
+    except Exception as e:
+        logger.warning(f"  Failed to bulk-fetch thread emails: {e}")
+        return {}
 
     thread_emails_map = {}
-    for conv_id in conv_ids:
-        try:
-            emails = db.fetch_thread_emails(user_id, conv_id)
-            if emails:
-                thread_emails_map[conv_id] = emails
-        except Exception as e:
-            logger.warning(f"  Failed to fetch thread emails for {conv_id}: {e}")
+    for row in (result.data or []):
+        cid = row["conversation_id"]
+        thread_emails_map.setdefault(cid, []).append(row)
+
+    # Limit to 10 per conversation (matching original behavior)
+    for cid in thread_emails_map:
+        thread_emails_map[cid] = thread_emails_map[cid][:10]
 
     return thread_emails_map
 

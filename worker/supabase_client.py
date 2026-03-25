@@ -329,16 +329,19 @@ class SupabaseWorkerClient:
     # Onboarding
     # ------------------------------------------------------------------
 
-    def get_users_needing_onboarding(self, min_emails=20):
+    def get_users_needing_onboarding(self, min_emails=20, fallback_emails=5, fallback_days=3):
         """Find users who haven't completed onboarding and have enough emails.
+
+        Eligibility: (email_count >= min_emails) OR
+                     (email_count >= fallback_emails AND account_age > fallback_days).
+        Users with 0 emails after fallback_days are skipped (extension likely not installed).
 
         Returns:
             list[str]: User IDs ready for onboarding.
         """
-        # Users with no onboarding_completed_at and not currently running
         result = (
             self.client.table("profiles")
-            .select("id, onboarding_status")
+            .select("id, onboarding_status, created_at")
             .is_("onboarding_completed_at", "null")
             .execute()
         )
@@ -346,21 +349,32 @@ class SupabaseWorkerClient:
             return []
 
         ready = []
+        now = datetime.utcnow()
         for row in result.data:
             uid = row["id"]
-            # Skip users already mid-onboarding (unless pending or failed)
             status = row.get("onboarding_status")
             if status and status not in ("pending", "failed"):
                 continue
-            # Check email count
+
             count_result = (
                 self.client.table("emails")
                 .select("id", count="exact")
                 .eq("user_id", uid)
                 .execute()
             )
-            if count_result.count and count_result.count >= min_emails:
+            email_count = count_result.count or 0
+
+            if email_count >= min_emails:
                 ready.append(uid)
+                continue
+
+            # Time-based fallback for quiet inboxes
+            created_at = row.get("created_at")
+            if created_at and email_count >= fallback_emails:
+                account_age = now - datetime.fromisoformat(created_at.replace("Z", "+00:00")).replace(tzinfo=None)
+                if account_age.days >= fallback_days:
+                    ready.append(uid)
+
         return ready
 
     def fetch_emails_for_onboarding(self, user_id, days=30, max_emails=None):
@@ -738,56 +752,33 @@ class SupabaseWorkerClient:
             ).eq("user_id", user_id).in_("email_id", chunk).execute()
 
     def bulk_upsert_contact_stats(self, user_id, sender_stats):
-        """Batch upsert minimal contact records for new/existing senders.
-
-        Uses atomic ON CONFLICT to avoid read-then-write race conditions.
+        """Batch upsert contact records via a single RPC call.
 
         Args:
             user_id: UUID string.
-            sender_stats: list of dicts with keys: email, received_time.
+            sender_stats: list of dicts with keys: email, received_time,
+                          and optional: name, contact_type.
         """
         if not sender_stats:
             return
         now = datetime.utcnow().isoformat()
-        rows = []
+        contacts_payload = []
         for stat in sender_stats:
-            row = {
-                "user_id": user_id,
+            entry = {
                 "email": stat["email"],
-                "total_received": 1,
-                "last_interaction_at": stat.get("received_time") or now,
-                "updated_at": now,
+                "received_time": stat.get("received_time") or now,
             }
             if stat.get("name"):
-                row["name"] = stat["name"]
-            if stat.get("contact_type") and stat["contact_type"] != "unknown":
-                row["contact_type"] = stat["contact_type"]
-            rows.append(row)
-        if rows:
-            # Supabase upsert with on_conflict handles the atomic increment
-            # via a Postgres function. For the SDK, we do a raw RPC or
-            # fall back to upsert (which sets total_received=1 for new rows).
-            # For existing rows, we need a separate update.
-            # Split into new vs existing contacts.
-            emails = [r["email"] for r in rows]
-            existing = self.fetch_contacts_by_emails(user_id, emails)
+                entry["name"] = stat["name"]
+            if stat.get("contact_type"):
+                entry["contact_type"] = stat["contact_type"]
+            contacts_payload.append(entry)
 
-            new_rows = [r for r in rows if r["email"] not in existing]
-            update_emails = [r for r in rows if r["email"] in existing]
-
-            if new_rows:
-                self.client.table("contacts").upsert(
-                    new_rows, on_conflict="user_id,email"
-                ).execute()
-
-            # Increment existing contacts atomically via individual updates
-            for r in update_emails:
-                contact = existing[r["email"]]
-                self.client.table("contacts").update({
-                    "total_received": (contact.get("total_received") or 0) + 1,
-                    "last_interaction_at": r["last_interaction_at"],
-                    "updated_at": now,
-                }).eq("user_id", user_id).eq("email", r["email"]).execute()
+        import json
+        self.client.rpc("increment_contact_stats", {
+            "p_user_id": user_id,
+            "p_contacts": json.dumps(contacts_payload),
+        }).execute()
 
     # ------------------------------------------------------------------
     # Threads

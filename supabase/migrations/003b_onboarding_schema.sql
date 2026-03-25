@@ -1,4 +1,3 @@
--- NOTE: Shares 003 prefix with 003_heartbeat_columns.sql. Both are idempotent (IF NOT EXISTS). Safe to run in any order.
 -- Clarion AI: Onboarding schema
 -- Tables and columns for the one-time onboarding intelligence build.
 -- Run after 002_dashboard_policies.sql.
