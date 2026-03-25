@@ -2,6 +2,13 @@
 
 Each constant is a system prompt for a specific onboarding phase.
 User messages are constructed by the calling module with the actual data.
+
+Cross-prompt dependency: The behavioral dimension values (decision_type,
+commitment_pattern, etc.) must stay aligned across three prompts:
+  1. HAIKU_BEHAVIORAL_EXTRACTION_PROMPT (this file) — extracts per-email values
+  2. SONNET_BEHAVIORAL_PROFILE_PROMPT (this file) — synthesizes IF-THEN rules
+  3. DEFAULT_DRAFT_PROMPT_TEMPLATE (pipeline/prompts.py) — Step 8 applies rules
+If you add or rename a value in one, propagate to all three.
 """
 
 # ---------------------------------------------------------------------------
@@ -77,6 +84,9 @@ Pleasantry level definitions:
 - "standard": greeting + closing pleasantry
 - "warm": effusive thanks, personal remarks, extra warmth
 
+For emails under 10 words, set tone to "terse" and extract what you can — \
+incomplete fields are acceptable for very short messages.
+
 Output format:
 {"extractions": [<one object per email>]}
 
@@ -123,6 +133,8 @@ interaction:
   - low: infrequent or almost entirely FYI
 - If there is not enough information to infer a field, use "unknown" — do not \
 guess.
+- For contacts with fewer than 5 emails, mark significance as "low" and \
+inferred_role as "unknown" unless the email content provides strong evidence.
 
 Output format:
 {"contact_profiles": [<one object per contact>]}
@@ -136,8 +148,8 @@ Start your response with { and end with }."""
 
 SONNET_TOPIC_CLUSTERING_PROMPT = """\
 You are building a topic profile for a business professional's email \
-assistant. Below is a ranked list of topic keywords extracted from 30 days of \
-the user's email, along with their frequency.
+assistant. Below is a ranked list of topic keywords extracted from the user's \
+recent email, along with their frequency.
 
 Cluster these keywords into 5-10 domain categories that represent the user's \
 areas of professional activity. For each domain:
@@ -156,8 +168,8 @@ Rules:
 - Domains should be specific to this user's work, not generic categories.
 - If a keyword doesn't fit any clear domain, place it in a "General" domain.
 - Order domains by signal_strength (highest first).
-- Keywords that appear only 1-2 times across 30 days are low signal — group \
-them into broader domains rather than creating a domain for each.
+- Keywords that appear only 1-2 times are low signal — group them into \
+broader domains rather than creating a domain for each.
 
 Also return a top-level field:
 "high_signal_keywords": [<the top 20 keywords by frequency — these are the \
