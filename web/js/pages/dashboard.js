@@ -83,8 +83,9 @@ async function loadDashboard() {
         const [allEmailsRes, rangeEmailsRes, eventsRes, runsRes] = await Promise.all([
             supabase
                 .from("emails")
-                .select("id, status, sender, sender_name, sender_email, subject, received_time, classifications(needs_response, action, context), drafts(id, draft_body)")
+                .select("id, status, sender, sender_name, sender_email, subject, received_time, classifications(needs_response, action, context), drafts(id, draft_body, status)")
                 .not("status", "in", "(completed,dismissed)")
+                .neq("drafts.status", "deleted")
                 .order("received_time", { ascending: false }),
             supabase
                 .from("emails")

@@ -93,12 +93,14 @@ async function loadEmails() {
             supabase
                 .from("emails")
                 .select("*, classifications(*), drafts(*)")
+                .neq("drafts.status", "deleted")
                 .gte("received_time", thirtyDaysAgo)
                 .order("received_time", { ascending: false }),
             // Emails with drafts — no date filter so drafts are always visible
             supabase
                 .from("emails")
                 .select("*, classifications(*), drafts!inner(*)")
+                .neq("drafts.status", "deleted")
                 .order("received_time", { ascending: false }),
             supabase
                 .from("response_events")

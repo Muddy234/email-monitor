@@ -14,6 +14,7 @@ let realtimeWs = null;
 let realtimeRef = 0;
 let realtimeHeartbeatTimer = null;
 let realtimeUserId = null;
+let staleSweepInProgress = false;
 
 // ---------------------------------------------------------------------------
 // Phoenix Channels protocol helpers
@@ -288,5 +289,66 @@ async function sweepPendingDrafts(userId) {
   } catch (err) {
     if (DEBUG) console.warn("Sweep: query failed:", err.message);
     return 0;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Stale-draft sweep — delete drafts whose conversation has a sent reply
+// ---------------------------------------------------------------------------
+
+/**
+ * Find drafts that are stale (user already replied in the same conversation)
+ * and delete them from Outlook + mark deleted in Supabase.
+ * Runs BEFORE sweepPendingDrafts to prevent writing stale drafts to Outlook.
+ */
+async function sweepStaleDrafts() {
+  if (staleSweepInProgress) return 0;
+  staleSweepInProgress = true;
+
+  try {
+    const staleDrafts = await supabaseRequest("/rpc/find_stale_drafts", {
+      method: "POST",
+      body: {},
+    });
+
+    if (!staleDrafts || staleDrafts.length === 0) return 0;
+
+    let deleted = 0;
+    let skipped = 0;
+
+    for (const draft of staleDrafts) {
+      try {
+        // Only call OWA DeleteItem for drafts already written to Outlook
+        if (draft.status === "written" && draft.outlook_draft_id) {
+          await handleDeleteItem(draft.outlook_draft_id);
+        }
+
+        // Mark deleted in Supabase regardless of prior status
+        await supabaseRequest(`/drafts?id=eq.${draft.draft_id}`, {
+          method: "PATCH",
+          body: {
+            draft_deleted: true,
+            status: "deleted",
+            updated_at: new Date().toISOString(),
+          },
+        });
+
+        deleted++;
+      } catch (err) {
+        skipped++;
+        if (DEBUG) console.warn(`Stale sweep: failed draft ${draft.draft_id}:`, err.message);
+
+        // No point trying more OWA calls if token is gone
+        if (err.message === "TOKEN_EXPIRED") break;
+      }
+    }
+
+    if (DEBUG) console.log(`Stale sweep: found=${staleDrafts.length} deleted=${deleted} skipped=${skipped}`);
+    return deleted;
+  } catch (err) {
+    if (DEBUG) console.warn("Stale sweep: query failed:", err.message);
+    return 0;
+  } finally {
+    staleSweepInProgress = false;
   }
 }

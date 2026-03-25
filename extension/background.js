@@ -435,6 +435,32 @@ async function handleSaveDraft(params) {
   };
 }
 
+// --- DeleteItem — remove draft from Outlook --------------------------------
+
+async function handleDeleteItem(itemId) {
+  const body = {
+    __type: "DeleteItemRequest:#Exchange",
+    ItemIds: [
+      { __type: "ItemId:#Exchange", Id: itemId },
+    ],
+    DeleteType: "HardDelete",
+  };
+
+  const data = await owaFetch("DeleteItem", body);
+  const ri = data.Body?.ResponseMessages?.Items?.[0];
+
+  if (ri?.ResponseCode === "NoError") {
+    return { success: true };
+  }
+
+  // Draft already gone (user sent it or manually deleted it)
+  if (ri?.ResponseCode === "ErrorItemNotFound") {
+    return { success: true, already_gone: true };
+  }
+
+  throw new Error(`DeleteItem failed: ${ri?.ResponseCode || "unknown"}`);
+}
+
 // --- FindItem on Sent Items ------------------------------------------------
 
 async function handleGetSentItems(params) {
@@ -756,7 +782,16 @@ chrome.alarms.onAlarm.addListener((alarm) => {
         } catch (_) {}
       }
 
-      // 3. Sweep pending drafts missed while WebSocket was dead
+      // 3. Delete stale drafts (conversation already has a sent reply)
+      if (session?.user?.id && token?.token && !isTokenExpired()) {
+        try {
+          await sweepStaleDrafts();
+        } catch (err) {
+          if (DEBUG) console.error("Alarm stale sweep error:", err.message);
+        }
+      }
+
+      // 4. Sweep pending drafts missed while WebSocket was dead
       if (session?.user?.id && token?.token && !isTokenExpired()) {
         try {
           await sweepPendingDrafts(session.user.id);

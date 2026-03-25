@@ -110,7 +110,7 @@ async function fetchCounts(session) {
     const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
 
     const [emails, events, runs] = await Promise.all([
-      supabaseQuery(`emails?select=id,status,classifications(needs_response),drafts(id)&user_id=eq.${uid}&status=not.in.(completed,dismissed)&order=received_time.desc`, session),
+      supabaseQuery(`emails?select=id,status,classifications(needs_response),drafts(id,status)&user_id=eq.${uid}&status=not.in.(completed,dismissed)&drafts.status=neq.deleted&order=received_time.desc`, session),
       supabaseQuery(`response_events?select=email_id,pri,mc,sender_tier,rt&user_id=eq.${uid}`, session),
       supabaseQuery(`pipeline_runs?select=emails_processed,drafts_generated&user_id=eq.${uid}&started_at=gte.${weekAgo}`, session),
     ]);
