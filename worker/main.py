@@ -224,7 +224,7 @@ def _recover_stuck_onboarding(db):
     'collecting', 'extracting', etc.  Reset them to 'pending' so
     onboarding restarts cleanly on the next loop.
     """
-    TERMINAL = {"complete", "pending", "failed"}
+    TERMINAL = {"complete", "complete_partial", "pending", "failed"}
     result = (
         db.client.table("profiles")
         .select("id, onboarding_status")

@@ -7,6 +7,7 @@ Phase 4C-2: Writing style guide generation — audience-aware style guide.
 
 import json
 import logging
+import re
 
 from onboarding.extraction import _parse_json_response
 from onboarding.prompts import (
@@ -48,7 +49,7 @@ def synthesize_contacts(contact_freq, response_rates, extractions):
         prompt=prompt_text,
         system_prompt=SONNET_CONTACT_PROFILE_PROMPT,
         model="sonnet",
-        max_tokens=8192,
+        max_tokens=4096,
         temperature=0,
         cache_system_prompt=True,
     )
@@ -81,8 +82,10 @@ def synthesize_topics(keyword_frequencies):
 
     # Format ranked keyword list
     sorted_kw = sorted(keyword_frequencies.items(), key=lambda x: x[1], reverse=True)
+    total_count = len(sorted_kw)
     lines = [f"- \"{kw}\" (frequency: {count})" for kw, count in sorted_kw[:150]]
-    prompt_text = "Ranked keywords by frequency:\n" + "\n".join(lines)
+    header = f"Ranked keywords by frequency (top 150 of {total_count}):\n" if total_count > 150 else "Ranked keywords by frequency:\n"
+    prompt_text = header + "\n".join(lines)
 
     response, _usage = call_with_retry(
         prompt=prompt_text,
@@ -141,7 +144,7 @@ def synthesize_style_guide(style_features, contact_profiles):
     # Format for Sonnet
     prompt_text = (
         f"Writing pattern analysis from {len(enriched)} sent emails:\n\n"
-        + json.dumps(enriched, indent=2)
+        + json.dumps(enriched)
     )
 
     response, _usage = call_with_retry(
@@ -157,8 +160,9 @@ def synthesize_style_guide(style_features, contact_profiles):
         logger.error("Style guide synthesis: no response from Sonnet")
         return None
 
-    logger.info(f"Generated style guide ({len(response)} chars)")
-    return response
+    cleaned = _clean_synthesis_output(response)
+    logger.info(f"Generated style guide ({len(cleaned)} chars)")
+    return cleaned
 
 
 def synthesize_behavioral_profile(behavioral_features, contact_profiles):
@@ -185,7 +189,8 @@ def synthesize_behavioral_profile(behavioral_features, contact_profiles):
         ctype = cp.get("contact_type", "unknown")
         org = cp.get("inferred_organization", "")
         role = cp.get("inferred_role", "")
-        profile_lines.append(f"- {email}: {ctype} ({org}, {role})")
+        sig = cp.get("significance", "medium")
+        profile_lines.append(f"- {email}: {ctype} ({org}, {role}, significance:{sig})")
 
     profiles_block = ""
     if profile_lines:
@@ -197,7 +202,7 @@ def synthesize_behavioral_profile(behavioral_features, contact_profiles):
 
     prompt_text = (
         f"Behavioral pattern analysis from {len(behavioral_features)} sent emails:\n\n"
-        + json.dumps(behavioral_features, indent=2)
+        + json.dumps(behavioral_features)
         + profiles_block
     )
 
@@ -214,8 +219,9 @@ def synthesize_behavioral_profile(behavioral_features, contact_profiles):
         logger.error("Behavioral profile synthesis: no response from Sonnet")
         return None
 
-    logger.info(f"Generated behavioral profile ({len(response)} chars)")
-    return response
+    cleaned = _clean_synthesis_output(response)
+    logger.info(f"Generated behavioral profile ({len(cleaned)} chars)")
+    return cleaned
 
 
 # ---------------------------------------------------------------------------
@@ -232,7 +238,7 @@ def _build_contact_inputs(contact_freq, response_rates, extractions):
             "emails_received": freq_data["count"],
             "first_seen": freq_data.get("first_seen"),
             "last_seen": freq_data.get("last_seen"),
-            "sample_subjects": freq_data.get("subjects", [])[:5],
+            "sample_subjects": _clean_subjects(freq_data.get("subjects", []))[:5],
             "to_count": freq_data.get("to_count", 0),
             "cc_count": freq_data.get("cc_count", 0),
             "top_co_recipients": freq_data.get("top_co_recipients", []),
@@ -240,10 +246,13 @@ def _build_contact_inputs(contact_freq, response_rates, extractions):
             "avg_response_time_hours": rates.get("avg_response_time_hours"),
         }
 
-    # Sort by email count — profile all contacts (Sonnet handles ~100 easily)
+    # Sort by email count, cap at 150 to keep Sonnet's attention focused
     sorted_contacts = sorted(
         contacts.values(), key=lambda c: c["emails_received"], reverse=True
     )
+    if len(sorted_contacts) > 150:
+        logger.info(f"Contact synthesis: capping at 150 of {len(sorted_contacts)} contacts")
+        sorted_contacts = sorted_contacts[:150]
     return sorted_contacts
 
 
@@ -270,3 +279,62 @@ def _format_contact_prompt(contact_inputs):
         lines.append("")
 
     return "\n".join(lines)
+
+
+_REPLY_PREFIX_RE = re.compile(r'^(?:RE|FW|FWD)\s*:\s*', re.IGNORECASE)
+
+
+def _clean_subjects(subjects):
+    """Strip RE/FW prefixes and deduplicate subject lines."""
+    seen = set()
+    cleaned = []
+    for subj in subjects:
+        s = _REPLY_PREFIX_RE.sub('', subj).strip()
+        # Repeat in case of nested prefixes (RE: RE: FW: ...)
+        while _REPLY_PREFIX_RE.match(s):
+            s = _REPLY_PREFIX_RE.sub('', s).strip()
+        key = s.lower()
+        if key and key not in seen:
+            seen.add(key)
+            cleaned.append(s)
+    return cleaned
+
+
+_PREAMBLE_PATTERNS = [
+    re.compile(r"^(?:Here(?:'s| is) (?:the |a |your )?(?:writing |behavioral )?.+?(?:guide|profile|analysis).+?:\s*\n)", re.IGNORECASE),
+    re.compile(r"^(?:Based on (?:the |my )?analysis.+?:\s*\n)", re.IGNORECASE),
+    re.compile(r"^(?:After (?:analyzing|reviewing).+?:\s*\n)", re.IGNORECASE),
+]
+
+_META_COMMENTARY_PATTERNS = [
+    re.compile(r"\n\s*(?:Note|Caveat|Disclaimer|Important):?\s.+$", re.IGNORECASE | re.DOTALL),
+    re.compile(r"\n\s*(?:This (?:profile|guide) (?:is |was )(?:based on|generated|derived).+)$", re.IGNORECASE | re.DOTALL),
+    re.compile(r"\n\s*(?:\*\*?Note\*?\*?:?\s.+)$", re.IGNORECASE | re.DOTALL),
+]
+
+
+def _clean_synthesis_output(text):
+    """Strip markdown fencing, preambles, and trailing meta-commentary."""
+    if not text:
+        return text
+
+    result = text.strip()
+
+    # Strip markdown fencing
+    if result.startswith("```"):
+        lines = result.split("\n")
+        if lines[-1].strip().startswith("```"):
+            result = "\n".join(lines[1:-1])
+        else:
+            result = "\n".join(lines[1:])
+        result = result.strip()
+
+    # Strip common preamble patterns
+    for pattern in _PREAMBLE_PATTERNS:
+        result = pattern.sub('', result).strip()
+
+    # Strip trailing meta-commentary
+    for pattern in _META_COMMENTARY_PATTERNS:
+        result = pattern.sub('', result).strip()
+
+    return result

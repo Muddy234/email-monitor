@@ -25,6 +25,7 @@ still saved.
 """
 
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
@@ -99,7 +100,6 @@ def run_onboarding(db, user_id, profile):
                 for s, c in extraction["contacts"].items()
             },
             "aggregate": extraction["user_profile"],
-            "subject_tokens": {},  # Not computed in new extraction
         }
         logger.info(f"Phase 2 complete: {len(extraction['response_events'])} events, "
                     f"{len(extraction['contacts'])} contacts")
@@ -134,7 +134,12 @@ def run_onboarding(db, user_id, profile):
             stats_contacts = _build_stats_only_contacts(extraction["contacts"])
             if stats_contacts:
                 db.upsert_contacts(user_id, stats_contacts)
-                logger.info(f"Wrote {len(stats_contacts)} stats-only contacts")
+                sig_dist = {}
+                for c in stats_contacts:
+                    level = c.get("relationship_significance", "low")
+                    sig_dist[level] = sig_dist.get(level, 0) + 1
+                logger.info(f"Wrote {len(stats_contacts)} stats-only contacts "
+                            f"(significance: {sig_dist})")
         except Exception as e:
             logger.error(f"Stage 1: upsert_contacts (stats-only) failed: {e}")
             stage1_failures.append("contacts")
@@ -144,7 +149,6 @@ def run_onboarding(db, user_id, profile):
             db.upsert_topic_profile(user_id, {
                 "domains": [],
                 "high_signal_keywords": [],
-                "token_frequencies": stats.get("subject_tokens"),
                 "baseline_statistics": extraction["user_profile"],
             })
         except Exception as e:
@@ -279,17 +283,35 @@ def run_onboarding(db, user_id, profile):
             except Exception:
                 logger.exception("Phase 4C-3: behavioral profile synthesis raised")
 
+        # Retry behavioral profile once if it failed — this drives every
+        # future draft's decision posture, so transient failures are costly.
+        if not behavioral_profile and behavioral_result:
+            logger.info("Retrying behavioral profile synthesis (1 of 1)...")
+            try:
+                behavioral_profile = synthesize_behavioral_profile(
+                    behavioral_result.get("behavioral_features", []),
+                    contact_profiles,
+                )
+            except Exception:
+                logger.exception("Phase 4C-3: behavioral profile retry also failed")
+
         if topic_result is None:
             topic_result = {"domains": [], "high_signal_keywords": []}
 
         logger.info("Phase 4B + 4C-2 + 4C-3 complete: topics + style + behavioral done")
+
+        # Track missing components for degraded completion status
+        missing_components = []
+        if not style_guide:
+            missing_components.append("style_guide")
+        if not behavioral_profile:
+            missing_components.append("behavioral_profile")
 
         # Write enrichment results to DB
         try:
             db.upsert_topic_profile(user_id, {
                 "domains": topic_result.get("domains", []),
                 "high_signal_keywords": topic_result.get("high_signal_keywords", []),
-                "token_frequencies": stats.get("subject_tokens"),
                 "baseline_statistics": extraction["user_profile"],
             })
         except Exception as e:
@@ -322,13 +344,21 @@ def run_onboarding(db, user_id, profile):
         except Exception:
             logger.exception("Stage 3: model training failed (non-fatal)")
 
-        # Mark complete
-        db.update_onboarding_status(
-            user_id, "complete",
-            completed_at=datetime.utcnow().isoformat(),
-        )
+        # Mark complete — degraded if critical components are missing
+        if missing_components:
+            logger.warning(f"Onboarding complete with missing components: {missing_components}. "
+                           "Drafts may be less personalized.")
+            db.update_onboarding_status(
+                user_id, "complete_partial",
+                completed_at=datetime.utcnow().isoformat(),
+            )
+        else:
+            db.update_onboarding_status(
+                user_id, "complete",
+                completed_at=datetime.utcnow().isoformat(),
+            )
 
-        logger.info(f"Onboarding complete for user {user_id}")
+        logger.info(f"Onboarding {'partial' if missing_components else 'complete'} for user {user_id}")
         return True
 
     except Exception:
@@ -392,12 +422,34 @@ def _fallback_contact_profiles(contact_freq, response_rates):
     return profiles
 
 
+_BUSINESS_SUFFIXES = re.compile(
+    r'(bank|capital|group|partners|holdings|management|financial|'
+    r'advisors|advisory|consulting|investments|realty|properties|'
+    r'mortgage|funding|lending|title|escrow|insurance|legal|law)',
+    re.IGNORECASE,
+)
+
+
 def _org_from_domain(email):
-    """Infer organization name from email domain."""
+    """Infer organization name from email domain.
+
+    Handles hyphens (arete-collective → Arete Collective) and splits
+    concatenated business suffixes (sunwestbank → Sunwest Bank).
+    """
     try:
         domain = email.split("@")[1]
-        # Strip common suffixes
         name = domain.split(".")[0]
+
+        # Replace hyphens with spaces
+        name = name.replace("-", " ").replace("_", " ")
+
+        # Split on common business suffixes (sunwestbank → sunwest bank)
+        match = _BUSINESS_SUFFIXES.search(name)
+        if match and match.start() > 0 and " " not in name.strip():
+            prefix = name[:match.start()]
+            suffix = name[match.start():]
+            name = f"{prefix} {suffix}"
+
         return name.title()
     except (IndexError, AttributeError):
         return "unknown"
