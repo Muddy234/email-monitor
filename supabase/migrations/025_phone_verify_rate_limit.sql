@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS public.phone_verify_attempts (
   attempted_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_phone_verify_ip_time
+CREATE INDEX IF NOT EXISTS idx_phone_verify_ip_time
   ON public.phone_verify_attempts (ip_address, attempted_at DESC);
 
 -- Check + record: returns true if under limit, false if blocked.
