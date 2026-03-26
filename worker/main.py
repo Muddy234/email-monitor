@@ -49,8 +49,7 @@ logger = logging.getLogger("worker")
 
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL_SECONDS", "30"))
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", "10"))
-INITIAL_WINDOW = int(os.environ.get("INITIAL_WINDOW_SECONDS", "45"))  # 45s
-MAX_WINDOW = int(os.environ.get("MAX_WINDOW_SECONDS", "180"))  # 3 minutes
+WINDOW_SECONDS = int(os.environ.get("WINDOW_SECONDS", "45"))  # fixed 45s cycle
 
 # ---------------------------------------------------------------------------
 # Graceful shutdown
@@ -149,7 +148,6 @@ def accumulate_emails(db, window_seconds):
     accumulated = {}  # user_id → {"profile": ..., "emails": [...]}
     deadline = time.time() + window_seconds
     poll_count = 0
-    found_any = False
 
     while time.time() < deadline and not _shutdown:
         poll_count += 1
@@ -186,17 +184,6 @@ def accumulate_emails(db, window_seconds):
                     f"  Poll {poll_count}: claimed {len(claimed)} for user {user_id[:8]}... "
                     f"(total: {len(accumulated[user_id]['emails'])})"
                 )
-
-                # Shorten window on first email arrival during long windows
-                if not found_any and window_seconds > INITIAL_WINDOW:
-                    new_deadline = time.time() + INITIAL_WINDOW
-                    if new_deadline < deadline:
-                        deadline = new_deadline
-                        logger.info(
-                            f"  Emails arrived during backoff — "
-                            f"shortening window to {INITIAL_WINDOW}s"
-                        )
-                found_any = True
 
         # Sleep in 1s increments for responsive shutdown
         for _ in range(POLL_INTERVAL):
@@ -244,7 +231,7 @@ def _recover_stuck_onboarding(db):
 
 def main():
     logger.info("Worker starting (batch mode)")
-    logger.info(f"Poll interval: {POLL_INTERVAL}s, Initial window: {INITIAL_WINDOW}s, Max window: {MAX_WINDOW}s")
+    logger.info(f"Poll interval: {POLL_INTERVAL}s, Window: {WINDOW_SECONDS}s")
 
     db = SupabaseWorkerClient()
     logger.info("Supabase client initialized")
@@ -254,8 +241,6 @@ def main():
         _recover_stuck_onboarding(db)
     except Exception as e:
         logger.error(f"Stuck onboarding recovery error: {e}")
-
-    current_window = INITIAL_WINDOW
 
     while not _shutdown:
         # -- Onboarding check ------------------------------------------
@@ -289,10 +274,10 @@ def main():
         except Exception as e:
             logger.error(f"Stuck-email recovery error: {e}")
 
-        logger.info(f"--- Accumulation window: {current_window}s ---")
+        logger.info(f"--- Accumulation window: {WINDOW_SECONDS}s ---")
 
         try:
-            accumulated, onboarding_needed = accumulate_emails(db, current_window)
+            accumulated, onboarding_needed = accumulate_emails(db, WINDOW_SECONDS)
         except Exception as e:
             logger.exception(f"Accumulation error: {e}")
             accumulated = {}
@@ -300,34 +285,15 @@ def main():
 
         # If accumulation broke early for onboarding, skip straight to next loop
         if onboarding_needed:
-            current_window = INITIAL_WINDOW
             continue
 
         # Check if any emails were found
         total_emails = sum(len(u["emails"]) for u in accumulated.values())
 
         if total_emails == 0:
-            # Check if any active users exist (don't use empty accumulated
-            # as proxy — it just means no unprocessed emails at poll time)
-            try:
-                active_ids = db.get_active_user_ids()
-                has_active = any(
-                    _is_user_active(db.fetch_user_config(uid))
-                    for uid in active_ids
-                )
-            except Exception:
-                has_active = True  # err on the side of staying awake
-
-            if not has_active:
-                current_window = MAX_WINDOW
-                logger.info(f"All users inactive, deep sleep: {current_window}s")
-            else:
-                current_window = min(current_window * 2, MAX_WINDOW)
-                logger.info(f"No emails found. Next window: {current_window}s")
+            logger.info("No emails found")
             continue
 
-        # Emails found — reset window to initial
-        current_window = INITIAL_WINDOW
         logger.info(f"Found {total_emails} emails across {len(accumulated)} user(s)")
 
         # Process each user's batch
