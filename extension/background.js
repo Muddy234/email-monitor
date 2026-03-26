@@ -22,7 +22,7 @@ importScripts(
 // ---------------------------------------------------------------------------
 
 const EMAIL_SYNC_ALARM = "email-sync";
-const EMAIL_SYNC_PERIOD_MIN = 2;   // 2 min
+const EMAIL_SYNC_PERIOD_MIN = 0.75; // 45 seconds (self-rescheduling)
 const MAX_CATCHUP_EMAILS = 6000;   // cap for first-time or stale syncs
 // OWA endpoint templates
 const OWA_ENDPOINTS = {
@@ -109,7 +109,6 @@ function isTokenExpired() {
   if (!token || !token.expiresOn) return true;
   const now = Math.floor(Date.now() / 1000);
   const expired = now >= token.expiresOn;
-  if (expired) console.log(`[SYNC_DBG] Token expired: now=${now}, expiresOn=${token.expiresOn}`);
   return expired;
 }
 
@@ -160,10 +159,8 @@ function usesCookieAuth() {
  * Used for personal accounts (outlook.live.com) where Bearer tokens don't work.
  */
 async function owaFetchViaTab(action, body) {
-  console.log(`[SYNC_DBG] owaFetchViaTab: action=${action}, outlookTabId=${outlookTabId}`);
   if (!outlookTabId) throw new Error("No Outlook tab available for OWA request");
   const url = getServiceUrl(action);
-  console.log(`[SYNC_DBG] owaFetchViaTab: url=${url}`);
   if (!url) throw new Error("No OWA endpoint — token origin unknown");
   if (!token || !token.token) throw new Error("No Exchange token available");
 
@@ -198,7 +195,6 @@ async function owaFetchViaTab(action, body) {
   });
 
   const result = results?.[0]?.result;
-  console.log(`[SYNC_DBG] owaFetchViaTab result:`, JSON.stringify(result)?.substring(0, 500));
   if (!result) throw new Error("Tab OWA fetch returned no result");
   if (result.error) {
     if (result.status === 401 || result.status === 440) {
@@ -216,16 +212,12 @@ async function owaFetchViaTab(action, body) {
 async function owaFetch(action, body) {
   // Personal accounts need cookies + Bearer token — route through the Outlook tab
   if (usesCookieAuth()) {
-    console.log(`[SYNC_DBG] owaFetch: action=${action}, routing via tab (personal account)`);
     return owaFetchViaTab(action, body);
   }
 
-  console.log(`[SYNC_DBG] owaFetch: action=${action}`);
   const url = getServiceUrl(action);
   if (!url) throw new Error("No OWA endpoint — token origin unknown");
   if (!token || !token.token) throw new Error("No Exchange token available");
-
-  console.log(`[SYNC_DBG] owaFetch: url=${url}, tokenLen=${token.token.length}`);
   const resp = await fetch(url, {
     method: "POST",
     credentials: "omit",
@@ -236,8 +228,6 @@ async function owaFetch(action, body) {
     },
     body: JSON.stringify(wrapRequest(action, body)),
   });
-  console.log(`[SYNC_DBG] owaFetch response: status=${resp.status}`);
-
   if (resp.status === 401) {
     // Token expired — mark it and notify
     token.token = null;
@@ -293,13 +283,11 @@ async function getOutlookEmail(accessToken) {
   const payload = decodeJwtPayload(accessToken);
   if (payload) {
     const email = payload.preferred_username || payload.upn || payload.unique_name || payload.smtp;
-    console.log(`[SYNC_DBG] getOutlookEmail JWT candidate: ${email}`);
     if (email && looksLikeEmail(email)) return email.toLowerCase();
   }
 
   // 2. Fetch most recent sent email and read the From address (reliable for personal accounts)
   try {
-    console.log(`[SYNC_DBG] getOutlookEmail: fetching latest sent email for From address`);
     const resp = await owaFetch("FindItem", {
       __type: "FindItemJsonRequest:#Exchange",
       Header: {
@@ -337,10 +325,9 @@ async function getOutlookEmail(accessToken) {
     });
     const items = resp?.Body?.ResponseMessages?.Items?.[0]?.RootFolder?.Items;
     const fromEmail = items?.[0]?.From?.Mailbox?.EmailAddress;
-    console.log(`[SYNC_DBG] getOutlookEmail sent-item From: ${fromEmail}`);
     if (fromEmail && looksLikeEmail(fromEmail)) return fromEmail.toLowerCase();
   } catch (err) {
-    console.log(`[SYNC_DBG] getOutlookEmail sent-item fetch failed: ${err.message}`);
+    if (DEBUG) console.warn("getOutlookEmail sent-item fetch failed:", err.message);
   }
 
   return null;
@@ -778,41 +765,36 @@ async function detectAndUpdateAliases(userId, authEmail, sentEmails) {
 }
 
 async function syncEmailsToSupabase() {
-  console.log(`[SYNC_DBG] syncEmailsToSupabase called, isSyncing=${isSyncing}`);
+  if (DEBUG) console.log("syncEmailsToSupabase called");
   if (isSyncing) return { skipped: true };
   isSyncing = true;
 
   try {
     // Check both tokens exist
-    console.log(`[SYNC_DBG] token exists=${!!token}, hasSecret=${!!token?.token}, origin=${token?.origin}, expiresOn=${token?.expiresOn}`);
-    console.log(`[SYNC_DBG] outlookTabId=${outlookTabId}, tokenOrigin=${token?.origin}`);
     if (!token || !token.token || isTokenExpired()) {
-      console.log(`[SYNC_DBG] BAIL: No valid Outlook token`);
       return { error: "No valid Outlook token" };
     }
 
     const session = await getSupabaseSession();
     if (!session || !session.access_token) {
-      console.log(`[SYNC_DBG] BAIL: Not logged in to Supabase`);
+      if (DEBUG) console.log("Not logged in to Supabase");
       return { error: "Not logged in to Supabase" };
     }
 
     const userId = session.user.id;
-    console.log(`[SYNC_DBG] userId=${userId}`);
+    if (DEBUG) console.log("userId:", userId);
 
     // --- Outlook account lock gate ---
     const outlookEmail = await getOutlookEmail(token.token);
-    console.log(`[SYNC_DBG] outlookEmail=${outlookEmail}`);
+    if (DEBUG) console.log("outlookEmail:", outlookEmail);
     if (outlookEmail) {
       // Read profile to check connected_outlook_email
       let profile;
       try {
-        console.log(`[SYNC_DBG] Fetching profile for lock gate...`);
         const profiles = await getProfile(userId);
         profile = profiles?.[0];
-        console.log(`[SYNC_DBG] Profile fetched, connected_outlook_email=${profile?.connected_outlook_email}`);
       } catch (err) {
-        console.warn(`[SYNC_DBG] getProfile failed:`, err.message);
+        if (DEBUG) console.warn("getProfile failed:", err.message);
       }
 
       const connectedEmail = profile?.connected_outlook_email?.toLowerCase();
@@ -820,26 +802,25 @@ async function syncEmailsToSupabase() {
       if (!connectedEmail) {
         // First sync — lock this Outlook account
         try {
-          console.log(`[SYNC_DBG] First sync — locking Outlook account: ${outlookEmail}`);
+          if (DEBUG) console.log("Locking Outlook account:", outlookEmail);
           await setConnectedOutlookEmail(userId, outlookEmail);
-          console.log(`[SYNC_DBG] Locked Outlook account successfully`);
         } catch (err) {
-          console.warn(`[SYNC_DBG] Failed to lock Outlook email:`, err.message);
+          console.warn("Failed to lock Outlook email:", err.message);
         }
       } else if (connectedEmail !== outlookEmail) {
         // Mismatch — abort sync
-        console.warn(`[SYNC_DBG] MISMATCH: expected=${connectedEmail}, got=${outlookEmail}`);
+        console.warn(`Outlook mismatch: expected=${connectedEmail}, got=${outlookEmail}`);
         await chrome.storage.local.set({
           outlookMismatch: { expected: connectedEmail, actual: outlookEmail },
         });
         return { error: "OUTLOOK_MISMATCH", expected: connectedEmail, actual: outlookEmail };
       } else {
         // Match — clear any stale mismatch state
-        console.log(`[SYNC_DBG] Outlook email matches, proceeding`);
+        if (DEBUG) console.log("Outlook email matches, proceeding");
         await chrome.storage.local.remove("outlookMismatch");
       }
     } else {
-      console.log(`[SYNC_DBG] No outlookEmail found, skipping lock gate`);
+      if (DEBUG) console.log("No outlookEmail found, skipping lock gate");
       await chrome.storage.local.remove("outlookMismatch");
     }
 
@@ -850,9 +831,9 @@ async function syncEmailsToSupabase() {
     let folders;
     try {
       folders = await discoverMailFolders();
-      console.log(`[SYNC_DBG] Discovered ${folders.length} folders:`, folders.map(f => f.displayName));
+      if (DEBUG) console.log(`Discovered ${folders.length} folders:`, folders.map(f => f.displayName));
     } catch (err) {
-      console.warn(`[SYNC_DBG] Folder discovery failed, falling back to inbox-only:`, err.message);
+      if (DEBUG) console.warn("Folder discovery failed, falling back to inbox-only:", err.message);
       folders = [{ id: null, displayName: "Inbox", isDistinguished: true }];
     }
 
@@ -860,7 +841,7 @@ async function syncEmailsToSupabase() {
     let totalSynced = 0;
     for (const folderInfo of folders) {
       try {
-        console.log(`[SYNC_DBG] Fetching folder "${folderInfo.displayName}", isDistinguished=${folderInfo.isDistinguished}`);
+        if (DEBUG) console.log(`Fetching folder "${folderInfo.displayName}"`);
         // Build fetch params — use raw folderId for non-distinguished folders
         const fetchParams = {
           max_scan: maxEmails,
@@ -914,7 +895,7 @@ async function syncEmailsToSupabase() {
         if (DEBUG) console.log(`Synced ${rows.length} emails from "${folderInfo.displayName}"`);
       } catch (err) {
         // Per-folder errors are non-blocking — log and continue to next folder
-        console.error(`[SYNC_DBG] Error syncing folder "${folderInfo.displayName}":`, err.message, err.stack);
+        console.error(`Error syncing folder "${folderInfo.displayName}":`, err.message);
       }
     }
 
@@ -1000,7 +981,7 @@ async function initSupabase() {
   }
 
   // Start email sync alarm
-  chrome.alarms.create(EMAIL_SYNC_ALARM, { periodInMinutes: EMAIL_SYNC_PERIOD_MIN });
+  chrome.alarms.create(EMAIL_SYNC_ALARM, { delayInMinutes: EMAIL_SYNC_PERIOD_MIN });
 
   // Connect Realtime for draft listening
   if (!isRealtimeConnected()) {
@@ -1051,6 +1032,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
           if (DEBUG) console.error("Alarm sweep error:", err.message);
         }
       }
+
+      // Re-schedule next sync (delayInMinutes avoids Chrome's 1-min floor)
+      chrome.alarms.create(EMAIL_SYNC_ALARM, { delayInMinutes: EMAIL_SYNC_PERIOD_MIN });
     })();
   }
 });
