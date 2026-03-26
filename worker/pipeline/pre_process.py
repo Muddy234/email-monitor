@@ -105,16 +105,31 @@ def _normalize_for_match(text):
     return _WHITESPACE_RE.sub(' ', text).strip()
 
 
-def isolate_new_content(raw_body, prior_bodies):
+def _is_forward_subject(subject):
+    """Check if a subject line indicates a forwarded email."""
+    s = (subject or "").strip().lower()
+    return s.startswith("fw:") or s.startswith("fwd:")
+
+
+def isolate_new_content(raw_body, prior_bodies, subject=None):
     """Extract only the new message by diffing against prior email bodies.
 
     For each prior body (longest first), tries multiple anchor windows
     from its opening text. If found, returns everything before the match
     position. Falls back to strip_reply_markers() when no prior body
     matches.
+
+    For forwarded emails, the quoted content IS the message — skip
+    reply stripping entirely and return the full body.
     """
     if not raw_body:
         return ""
+
+    # Forwarded emails: the forwarded content is the point of the email.
+    # Don't strip it — return the full body for the AI to read.
+    if _is_forward_subject(subject):
+        return raw_body
+
     if not prior_bodies:
         return strip_reply_markers(raw_body)
 

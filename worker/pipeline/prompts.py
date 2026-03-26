@@ -107,14 +107,15 @@ EMAIL BODY:
 
 def build_notable_summary_prompt(email_data, conversation_history=None):
     """Build the user message for a notable email summary call."""
-    from .pre_process import isolate_new_content, strip_reply_markers, truncate_smart
+    from .pre_process import isolate_new_content, strip_reply_markers, truncate_smart, _is_forward_subject
 
+    subject = email_data.get("subject", "")
     raw_body = email_data.get("body", "") or ""
     if conversation_history:
         prior_bodies = [m.get("body") or "" for m in conversation_history if m.get("body")]
-        body = isolate_new_content(raw_body, prior_bodies)
+        body = isolate_new_content(raw_body, prior_bodies, subject=subject)
     else:
-        body = strip_reply_markers(raw_body)
+        body = strip_reply_markers(raw_body) if not _is_forward_subject(subject) else raw_body
     body = truncate_smart(body, max_tokens=1000)
 
     prompt = NOTABLE_SUMMARY_USER_TEMPLATE.format(

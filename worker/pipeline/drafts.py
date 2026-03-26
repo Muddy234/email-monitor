@@ -38,8 +38,10 @@ class DraftGenerator:
         raw_body = email_data.get("body", "") or ""
         thread_emails = action_context.get("thread_emails", [])
         prior_bodies = [te["body"] for te in thread_emails if te.get("body")]
-        body = isolate_new_content(raw_body, prior_bodies)
-        body = truncate_smart(body, max_tokens=1000)
+        is_forward = subject.lower().startswith(("fw:", "fwd:"))
+        body = isolate_new_content(raw_body, prior_bodies, subject=subject)
+        # Forwards carry the full thread inline — give more room
+        body = truncate_smart(body, max_tokens=2500 if is_forward else 1000)
 
         # Check for enrichment data
         enrichment = action_context.get("enrichment")
