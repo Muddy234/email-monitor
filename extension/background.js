@@ -366,6 +366,33 @@ function parseFindItemMessage(item, folder) {
   };
 }
 
+/** Convert HTML email body to plain text. */
+function htmlToText(html) {
+  if (!html) return "";
+  let text = html;
+  // Line breaks for block elements
+  text = text.replace(/<br\s*\/?>/gi, "\n");
+  text = text.replace(/<\/(?:p|div|tr|li|h[1-6])>/gi, "\n");
+  text = text.replace(/<\/(?:td|th)>/gi, "\t");
+  // Remove style/script blocks entirely
+  text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "");
+  text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "");
+  // Strip remaining tags
+  text = text.replace(/<[^>]+>/g, "");
+  // Decode common HTML entities
+  text = text.replace(/&nbsp;/gi, " ");
+  text = text.replace(/&amp;/gi, "&");
+  text = text.replace(/&lt;/gi, "<");
+  text = text.replace(/&gt;/gi, ">");
+  text = text.replace(/&quot;/gi, '"');
+  text = text.replace(/&#39;/gi, "'");
+  text = text.replace(/&#\d+;/g, "");
+  // Collapse whitespace
+  text = text.replace(/[ \t]+/g, " ");
+  text = text.replace(/\n{3,}/g, "\n\n");
+  return text.trim();
+}
+
 /** Parse a GetItem OWA message into enriched fields. */
 function parseGetItemMessage(item) {
   const toRecips = item.ToRecipients || [];
@@ -382,7 +409,7 @@ function parseGetItemMessage(item) {
     sender: item.From?.Mailbox?.EmailAddress || "",
     sender_email: item.From?.Mailbox?.EmailAddress || "",
     sender_name: item.From?.Mailbox?.Name || "",
-    body: item.Body?.Value || "",
+    body: htmlToText(item.Body?.Value || ""),
     received_time: item.DateTimeReceived || "",
     has_attachments: item.HasAttachments || false,
     attachment_names: attachments.map((a) => a.Name).filter(Boolean),
@@ -513,7 +540,7 @@ async function handleGetItemBatch(emails) {
       __type: "ItemResponseShape:#Exchange",
       BaseShape: "IdOnly",
       AdditionalProperties: properties,
-      BodyType: "Text",
+      BodyType: "HTML",
     },
     ItemIds: itemIds,
   };
