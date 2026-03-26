@@ -47,7 +47,7 @@ logger = logging.getLogger("worker")
 # Config
 # ---------------------------------------------------------------------------
 
-POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL_SECONDS", "45"))
+POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL_SECONDS", "10"))
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", "10"))
 WINDOW_SECONDS = int(os.environ.get("WINDOW_SECONDS", "45"))  # fixed 45s cycle
 
