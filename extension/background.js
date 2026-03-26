@@ -877,18 +877,19 @@ async function detectAndUpdateAliases(userId, authEmail, sentEmails) {
 async function syncEmailsToSupabase() {
   console.log("[SYNC v2] syncEmailsToSupabase called");
   if (DEBUG) console.log("syncEmailsToSupabase called");
-  if (isSyncing) return { skipped: true };
+  if (isSyncing) { console.warn("[SYNC v2] Skipped — isSyncing is true"); return { skipped: true }; }
   isSyncing = true;
 
   try {
     // Check both tokens exist
     if (!token || !token.token || isTokenExpired()) {
+      console.warn("[SYNC v2] Exiting — no valid Outlook token", { hasToken: !!token, hasTokenValue: !!token?.token, expired: token ? isTokenExpired() : "N/A" });
       return { error: "No valid Outlook token" };
     }
 
     const session = await getSupabaseSession();
     if (!session || !session.access_token) {
-      if (DEBUG) console.log("Not logged in to Supabase");
+      console.warn("[SYNC v2] Exiting — no Supabase session");
       return { error: "Not logged in to Supabase" };
     }
 
