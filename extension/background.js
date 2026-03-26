@@ -422,12 +422,24 @@ function parseGetItemMessage(item) {
     ...ccRecips.map((r) => ({ name: r.Name || "", address: r.EmailAddress || "", type: 2 })),
   ];
 
+  const rawHtml = item.Body?.Value || "";
+  const bodyText = htmlToText(rawHtml);
+
+  // Always log when body is empty to diagnose GetItem issues
+  if (!bodyText) {
+    console.warn(`[GetItem] Empty body for "${item.Subject}"`,
+      `| Body obj:`, item.Body,
+      `| Raw HTML length: ${rawHtml.length}`,
+      `| BodyType: ${item.Body?.BodyType}`,
+      `| First 200 chars: ${rawHtml.substring(0, 200)}`);
+  }
+
   return {
     subject: item.Subject || "",
     sender: item.From?.Mailbox?.EmailAddress || "",
     sender_email: item.From?.Mailbox?.EmailAddress || "",
     sender_name: item.From?.Mailbox?.Name || "",
-    body: htmlToText(item.Body?.Value || ""),
+    body: bodyText,
     received_time: item.DateTimeReceived || "",
     has_attachments: item.HasAttachments || false,
     attachment_names: attachments.map((a) => a.Name).filter(Boolean),
@@ -569,6 +581,7 @@ async function handleGetItemBatch(emails) {
   const items = data.Body?.ResponseMessages?.Items || [];
 
   const results = [];
+  let fallbackCount = 0;
   // Iterate over emails.length — OWA may return fewer items than requested
   for (let i = 0; i < emails.length; i++) {
     const ri = items[i];
@@ -576,6 +589,10 @@ async function handleGetItemBatch(emails) {
       results.push(parseGetItemMessage(ri.Items[0]));
     } else {
       // Fall back to basic FindItem data for failed/missing items
+      fallbackCount++;
+      console.warn(`[GetItem] Fallback for "${emails[i].subject}"`,
+        `| ResponseCode: ${ri?.ResponseCode || "MISSING"}`,
+        `| Has Items: ${!!ri?.Items?.[0]}`);
       results.push(emails[i]);
     }
   }
