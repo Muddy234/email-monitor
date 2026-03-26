@@ -529,53 +529,61 @@ async function handleGetEmails(params) {
 
 const GETITEM_BATCH_SIZE = 50; // OWA handles up to ~50-100 items per request
 
-async function handleGetItemBatch(emails) {
-  const properties = [
-    { __type: "PropertyUri:#Exchange", FieldURI: "Subject" },
-    { __type: "PropertyUri:#Exchange", FieldURI: "Body" },
-    { __type: "PropertyUri:#Exchange", FieldURI: "From" },
-    { __type: "PropertyUri:#Exchange", FieldURI: "ToRecipients" },
-    { __type: "PropertyUri:#Exchange", FieldURI: "CcRecipients" },
-    { __type: "PropertyUri:#Exchange", FieldURI: "DateTimeReceived" },
-    { __type: "PropertyUri:#Exchange", FieldURI: "Importance" },
-    { __type: "PropertyUri:#Exchange", FieldURI: "HasAttachments" },
-    { __type: "PropertyUri:#Exchange", FieldURI: "Attachments" },
-    { __type: "PropertyUri:#Exchange", FieldURI: "Flag" },
-    { __type: "PropertyUri:#Exchange", FieldURI: "ConversationId" },
-    { __type: "PropertyUri:#Exchange", FieldURI: "ConversationTopic" },
-    { __type: "PropertyUri:#Exchange", FieldURI: "IsRead" },
-  ];
+const GETITEM_PROPERTIES = [
+  { __type: "PropertyUri:#Exchange", FieldURI: "Subject" },
+  { __type: "PropertyUri:#Exchange", FieldURI: "Body" },
+  { __type: "PropertyUri:#Exchange", FieldURI: "From" },
+  { __type: "PropertyUri:#Exchange", FieldURI: "ToRecipients" },
+  { __type: "PropertyUri:#Exchange", FieldURI: "CcRecipients" },
+  { __type: "PropertyUri:#Exchange", FieldURI: "DateTimeReceived" },
+  { __type: "PropertyUri:#Exchange", FieldURI: "Importance" },
+  { __type: "PropertyUri:#Exchange", FieldURI: "HasAttachments" },
+  { __type: "PropertyUri:#Exchange", FieldURI: "Attachments" },
+  { __type: "PropertyUri:#Exchange", FieldURI: "Flag" },
+  { __type: "PropertyUri:#Exchange", FieldURI: "ConversationId" },
+  { __type: "PropertyUri:#Exchange", FieldURI: "ConversationTopic" },
+  { __type: "PropertyUri:#Exchange", FieldURI: "IsRead" },
+];
 
+function buildGetItemBody(itemIds) {
+  return {
+    __type: "GetItemRequest:#Exchange",
+    ItemShape: {
+      __type: "ItemResponseShape:#Exchange",
+      BaseShape: "IdOnly",
+      AdditionalProperties: GETITEM_PROPERTIES,
+      BodyType: "HTML",
+    },
+    ItemIds: itemIds,
+  };
+}
+
+async function handleGetItemBatch(emails) {
   const itemIds = emails.map((e) => {
     const id = { __type: "ItemId:#Exchange", Id: e.email_ref };
     if (e._change_key) id.ChangeKey = e._change_key;
     return id;
   });
 
-  const body = {
-    __type: "GetItemRequest:#Exchange",
-    ItemShape: {
-      __type: "ItemResponseShape:#Exchange",
-      BaseShape: "IdOnly",
-      AdditionalProperties: properties,
-      BodyType: "HTML",
-    },
-    ItemIds: itemIds,
-  };
-
-  const data = await owaFetch("GetItem", body);
+  const data = await owaFetch("GetItem", buildGetItemBody(itemIds));
   const items = data.Body?.ResponseMessages?.Items || [];
 
   const results = [];
-  for (let i = 0; i < items.length; i++) {
+  // Iterate over emails.length — OWA may return fewer items than requested
+  for (let i = 0; i < emails.length; i++) {
     const ri = items[i];
     if (ri?.ResponseCode === "NoError" && ri.Items?.[0]) {
       results.push(parseGetItemMessage(ri.Items[0]));
     } else {
-      // Fall back to basic FindItem data for failed items
+      // Fall back to basic FindItem data for failed/missing items
       results.push(emails[i]);
     }
   }
+
+  if (DEBUG && items.length !== emails.length) {
+    console.warn(`GetItem returned ${items.length} responses for ${emails.length} requested items`);
+  }
+
   return results;
 }
 
@@ -598,6 +606,46 @@ async function enrichEmailsBatched(emails) {
       console.log(`Enriched ${Math.min(i + GETITEM_BATCH_SIZE, emails.length)}/${emails.length} emails`);
     }
   }
+
+  // Retry individual GetItem for emails that came back with empty bodies.
+  // Batch GetItem can intermittently return empty Body.Value for some items.
+  const emptyBodyIndices = [];
+  for (let i = 0; i < enriched.length; i++) {
+    if (!enriched[i].body && enriched[i].email_ref) {
+      emptyBodyIndices.push(i);
+    }
+  }
+
+  if (emptyBodyIndices.length > 0 && emptyBodyIndices.length < enriched.length) {
+    if (DEBUG) console.log(`Retrying GetItem for ${emptyBodyIndices.length} email(s) with empty body`);
+    for (const idx of emptyBodyIndices) {
+      try {
+        const email = enriched[idx];
+        const itemId = { __type: "ItemId:#Exchange", Id: email.email_ref };
+        if (email._change_key) itemId.ChangeKey = email._change_key;
+
+        const data = await owaFetch("GetItem", buildGetItemBody([itemId]));
+        const ri = data.Body?.ResponseMessages?.Items?.[0];
+        if (ri?.ResponseCode === "NoError" && ri.Items?.[0]) {
+          const retried = parseGetItemMessage(ri.Items[0]);
+          if (retried.body) {
+            enriched[idx] = retried;
+            if (DEBUG) console.log(`  Retry succeeded for "${email.subject}"`);
+          } else if (DEBUG) {
+            console.warn(`  Retry still empty for "${email.subject}"`);
+          }
+        }
+      } catch (err) {
+        if (DEBUG) console.warn(`  Retry failed for index ${idx}:`, err.message);
+      }
+    }
+  }
+
+  const finalEmpty = enriched.filter((e) => !e.body).length;
+  if (DEBUG && finalEmpty > 0) {
+    console.warn(`After enrichment: ${finalEmpty}/${enriched.length} emails still have empty bodies`);
+  }
+
   return enriched;
 }
 
