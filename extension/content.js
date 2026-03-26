@@ -11,9 +11,10 @@ const TOKEN_POLL_INTERVAL_MS = 60_000;
 function findExchangeToken() {
   const keys = Object.keys(localStorage);
   // Collect candidates and pick the best match by priority:
-  // 1. mail.read (work/org accounts)
-  // 2. mbi_ssl  (personal accounts — OWA Exchange token)
-  // 3. .default (fallback)
+  // 0. mail.read (work/org accounts — explicit Mail scope)
+  // 1. .default with M365.Access (personal accounts — OWA API token)
+  // 2. .default without M365.Access (generic fallback)
+  // 3. mbi_ssl (SSO session token — NOT usable for API calls)
   let best = null;
   let bestPriority = Infinity;
   for (const key of keys) {
@@ -26,8 +27,9 @@ function findExchangeToken() {
       const t = (entry.target || "").toLowerCase();
       let priority = -1;
       if (t.includes("mail.read")) priority = 0;
-      else if (t.includes("mbi_ssl")) priority = 1;
+      else if (t.includes(".default") && t.includes("m365.access")) priority = 1;
       else if (t.includes(".default")) priority = 2;
+      else if (t.includes("mbi_ssl")) priority = 3;
       if (priority >= 0 && priority < bestPriority) {
         bestPriority = priority;
         best = {

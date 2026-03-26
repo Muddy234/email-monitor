@@ -423,6 +423,17 @@ class SupabaseWorkerClient:
             update["onboarding_completed_at"] = kwargs["completed_at"]
         self.client.table("profiles").update(update).eq("id", user_id).execute()
 
+    def set_pipeline_stage(self, user_id, stage):
+        """Update the user's current pipeline processing stage.
+
+        Args:
+            user_id: UUID string.
+            stage: One of 'idle', 'gathering', 'analyzing', 'drafting'.
+        """
+        self.client.table("profiles").update(
+            {"pipeline_stage": stage}
+        ).eq("id", user_id).execute()
+
     def upsert_contacts(self, user_id, contacts_list):
         """Batch upsert contacts for a user.
 

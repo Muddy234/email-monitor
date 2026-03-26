@@ -159,55 +159,47 @@ function usesCookieAuth() {
  * Execute an OWA fetch via the Outlook tab's page context (cookie auth).
  * Used for personal accounts (outlook.live.com) where Bearer tokens don't work.
  */
-async function owaFetchViaCookie(action, body) {
-  console.log(`[SYNC_DBG] owaFetchViaCookie: action=${action}, outlookTabId=${outlookTabId}`);
-  if (!outlookTabId) throw new Error("No Outlook tab available for cookie-auth OWA request");
+async function owaFetchViaTab(action, body) {
+  console.log(`[SYNC_DBG] owaFetchViaTab: action=${action}, outlookTabId=${outlookTabId}`);
+  if (!outlookTabId) throw new Error("No Outlook tab available for OWA request");
   const url = getServiceUrl(action);
-  console.log(`[SYNC_DBG] owaFetchViaCookie: url=${url}`);
+  console.log(`[SYNC_DBG] owaFetchViaTab: url=${url}`);
   if (!url) throw new Error("No OWA endpoint — token origin unknown");
+  if (!token || !token.token) throw new Error("No Exchange token available");
 
   const payload = JSON.stringify(wrapRequest(action, body));
+  const bearerToken = token.token;
 
   const results = await chrome.scripting.executeScript({
     target: { tabId: outlookTabId },
     world: "MAIN",
-    func: async (fetchUrl, fetchAction, fetchBody) => {
+    func: async (fetchUrl, fetchAction, fetchBody, authToken) => {
       try {
-        // Extract X-OWA-CANARY from cookies (CSRF token required by OWA)
-        const cookies = document.cookie.split(";").map(c => c.trim());
-        let canary = "";
-        for (const c of cookies) {
-          if (c.startsWith("X-OWA-CANARY=")) {
-            canary = c.substring("X-OWA-CANARY=".length);
-            break;
-          }
-        }
-        const headers = {
-          "Content-Type": "application/json",
-          "Action": fetchAction,
-        };
-        if (canary) headers["X-OWA-CANARY"] = canary;
         const resp = await fetch(fetchUrl, {
           method: "POST",
           credentials: "include",
-          headers,
+          headers: {
+            "Content-Type": "application/json",
+            "Action": fetchAction,
+            "Authorization": "Bearer " + authToken,
+          },
           body: fetchBody,
         });
         if (!resp.ok) {
           const text = await resp.text().catch(() => "");
-          return { error: true, status: resp.status, detail: text.substring(0, 500), canaryFound: !!canary };
+          return { error: true, status: resp.status, detail: text.substring(0, 500) };
         }
         return { ok: true, data: await resp.json() };
       } catch (err) {
         return { error: true, status: 0, detail: err.message };
       }
     },
-    args: [url, action, payload],
+    args: [url, action, payload, bearerToken],
   });
 
   const result = results?.[0]?.result;
-  console.log(`[SYNC_DBG] owaFetchViaCookie result (canary=${result?.canaryFound}):`, JSON.stringify(result)?.substring(0, 500));
-  if (!result) throw new Error("Cookie-auth OWA fetch returned no result");
+  console.log(`[SYNC_DBG] owaFetchViaTab result:`, JSON.stringify(result)?.substring(0, 500));
+  if (!result) throw new Error("Tab OWA fetch returned no result");
   if (result.error) {
     if (result.status === 401 || result.status === 440) {
       token.token = null;
@@ -222,14 +214,18 @@ async function owaFetchViaCookie(action, body) {
 
 /** Execute a fetch to service.svc with the cached Bearer token. */
 async function owaFetch(action, body) {
-  // Personal accounts use cookie auth via the Outlook tab
-  console.log(`[SYNC_DBG] owaFetch: action=${action}, cookieAuth=${usesCookieAuth()}`);
-  if (usesCookieAuth()) return owaFetchViaCookie(action, body);
+  // Personal accounts need cookies + Bearer token — route through the Outlook tab
+  if (usesCookieAuth()) {
+    console.log(`[SYNC_DBG] owaFetch: action=${action}, routing via tab (personal account)`);
+    return owaFetchViaTab(action, body);
+  }
 
+  console.log(`[SYNC_DBG] owaFetch: action=${action}`);
   const url = getServiceUrl(action);
   if (!url) throw new Error("No OWA endpoint — token origin unknown");
   if (!token || !token.token) throw new Error("No Exchange token available");
 
+  console.log(`[SYNC_DBG] owaFetch: url=${url}, tokenLen=${token.token.length}`);
   const resp = await fetch(url, {
     method: "POST",
     credentials: "omit",
@@ -240,6 +236,7 @@ async function owaFetch(action, body) {
     },
     body: JSON.stringify(wrapRequest(action, body)),
   });
+  console.log(`[SYNC_DBG] owaFetch response: status=${resp.status}`);
 
   if (resp.status === 401) {
     // Token expired — mark it and notify
@@ -292,62 +289,58 @@ async function getOutlookEmail(accessToken) {
   // Basic email validation — reject truncated/garbage values
   const looksLikeEmail = (s) => /^[^\s@]{2,}@[^\s@]{2,}\.[^\s@]{2,}$/.test(s);
 
-  // 1. Try DOM scraping first (most reliable for both personal & work accounts)
-  if (outlookTabId) {
-    try {
-      const results = await chrome.scripting.executeScript({
-        target: { tabId: outlookTabId },
-        world: "MAIN",
-        func: () => {
-          const candidates = [];
-          // O365 account button (work accounts)
-          const o365Btn = document.querySelector('[data-tid="O365_MainLink_Me"]');
-          if (o365Btn) {
-            const label = o365Btn.getAttribute("aria-label") || "";
-            const match = label.match(/[\w.+-]+@[\w.-]+\.\w+/);
-            if (match) candidates.push(match[0]);
-          }
-          // Microsoft account manager (personal + work)
-          const mectrl = document.querySelector('#mectrl_currentAccount_secondary');
-          if (mectrl) {
-            const text = mectrl.textContent.trim();
-            if (text.includes("@")) candidates.push(text);
-          }
-          // OWA header account button (personal Outlook Live)
-          const owaBtn = document.querySelector('[data-tid="AccountManager__Me"]')
-            || document.querySelector('button[aria-label*="Account manager"]')
-            || document.querySelector('#meInitialsButton');
-          if (owaBtn) {
-            const label = owaBtn.getAttribute("aria-label") || "";
-            const match = label.match(/[\w.+-]+@[\w.-]+\.\w+/);
-            if (match) candidates.push(match[0]);
-          }
-          // Broader sweep: any element with data-bind emailAddress
-          const bindEl = document.querySelector('[data-bind*="emailAddress"]');
-          if (bindEl) {
-            const text = bindEl.textContent.trim();
-            if (text.includes("@")) candidates.push(text);
-          }
-          return candidates;
-        },
-      });
-      const candidates = results?.[0]?.result || [];
-      console.log(`[SYNC_DBG] getOutlookEmail DOM scrape candidates:`, JSON.stringify(candidates));
-      // Pick the first candidate that looks like a real email
-      for (const c of candidates) {
-        if (looksLikeEmail(c)) return c.toLowerCase();
-      }
-    } catch (err) {
-      console.log(`[SYNC_DBG] getOutlookEmail DOM scrape failed: ${err.message}`);
-    }
-  }
-
-  // 2. Fallback: JWT decode (works for work/org accounts, unreliable for personal MBI_SSL tokens)
+  // 1. JWT decode (fast, works for work/org accounts)
   const payload = decodeJwtPayload(accessToken);
   if (payload) {
     const email = payload.preferred_username || payload.upn || payload.unique_name || payload.smtp;
     console.log(`[SYNC_DBG] getOutlookEmail JWT candidate: ${email}`);
     if (email && looksLikeEmail(email)) return email.toLowerCase();
+  }
+
+  // 2. Fetch most recent sent email and read the From address (reliable for personal accounts)
+  try {
+    console.log(`[SYNC_DBG] getOutlookEmail: fetching latest sent email for From address`);
+    const resp = await owaFetch("FindItem", {
+      __type: "FindItemJsonRequest:#Exchange",
+      Header: {
+        __type: "JsonRequestHeaders:#Exchange",
+        RequestServerVersion: "Exchange2016",
+      },
+      Body: {
+        __type: "FindItemRequest:#Exchange",
+        ItemShape: {
+          __type: "ItemResponseShape:#Exchange",
+          BaseShape: "IdOnly",
+          AdditionalProperties: [
+            { __type: "PropertyUri:#Exchange", FieldURI: "ItemLastModifiedTime" },
+            { __type: "PropertyUri:#Exchange", FieldURI: "From" },
+          ],
+        },
+        ParentFolderIds: [
+          { __type: "DistinguishedFolderId:#Exchange", Id: "sentitems" },
+        ],
+        Traversal: "Shallow",
+        Paging: {
+          __type: "IndexedPageView:#Exchange",
+          BasePoint: "Beginning",
+          Offset: 0,
+          MaxEntriesReturned: 1,
+        },
+        SortOrder: [
+          {
+            __type: "SortResults:#Exchange",
+            Order: "Descending",
+            Path: { __type: "PropertyUri:#Exchange", FieldURI: "DateTimeSent" },
+          },
+        ],
+      },
+    });
+    const items = resp?.Body?.ResponseMessages?.Items?.[0]?.RootFolder?.Items;
+    const fromEmail = items?.[0]?.From?.Mailbox?.EmailAddress;
+    console.log(`[SYNC_DBG] getOutlookEmail sent-item From: ${fromEmail}`);
+    if (fromEmail && looksLikeEmail(fromEmail)) return fromEmail.toLowerCase();
+  } catch (err) {
+    console.log(`[SYNC_DBG] getOutlookEmail sent-item fetch failed: ${err.message}`);
   }
 
   return null;
@@ -792,7 +785,7 @@ async function syncEmailsToSupabase() {
   try {
     // Check both tokens exist
     console.log(`[SYNC_DBG] token exists=${!!token}, hasSecret=${!!token?.token}, origin=${token?.origin}, expiresOn=${token?.expiresOn}`);
-    console.log(`[SYNC_DBG] usesCookieAuth=${usesCookieAuth()}, outlookTabId=${outlookTabId}`);
+    console.log(`[SYNC_DBG] outlookTabId=${outlookTabId}, tokenOrigin=${token?.origin}`);
     if (!token || !token.token || isTokenExpired()) {
       console.log(`[SYNC_DBG] BAIL: No valid Outlook token`);
       return { error: "No valid Outlook token" };

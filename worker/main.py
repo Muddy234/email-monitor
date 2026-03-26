@@ -345,11 +345,21 @@ def main():
                 continue
 
             logger.info(f"Processing user {user_id[:8]}...: {len(data['emails'])} emails")
-            processed, drafts = process_user_batch_signals(
-                db, user_id, data["profile"], data["emails"]
-            )
-            total_processed += processed
-            total_drafts += drafts
+            try:
+                db.set_pipeline_stage(user_id, "gathering")
+            except Exception:
+                pass
+            try:
+                processed, drafts = process_user_batch_signals(
+                    db, user_id, data["profile"], data["emails"]
+                )
+                total_processed += processed
+                total_drafts += drafts
+            finally:
+                try:
+                    db.set_pipeline_stage(user_id, "idle")
+                except Exception:
+                    pass
 
         logger.info(f"Window complete: {total_processed} processed, {total_drafts} drafts")
 
