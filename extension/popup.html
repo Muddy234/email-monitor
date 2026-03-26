@@ -323,12 +323,11 @@
       to { width: 85%; }
     }
     .pipeline-phase-fill.waiting {
-      width: 100%;
-      animation: phasePulse 2.5s ease-in-out infinite;
+      animation: gatherFill 45s linear infinite;
     }
-    @keyframes phasePulse {
-      0%, 100% { opacity: 0.3; }
-      50% { opacity: 1; }
+    @keyframes gatherFill {
+      0% { width: 0%; }
+      100% { width: 100%; }
     }
     .pipeline-labels {
       display: flex;
