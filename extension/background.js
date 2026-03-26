@@ -370,25 +370,43 @@ function parseFindItemMessage(item, folder) {
 function htmlToText(html) {
   if (!html) return "";
   let text = html;
-  // Line breaks for block elements
-  text = text.replace(/<br\s*\/?>/gi, "\n");
-  text = text.replace(/<\/(?:p|div|tr|li|h[1-6])>/gi, "\n");
-  text = text.replace(/<\/(?:td|th)>/gi, "\t");
-  // Remove style/script blocks entirely
+  // Remove style/script/head blocks first (before any tag processing)
   text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "");
   text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "");
+  text = text.replace(/<head[^>]*>[\s\S]*?<\/head>/gi, "");
+  // Outlook-specific: remove <o:p> tags (empty paragraph spacers)
+  text = text.replace(/<o:p>[\s\S]*?<\/o:p>/gi, "");
+  // Line breaks
+  text = text.replace(/<br\s*\/?>/gi, "\n");
+  text = text.replace(/<hr\s*\/?>/gi, "\n---\n");
+  // Block-level opening tags: insert newline before content
+  text = text.replace(/<(?:p|div|blockquote|h[1-6])(?:\s[^>]*)?>(?!\s*<\/)/gi, "\n");
+  // Block-level closing tags: insert newline after content
+  text = text.replace(/<\/(?:p|div|blockquote|tr|li|h[1-6])>/gi, "\n");
+  // List items: add bullet
+  text = text.replace(/<li(?:\s[^>]*)?>/gi, "\n• ");
+  // Table cells: tab-separate
+  text = text.replace(/<\/(?:td|th)>/gi, "\t");
   // Strip remaining tags
   text = text.replace(/<[^>]+>/g, "");
-  // Decode common HTML entities
+  // Decode HTML entities
   text = text.replace(/&nbsp;/gi, " ");
   text = text.replace(/&amp;/gi, "&");
   text = text.replace(/&lt;/gi, "<");
   text = text.replace(/&gt;/gi, ">");
   text = text.replace(/&quot;/gi, '"');
   text = text.replace(/&#39;/gi, "'");
-  text = text.replace(/&#\d+;/g, "");
-  // Collapse whitespace
+  text = text.replace(/&rsquo;/gi, "'");
+  text = text.replace(/&lsquo;/gi, "'");
+  text = text.replace(/&rdquo;/gi, "\u201D");
+  text = text.replace(/&ldquo;/gi, "\u201C");
+  text = text.replace(/&mdash;/gi, "\u2014");
+  text = text.replace(/&ndash;/gi, "\u2013");
+  text = text.replace(/&hellip;/gi, "\u2026");
+  text = text.replace(/&#(\d+);/g, (_, n) => String.fromCharCode(n));
+  // Collapse whitespace (preserve newlines)
   text = text.replace(/[ \t]+/g, " ");
+  text = text.replace(/ ?\n ?/g, "\n");
   text = text.replace(/\n{3,}/g, "\n\n");
   return text.trim();
 }
