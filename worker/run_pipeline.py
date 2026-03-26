@@ -132,8 +132,32 @@ def filter_emails(db_client, emails, user_id, config):
     skip_ids = []
     skip_classifications = []
 
+    deferred_ids = []
+
     for email in emails:
         email_data = supabase_row_to_email_data(email)
+
+        # Defer emails with empty bodies — likely synced before GetItem
+        # enrichment succeeded. Leave as "unprocessed" for re-processing
+        # once the extension re-syncs with a valid token and populates body.
+        # After 10 minutes, give up and process with empty body to avoid
+        # infinite defer loops for genuinely empty emails.
+        if not (email_data.get("body") or "").strip():
+            created = email.get("created_at")
+            age_ok = False
+            if created:
+                try:
+                    ct = datetime.fromisoformat(str(created).replace("Z", "+00:00"))
+                    if ct.tzinfo is None:
+                        ct = ct.replace(tzinfo=timezone.utc)
+                    age_ok = (datetime.now(timezone.utc) - ct).total_seconds() > 600
+                except (ValueError, TypeError):
+                    pass
+            if not age_ok:
+                logger.info(f"  Deferred (empty body): {email_data.get('subject', '?')[:60]}")
+                deferred_ids.append(email["id"])
+                continue
+
         email_data["signals"] = build_signals(email_data, user_aliases)
         classification, filter_reason = email_filter.classify(email_data)
 
@@ -169,6 +193,11 @@ def filter_emails(db_client, emails, user_id, config):
         email_data["_filter_result"] = classification
         email_data["_db_id"] = email["id"]
         filtered.append(email_data)
+
+    # Reset deferred (empty body) emails back to unprocessed
+    if deferred_ids:
+        db_client.bulk_update_email_status(deferred_ids, "unprocessed")
+        logger.info(f"  Deferred {len(deferred_ids)} empty-body emails for re-processing")
 
     # Batch-write all skipped emails in bulk
     if skip_ids:

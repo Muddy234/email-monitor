@@ -335,18 +335,11 @@ def pre_process_email(email_data, prior_bodies=None):
 
     Args:
         email_data: dict with 'body' and 'subject' keys.
-        prior_bodies: Optional list of prior email body strings from the
-            same thread. When provided, uses content-aware diffing instead
-            of regex-based reply stripping.
+        prior_bodies: Unused, kept for call-site compatibility.
 
     Returns:
-        str: Cleaned, truncated email body ready for Haiku.
+        str: Truncated email body ready for Haiku.
     """
     body = email_data.get("body") or ""
-    if prior_bodies:
-        body = isolate_new_content(body, prior_bodies)
-    else:
-        body = strip_reply_markers(body)
-    body = strip_signatures(body)
-    body = truncate_smart(body, max_tokens=1000)
+    body = truncate_smart(body, max_tokens=2500)
     return body
