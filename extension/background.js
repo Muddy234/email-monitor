@@ -875,6 +875,7 @@ async function detectAndUpdateAliases(userId, authEmail, sentEmails) {
 }
 
 async function syncEmailsToSupabase() {
+  console.log("[SYNC v2] syncEmailsToSupabase called");
   if (DEBUG) console.log("syncEmailsToSupabase called");
   if (isSyncing) return { skipped: true };
   isSyncing = true;
@@ -973,6 +974,12 @@ async function syncEmailsToSupabase() {
 
         // Enrich emails with body/recipients via batched GetItem
         const enriched = await enrichEmailsBatched(result.emails);
+
+        // Diagnostic: log body status for every email
+        console.log(`[SYNC v2] Enriched ${enriched.length} emails from "${folderInfo.displayName}":`);
+        for (const e of enriched) {
+          console.log(`  "${e.subject}" | body: ${e.body ? e.body.length + ' chars' : 'EMPTY'}`);
+        }
 
         // Transform to Supabase row format
         const rows = enriched.map((e) => ({
