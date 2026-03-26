@@ -73,6 +73,57 @@ async function fetchOnboardingStatus(session) {
 }
 
 // ---------------------------------------------------------------------------
+// Token refresh — popup can't access background's getValidAccessToken()
+// ---------------------------------------------------------------------------
+
+async function refreshSupabaseSession(session) {
+  if (!session?.refresh_token) return null;
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({ refresh_token: session.refresh_token }),
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const refreshed = {
+      access_token: data.access_token,
+      refresh_token: data.refresh_token,
+      expires_at: Math.floor(Date.now() / 1000) + (data.expires_in || 3600),
+      user: {
+        id: data.user?.id,
+        email: data.user?.email,
+        name: data.user?.user_metadata?.full_name || data.user?.user_metadata?.name || session.user?.name || "",
+      },
+    };
+    await chrome.storage.local.set({ supabaseSession: refreshed });
+    return refreshed;
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * Get a valid session, refreshing the token if within 5 min of expiry.
+ * Returns null if no session or refresh fails.
+ */
+async function getValidSession() {
+  const result = await chrome.storage.local.get("supabaseSession");
+  const session = result.supabaseSession;
+  if (!session?.access_token) return null;
+
+  const now = Math.floor(Date.now() / 1000);
+  if (session.expires_at - now > 300) return session;
+
+  // Token expired or expiring soon — refresh
+  const refreshed = await refreshSupabaseSession(session);
+  return refreshed || session; // fall back to old session if refresh fails
+}
+
+// ---------------------------------------------------------------------------
 // Auth helpers (direct REST — popup can't access background's functions)
 // ---------------------------------------------------------------------------
 
@@ -200,8 +251,7 @@ async function setState(state) {
 }
 
 async function checkSessionAndRender() {
-  const result = await chrome.storage.local.get("supabaseSession");
-  const session = result.supabaseSession;
+  const session = await getValidSession();
   const state = await getState();
 
   if (!session || !session.access_token) {
@@ -344,9 +394,9 @@ async function updateSetupChecklist(session) {
   if (allDone) {
     setTimeout(async () => {
       await setState("complete");
-      const result = await chrome.storage.local.get("supabaseSession");
-      if (result.supabaseSession) {
-        showStatusView(result.supabaseSession);
+      const session = await getValidSession();
+      if (session) {
+        showStatusView(session);
       }
     }, 2000);
   }
@@ -467,13 +517,10 @@ function renderPipelineBar(stage) {
     drafting: document.getElementById("labelDrafting"),
   };
 
-  if (!stage || stage === "idle") {
-    bar.style.display = "none";
-    return;
-  }
-
   bar.style.display = "block";
-  const activeIdx = phases.indexOf(stage);
+  // Idle or unknown → show "gathering" as active (worker is always polling)
+  const effective = (!stage || stage === "idle") ? "gathering" : stage;
+  const activeIdx = phases.indexOf(effective);
 
   for (let i = 0; i < phases.length; i++) {
     const fill = fills[phases[i]];
@@ -930,8 +977,8 @@ document.getElementById("setupSyncBtn").addEventListener("click", () => {
     if (resp && resp.error) {
       showError(friendlySyncError(resp.error));
     } else {
-      chrome.storage.local.get("supabaseSession", (result) => {
-        if (result.supabaseSession) updateSetupChecklist(result.supabaseSession);
+      getValidSession().then((session) => {
+        if (session) updateSetupChecklist(session);
       });
     }
   });
@@ -949,19 +996,17 @@ document.getElementById("authPassword").addEventListener("keydown", (e) => {
 checkSessionAndRender();
 
 // Dashboard refresh (15s)
-setInterval(() => {
+setInterval(async () => {
   if (document.getElementById("statusView").style.display !== "none") {
-    chrome.storage.local.get("supabaseSession", (result) => {
-      if (result.supabaseSession) refreshStatus(result.supabaseSession);
-    });
+    const session = await getValidSession();
+    if (session) refreshStatus(session);
   }
 }, 15000);
 
 // Setup view refresh (5s — faster polling during onboarding)
-setInterval(() => {
+setInterval(async () => {
   if (document.getElementById("setupView").style.display !== "none") {
-    chrome.storage.local.get("supabaseSession", (result) => {
-      if (result.supabaseSession) updateSetupChecklist(result.supabaseSession);
-    });
+    const session = await getValidSession();
+    if (session) updateSetupChecklist(session);
   }
 }, 5000);
