@@ -518,8 +518,8 @@ function renderPipelineBar(stage) {
   };
 
   bar.style.display = "block";
-  // Idle or unknown → show "gathering" as active (worker is always polling)
-  const effective = (!stage || stage === "idle") ? "gathering" : stage;
+  const isIdle = !stage || stage === "idle";
+  const effective = isIdle ? "gathering" : stage;
   const activeIdx = phases.indexOf(effective);
 
   for (let i = 0; i < phases.length; i++) {
@@ -535,7 +535,8 @@ function renderPipelineBar(stage) {
       fill.classList.add("filled");
       label.classList.add("done");
     } else if (i === activeIdx) {
-      fill.classList.add("filling");
+      // Idle/gathering → gentle pulse; active processing → progress fill
+      fill.classList.add(isIdle && i === 0 ? "waiting" : "filling");
       label.classList.add("active");
     }
   }
