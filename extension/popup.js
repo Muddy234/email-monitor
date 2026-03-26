@@ -535,8 +535,15 @@ function renderPipelineBar(stage) {
       fill.classList.add("filled");
       label.classList.add("done");
     } else if (i === activeIdx) {
-      // Idle/gathering → gentle pulse; active processing → progress fill
-      fill.classList.add(isIdle && i === 0 ? "waiting" : "filling");
+      if (isIdle && i === 0) {
+        // Sync animation to wall clock so position persists across popup opens
+        const elapsedMs = Date.now() % 45000;
+        fill.style.animationDelay = `-${elapsedMs}ms`;
+        fill.classList.add("waiting");
+      } else {
+        fill.style.animationDelay = "";
+        fill.classList.add("filling");
+      }
       label.classList.add("active");
     }
   }
