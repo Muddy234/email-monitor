@@ -998,6 +998,9 @@ async function initSupabase() {
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === EMAIL_SYNC_ALARM) {
+    // Re-schedule immediately so the next sync is queued while this one runs
+    chrome.alarms.create(EMAIL_SYNC_ALARM, { delayInMinutes: EMAIL_SYNC_PERIOD_MIN });
+
     (async () => {
       // 1. Sync emails
       try {
@@ -1032,9 +1035,6 @@ chrome.alarms.onAlarm.addListener((alarm) => {
           if (DEBUG) console.error("Alarm sweep error:", err.message);
         }
       }
-
-      // Re-schedule next sync (delayInMinutes avoids Chrome's 1-min floor)
-      chrome.alarms.create(EMAIL_SYNC_ALARM, { delayInMinutes: EMAIL_SYNC_PERIOD_MIN });
     })();
   }
 });
