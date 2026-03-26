@@ -501,9 +501,18 @@ async function refreshStatus(session) {
 // Pipeline progress bar
 // ---------------------------------------------------------------------------
 
+let _lastPipelineStage = null;
+
 function renderPipelineBar(stage) {
   const bar = document.getElementById("pipelineBar");
   if (!bar) return;
+
+  const isIdle = !stage || stage === "idle";
+  const effective = isIdle ? "gathering" : stage;
+
+  // Skip re-render if stage unchanged — prevents animation restarts
+  if (effective === _lastPipelineStage) return;
+  _lastPipelineStage = effective;
 
   const phases = ["gathering", "analyzing", "drafting"];
   const fills = {
@@ -518,8 +527,6 @@ function renderPipelineBar(stage) {
   };
 
   bar.style.display = "block";
-  const isIdle = !stage || stage === "idle";
-  const effective = isIdle ? "gathering" : stage;
   const activeIdx = phases.indexOf(effective);
 
   for (let i = 0; i < phases.length; i++) {
@@ -527,8 +534,8 @@ function renderPipelineBar(stage) {
     const label = labels[phases[i]];
     if (!fill || !label) continue;
 
-    // Reset classes
     fill.className = "pipeline-phase-fill";
+    fill.style.animationDelay = "";
     label.className = "pipeline-label";
 
     if (i < activeIdx) {
@@ -536,13 +543,12 @@ function renderPipelineBar(stage) {
       label.classList.add("done");
     } else if (i === activeIdx) {
       if (isIdle && i === 0) {
-        // Sync animation to wall clock so position persists across popup opens
-        const elapsedMs = Date.now() % 45000;
-        fill.style.animationDelay = `-${elapsedMs}ms`;
+        // Sync to wall clock so position persists across popup opens
+        fill.style.animationDelay = `-${Date.now() % 45000}ms`;
         fill.classList.add("waiting");
       } else {
-        fill.style.animationDelay = "";
-        fill.classList.add("filling");
+        // Analyzing/drafting — pulse
+        fill.classList.add("active-pulse");
       }
       label.classList.add("active");
     }

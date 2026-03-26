@@ -315,19 +315,20 @@
     .pipeline-phase-fill.filled {
       width: 100%;
     }
-    .pipeline-phase-fill.filling {
-      animation: phaseProgress 8s linear forwards;
-    }
-    @keyframes phaseProgress {
-      from { width: 15%; }
-      to { width: 85%; }
-    }
     .pipeline-phase-fill.waiting {
       animation: gatherFill 45s linear infinite;
     }
     @keyframes gatherFill {
       0% { width: 0%; }
       100% { width: 100%; }
+    }
+    .pipeline-phase-fill.active-pulse {
+      width: 100%;
+      animation: activePulse 1.5s ease-in-out infinite;
+    }
+    @keyframes activePulse {
+      0%, 100% { opacity: 0.35; }
+      50% { opacity: 1; }
     }
     .pipeline-labels {
       display: flex;
