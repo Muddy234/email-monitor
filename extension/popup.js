@@ -414,12 +414,12 @@ async function refreshStatus(session) {
     }
   });
 
-  // Show connected Outlook email in footer
+  // Show connected Outlook email + pipeline stage from one query
   try {
     const uid = session.user?.id;
     if (uid) {
       const resp = await fetch(
-        `${SUPABASE_URL}/rest/v1/profiles?id=eq.${uid}&select=connected_outlook_email`,
+        `${SUPABASE_URL}/rest/v1/profiles?id=eq.${uid}&select=connected_outlook_email,pipeline_stage`,
         {
           headers: {
             apikey: SUPABASE_ANON_KEY,
@@ -435,6 +435,7 @@ async function refreshStatus(session) {
           connectedEl.textContent = `Outlook: ${outlookAddr}`;
           connectedEl.style.display = "block";
         }
+        renderPipelineBar(rows?.[0]?.pipeline_stage || "idle");
       }
     }
   } catch (_) {}
@@ -444,6 +445,53 @@ async function refreshStatus(session) {
   renderHeadline(counts);
   renderQuickStats(counts);
   renderDeepLinks(counts);
+}
+
+// ---------------------------------------------------------------------------
+// Pipeline progress bar
+// ---------------------------------------------------------------------------
+
+function renderPipelineBar(stage) {
+  const bar = document.getElementById("pipelineBar");
+  if (!bar) return;
+
+  const phases = ["gathering", "analyzing", "drafting"];
+  const fills = {
+    gathering: document.getElementById("phaseGathering"),
+    analyzing: document.getElementById("phaseAnalyzing"),
+    drafting: document.getElementById("phaseDrafting"),
+  };
+  const labels = {
+    gathering: document.getElementById("labelGathering"),
+    analyzing: document.getElementById("labelAnalyzing"),
+    drafting: document.getElementById("labelDrafting"),
+  };
+
+  if (!stage || stage === "idle") {
+    bar.style.display = "none";
+    return;
+  }
+
+  bar.style.display = "block";
+  const activeIdx = phases.indexOf(stage);
+
+  for (let i = 0; i < phases.length; i++) {
+    const fill = fills[phases[i]];
+    const label = labels[phases[i]];
+    if (!fill || !label) continue;
+
+    // Reset classes
+    fill.className = "pipeline-phase-fill";
+    label.className = "pipeline-label";
+
+    if (i < activeIdx) {
+      fill.classList.add("filled");
+      label.classList.add("done");
+    } else if (i === activeIdx) {
+      fill.classList.add("filling");
+      label.classList.add("active");
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -810,6 +810,11 @@ def process_user_batch_signals(db, user_id, profile, emails):
             f"{len(threads_map)} threads, {len(domain_tiers)} domain tiers"
         )
 
+        try:
+            db.set_pipeline_stage(user_id, "analyzing")
+        except Exception:
+            pass
+
         # ── Stage 3: Signal extraction (Haiku batch) ─────────────
         batch_requests = []
         email_context = {}  # email_id → context needed for post-processing
@@ -1097,6 +1102,10 @@ def process_user_batch_signals(db, user_id, profile, emails):
         # ── Stage 5: Draft generation (Sonnet batch) ─────────────
         drafts_generated = 0
         if draft_candidates:
+            try:
+                db.set_pipeline_stage(user_id, "drafting")
+            except Exception:
+                pass
             draft_generator = DraftGenerator(
                 config, system_prompt_template=get_draft_prompt_template()
             )

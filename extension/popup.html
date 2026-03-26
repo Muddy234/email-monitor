@@ -286,6 +286,59 @@
     /* Logout confirm */
     .logout-confirm { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
     .logout-confirm span { color: #78716C; }
+
+    /* Pipeline progress bar */
+    .pipeline-bar {
+      display: none;
+      margin-bottom: 12px;
+    }
+    .pipeline-phases {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 6px;
+    }
+    .pipeline-phase {
+      flex: 1;
+      height: 6px;
+      border-radius: 3px;
+      background: #E7E5E4;
+      overflow: hidden;
+      position: relative;
+    }
+    .pipeline-phase-fill {
+      height: 100%;
+      border-radius: 3px;
+      background: #2C4F7C;
+      width: 0%;
+      transition: width 2s ease-in-out;
+    }
+    .pipeline-phase-fill.filled {
+      width: 100%;
+    }
+    .pipeline-phase-fill.filling {
+      animation: phaseProgress 8s linear forwards;
+    }
+    @keyframes phaseProgress {
+      from { width: 15%; }
+      to { width: 85%; }
+    }
+    .pipeline-labels {
+      display: flex;
+      gap: 4px;
+    }
+    .pipeline-label {
+      flex: 1;
+      font-size: 10px;
+      color: #A8A29E;
+      text-align: center;
+    }
+    .pipeline-label.active {
+      color: #2C4F7C;
+      font-weight: 600;
+    }
+    .pipeline-label.done {
+      color: #10B981;
+    }
   </style>
 </head>
 <body>
@@ -400,6 +453,20 @@
 
     <!-- Outlook account mismatch banner -->
     <div class="error-banner" id="outlookMismatchBanner"></div>
+
+    <!-- Pipeline progress -->
+    <div class="pipeline-bar" id="pipelineBar">
+      <div class="pipeline-phases">
+        <div class="pipeline-phase"><div class="pipeline-phase-fill" id="phaseGathering"></div></div>
+        <div class="pipeline-phase"><div class="pipeline-phase-fill" id="phaseAnalyzing"></div></div>
+        <div class="pipeline-phase"><div class="pipeline-phase-fill" id="phaseDrafting"></div></div>
+      </div>
+      <div class="pipeline-labels">
+        <span class="pipeline-label" id="labelGathering">Gathering</span>
+        <span class="pipeline-label" id="labelAnalyzing">Analyzing</span>
+        <span class="pipeline-label" id="labelDrafting">Drafting</span>
+      </div>
+    </div>
 
     <!-- Headline stat -->
     <div class="headline-card" id="headlineCard">
