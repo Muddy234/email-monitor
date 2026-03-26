@@ -247,6 +247,22 @@
     .check-icon { font-size: 15px; flex-shrink: 0; }
     .check-done { color: #10B981; }
     .check-pending { color: #D6D3D1; }
+    .check-active { color: #2C4F7C; animation: pulseDot 1.5s ease-in-out infinite; }
+    @keyframes pulseDot {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+    .setup-error {
+      display: none;
+      background: #FEF2F2;
+      border: 1px solid #FEE2E2;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-top: 10px;
+      font-size: 12px;
+      color: #DC2626;
+      line-height: 1.4;
+    }
     .setup-greeting { font-size: 13px; color: #44403C; margin-bottom: 10px; }
     .btn-row { display: flex; gap: 8px; margin-top: 10px; }
     .btn-row .btn { flex: 1; text-align: center; }
@@ -349,12 +365,28 @@
         <span>Open Outlook in this browser</span>
       </li>
       <li>
-        <span class="check-icon" id="checkSync">&#x2B58;</span>
-        <span>First email sync</span>
+        <span class="check-icon" id="checkSyncing">&#x2B58;</span>
+        <span>Syncing emails</span>
+      </li>
+      <li>
+        <span class="check-icon" id="checkBehavior">&#x2B58;</span>
+        <span>Learning your email behavior</span>
+      </li>
+      <li>
+        <span class="check-icon" id="checkStyle">&#x2B58;</span>
+        <span>Learning your writing style</span>
+      </li>
+      <li>
+        <span class="check-icon" id="checkComplete">&#x2B58;</span>
+        <span>Onboarding complete</span>
       </li>
     </ul>
-    <div class="btn-row" style="margin-top: 12px;">
-      <button class="btn btn-sm btn-outline" id="setupSyncBtn">Sync Now</button>
+    <div class="setup-error" id="setupError"></div>
+    <div class="btn-row" style="margin-top: 12px; display: flex; gap: 8px;">
+      <button class="btn btn-sm btn-outline" id="setupSyncBtn" style="flex: 1;">Sync Now</button>
+      <span id="setupLogoutContainer" style="flex: 1; display: flex;">
+        <button class="btn btn-sm btn-outline" id="setupLogoutBtn" style="flex: 1;">Logout</button>
+      </span>
     </div>
   </div>
 
@@ -365,6 +397,9 @@
 
     <!-- Error banner -->
     <div class="error-banner" id="statusError"></div>
+
+    <!-- Outlook account mismatch banner -->
+    <div class="error-banner" id="outlookMismatchBanner"></div>
 
     <!-- Headline stat -->
     <div class="headline-card" id="headlineCard">
@@ -390,7 +425,10 @@
 
     <!-- Footer -->
     <div class="popup-footer">
-      <span class="user-email" id="userEmail">—</span>
+      <span>
+        <span class="user-email" id="userEmail">—</span>
+        <span class="user-email" id="connectedOutlookEmail" style="display:none; font-size:10px; color:#A8A29E;"></span>
+      </span>
       <span id="logoutContainer">
         <button class="btn btn-sm btn-outline" id="logoutBtn">Logout</button>
       </span>

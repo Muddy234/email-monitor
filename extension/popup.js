@@ -36,6 +36,42 @@ function removeSkeleton(id) {
   if (el) el.classList.remove("skeleton-text");
 }
 
+// Onboarding status ordering — maps worker pipeline phases to linear progression
+const ONBOARDING_ORDER = [
+  "starting", "collecting", "statistics", "persisting",
+  "extracting", "synthesizing", "style_guide", "training",
+  "complete", "complete_partial",
+];
+
+function onboardingAtLeast(current, threshold) {
+  if (!current) return false;
+  const ci = ONBOARDING_ORDER.indexOf(current);
+  const ti = ONBOARDING_ORDER.indexOf(threshold);
+  if (ci === -1 || ti === -1) return false;
+  return ci >= ti;
+}
+
+async function fetchOnboardingStatus(session) {
+  const uid = session.user?.id;
+  if (!uid) return null;
+  try {
+    const resp = await fetch(
+      `${SUPABASE_URL}/rest/v1/profiles?id=eq.${uid}&select=onboarding_status`,
+      {
+        headers: {
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      }
+    );
+    if (!resp.ok) return null;
+    const rows = await resp.json();
+    return rows?.[0]?.onboarding_status || null;
+  } catch (_) {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Auth helpers (direct REST — popup can't access background's functions)
 // ---------------------------------------------------------------------------
@@ -180,30 +216,9 @@ async function checkSessionAndRender() {
   if (state === "complete") {
     showStatusView(session);
   } else {
-    // Check if user already has emails in Supabase — if so, skip setup.
-    // This avoids relying on ephemeral background state (lastSyncTime)
-    // which may be null after a service worker restart.
-    let hasEmails = false;
-    try {
-      const uid = session.user?.id;
-      if (uid) {
-        const resp = await fetch(
-          `${SUPABASE_URL}/rest/v1/emails?user_id=eq.${uid}&select=id&limit=1`,
-          {
-            headers: {
-              apikey: SUPABASE_ANON_KEY,
-              Authorization: `Bearer ${session.access_token}`,
-            },
-          }
-        );
-        if (resp.ok) {
-          const rows = await resp.json();
-          hasEmails = rows.length > 0;
-        }
-      }
-    } catch (_) {}
-
-    if (hasEmails) {
+    // Check onboarding_status to determine correct view
+    const obStatus = await fetchOnboardingStatus(session);
+    if (obStatus === "complete" || obStatus === "complete_partial") {
       await setState("complete");
       showStatusView(session);
     } else {
@@ -227,35 +242,114 @@ function showSetupView(session) {
   updateSetupChecklist(session);
 }
 
-function updateSetupChecklist(session) {
-  const setCheck = (id, done) => {
+async function updateSetupChecklist(session) {
+  const setCheck = (id, state) => {
     const el = document.getElementById(id);
-    if (done) {
+    if (!el) return;
+    if (state === "done") {
       el.textContent = "\u2705";
       el.className = "check-icon check-done";
+    } else if (state === "active") {
+      el.textContent = "\u2B58";
+      el.className = "check-icon check-active";
     } else {
       el.textContent = "\u2B58";
       el.className = "check-icon check-pending";
     }
   };
 
-  setCheck("checkAuth", true);
+  // Auth is always done
+  setCheck("checkAuth", "done");
 
-  chrome.runtime.sendMessage({ type: "getStatus" }, async (status) => {
-    if (chrome.runtime.lastError || !status) return;
+  // Check Outlook token via background
+  const status = await new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type: "getStatus" }, (s) => {
+      if (chrome.runtime.lastError || !s) resolve(null);
+      else resolve(s);
+    });
+  });
 
-    const hasToken = status.has_token && !status.token_expired;
-    setCheck("checkOutlook", hasToken);
-    setCheck("checkSync", !!status.last_sync);
+  const hasToken = status && status.has_token && !status.token_expired;
+  setCheck("checkOutlook", hasToken ? "done" : "pending");
 
-    if (hasToken && status.last_sync) {
+  // Fetch onboarding_status from profiles
+  const obStatus = await fetchOnboardingStatus(session);
+
+  // Handle failed state
+  const errorEl = document.getElementById("setupError");
+  if (obStatus === "failed") {
+    errorEl.textContent = "Something went wrong during setup. Please try syncing again.";
+    errorEl.style.display = "block";
+    setCheck("checkSyncing", "pending");
+    setCheck("checkBehavior", "pending");
+    setCheck("checkStyle", "pending");
+    setCheck("checkComplete", "pending");
+    document.getElementById("setupSyncBtn").style.display = "";
+    return;
+  } else if (errorEl) {
+    errorEl.style.display = "none";
+  }
+
+  // Determine step states based on onboarding_status
+  const syncingDone = onboardingAtLeast(obStatus, "statistics");
+  const behaviorDone = onboardingAtLeast(obStatus, "extracting");
+  const styleDone = onboardingAtLeast(obStatus, "training");
+  const allDone = obStatus === "complete" || obStatus === "complete_partial";
+
+  // Syncing emails
+  if (syncingDone) {
+    setCheck("checkSyncing", "done");
+  } else if (hasToken && (obStatus || status?.last_sync)) {
+    setCheck("checkSyncing", "active");
+  } else {
+    setCheck("checkSyncing", "pending");
+  }
+
+  // Learning your email behavior
+  if (behaviorDone) {
+    setCheck("checkBehavior", "done");
+  } else if (syncingDone) {
+    setCheck("checkBehavior", "active");
+  } else {
+    setCheck("checkBehavior", "pending");
+  }
+
+  // Learning your writing style
+  if (styleDone) {
+    setCheck("checkStyle", "done");
+  } else if (behaviorDone) {
+    setCheck("checkStyle", "active");
+  } else {
+    setCheck("checkStyle", "pending");
+  }
+
+  // Onboarding complete
+  if (allDone) {
+    setCheck("checkComplete", "done");
+  } else if (styleDone) {
+    setCheck("checkComplete", "active");
+  } else {
+    setCheck("checkComplete", "pending");
+  }
+
+  // Hide Sync Now button once onboarding has started
+  const syncBtn = document.getElementById("setupSyncBtn");
+  if (obStatus) {
+    syncBtn.style.display = "none";
+  } else {
+    syncBtn.style.display = "";
+  }
+
+  // Transition to dashboard when complete (brief delay so user sees the finished checklist)
+  if (allDone) {
+    setTimeout(async () => {
       await setState("complete");
       const result = await chrome.storage.local.get("supabaseSession");
       if (result.supabaseSession) {
         showStatusView(result.supabaseSession);
       }
-    }
-  });
+    }, 2000);
+  }
 }
 
 function showStatusView(session) {
@@ -307,6 +401,43 @@ async function refreshStatus(session) {
       el.style.display = "none";
     }
   });
+
+  // Check for Outlook account mismatch
+  chrome.storage.local.get("outlookMismatch", (result) => {
+    const banner = document.getElementById("outlookMismatchBanner");
+    if (result.outlookMismatch) {
+      const expected = result.outlookMismatch.expected;
+      banner.textContent = `This extension is linked to ${expected}. Please sign in with that Outlook account.`;
+      banner.style.display = "block";
+    } else {
+      banner.style.display = "none";
+    }
+  });
+
+  // Show connected Outlook email in footer
+  try {
+    const uid = session.user?.id;
+    if (uid) {
+      const resp = await fetch(
+        `${SUPABASE_URL}/rest/v1/profiles?id=eq.${uid}&select=connected_outlook_email`,
+        {
+          headers: {
+            apikey: SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        }
+      );
+      if (resp.ok) {
+        const rows = await resp.json();
+        const connectedEl = document.getElementById("connectedOutlookEmail");
+        const outlookAddr = rows?.[0]?.connected_outlook_email;
+        if (outlookAddr && connectedEl) {
+          connectedEl.textContent = `Outlook: ${outlookAddr}`;
+          connectedEl.style.display = "block";
+        }
+      }
+    }
+  } catch (_) {}
 
   // Fetch counts and render headline
   const counts = await fetchCounts(session);
@@ -688,43 +819,50 @@ document.getElementById("otpInput")?.addEventListener("keydown", (e) => {
   if (e.key === "Enter") document.getElementById("verifyCodeBtn").click();
 });
 
-// Logout — two-step confirmation
-function initLogoutBtn() {
-  const container = document.getElementById("logoutContainer");
-  container.innerHTML = '<button class="btn btn-sm btn-outline" id="logoutBtn">Logout</button>';
-  document.getElementById("logoutBtn").addEventListener("click", showLogoutConfirm);
+// Logout — shared handler + two-step confirmation for each container
+async function performLogout() {
+  const result = await chrome.storage.local.get("supabaseSession");
+  const session = result.supabaseSession;
+  if (session?.access_token && session?.user?.id) {
+    setWorkerActive(session.access_token, session.user.id, false).catch(() => {});
+  }
+  await chrome.storage.local.remove("supabaseSession");
+  await chrome.storage.local.remove("lastSyncTime");
+  await chrome.storage.session.remove("exchangeToken");
+  await setState("login");
+  chrome.runtime.sendMessage({ type: "supabaseSessionChanged" });
+  showView("loginView");
 }
 
-function showLogoutConfirm() {
-  const container = document.getElementById("logoutContainer");
+function initLogoutContainer(containerId, btnId) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  container.innerHTML = `<button class="btn btn-sm btn-outline" id="${btnId}">Logout</button>`;
+  document.getElementById(btnId).addEventListener("click", () => showLogoutConfirm(containerId, btnId));
+}
+
+function showLogoutConfirm(containerId, btnId) {
+  const container = document.getElementById(containerId);
   container.innerHTML = `<span class="logout-confirm">
     <span>Sure?</span>
-    <button class="btn btn-sm btn-danger" id="logoutYes">Yes</button>
-    <button class="btn btn-sm btn-outline" id="logoutCancel">No</button>
+    <button class="btn btn-sm btn-danger" id="${btnId}Yes">Yes</button>
+    <button class="btn btn-sm btn-outline" id="${btnId}Cancel">No</button>
   </span>`;
-
-  document.getElementById("logoutYes").addEventListener("click", async () => {
-    const result = await chrome.storage.local.get("supabaseSession");
-    const session = result.supabaseSession;
-    if (session?.access_token && session?.user?.id) {
-      setWorkerActive(session.access_token, session.user.id, false).catch(() => {});
-    }
-    await chrome.storage.local.remove("supabaseSession");
-    await chrome.storage.local.remove("lastSyncTime");
-    await chrome.storage.session.remove("exchangeToken");
-    await setState("login");
-    chrome.runtime.sendMessage({ type: "supabaseSessionChanged" });
-    showView("loginView");
-  });
-
-  document.getElementById("logoutCancel").addEventListener("click", () => initLogoutBtn());
+  document.getElementById(`${btnId}Yes`).addEventListener("click", performLogout);
+  document.getElementById(`${btnId}Cancel`).addEventListener("click", () => initLogoutContainer(containerId, btnId));
 }
 
-document.getElementById("logoutBtn").addEventListener("click", showLogoutConfirm);
+// Status view logout
+function initLogoutBtn() { initLogoutContainer("logoutContainer", "logoutBtn"); }
+document.getElementById("logoutBtn").addEventListener("click", () => showLogoutConfirm("logoutContainer", "logoutBtn"));
+
+// Setup view logout
+initLogoutContainer("setupLogoutContainer", "setupLogoutBtn");
 
 // Sync (setup view only)
 function friendlySyncError(raw) {
   if (!raw) return null;
+  if (raw === "OUTLOOK_MISMATCH") return "Wrong Outlook account — see details above";
   if (raw === "No valid Outlook token") return "Outlook not connected — open Outlook in this browser";
   if (raw === "Not logged in to Supabase") return "Please log in first";
   if (raw === "TOKEN_EXPIRED") return "Outlook session expired — reopen Outlook to refresh";
@@ -762,17 +900,20 @@ document.getElementById("authPassword").addEventListener("keydown", (e) => {
 
 checkSessionAndRender();
 
-// Periodic refresh (every 15s)
+// Dashboard refresh (15s)
 setInterval(() => {
-  const statusVisible = document.getElementById("statusView").style.display !== "none";
-  const setupVisible = document.getElementById("setupView").style.display !== "none";
-  if (statusVisible) {
+  if (document.getElementById("statusView").style.display !== "none") {
     chrome.storage.local.get("supabaseSession", (result) => {
       if (result.supabaseSession) refreshStatus(result.supabaseSession);
     });
-  } else if (setupVisible) {
+  }
+}, 15000);
+
+// Setup view refresh (5s — faster polling during onboarding)
+setInterval(() => {
+  if (document.getElementById("setupView").style.display !== "none") {
     chrome.storage.local.get("supabaseSession", (result) => {
       if (result.supabaseSession) updateSetupChecklist(result.supabaseSession);
     });
   }
-}, 15000);
+}, 5000);

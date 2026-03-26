@@ -50,7 +50,7 @@ logger = logging.getLogger("worker")
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL_SECONDS", "30"))
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", "10"))
 INITIAL_WINDOW = int(os.environ.get("INITIAL_WINDOW_SECONDS", "45"))  # 45s
-MAX_WINDOW = int(os.environ.get("MAX_WINDOW_SECONDS", "360"))  # 6 minutes
+MAX_WINDOW = int(os.environ.get("MAX_WINDOW_SECONDS", "180"))  # 3 minutes
 
 # ---------------------------------------------------------------------------
 # Graceful shutdown

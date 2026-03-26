@@ -72,7 +72,19 @@ async function pushEmails(emails) {
  * Fetch the current user's profile (user_email_aliases, etc).
  */
 async function getProfile(userId) {
-  return supabaseRequest(`/profiles?id=eq.${userId}&select=user_email_aliases`);
+  return supabaseRequest(`/profiles?id=eq.${userId}&select=user_email_aliases,connected_outlook_email`);
+}
+
+/**
+ * One-time lock: set the connected Outlook email on the user's profile.
+ * Uses `connected_outlook_email=is.null` filter so it only writes once.
+ * If the column is already set, the filter matches 0 rows (safe no-op).
+ */
+async function setConnectedOutlookEmail(userId, email) {
+  return supabaseRequest(`/profiles?id=eq.${userId}&connected_outlook_email=is.null`, {
+    method: "PATCH",
+    body: { connected_outlook_email: email },
+  });
 }
 
 /**
