@@ -37,7 +37,13 @@ class DraftGenerator:
         sender = email_data.get("sender", "")
         raw_body = email_data.get("body", "") or ""
         thread_emails = action_context.get("thread_emails", [])
-        prior_bodies = [te["body"] for te in thread_emails if te.get("body")]
+        # Exclude the current email from prior bodies (safety net — the
+        # query should already exclude it, but guard against self-match)
+        current_id = email_data.get("_db_id")
+        prior_bodies = [
+            te["body"] for te in thread_emails
+            if te.get("body") and te.get("id") != current_id
+        ]
         is_forward = subject.lower().startswith(("fw:", "fwd:"))
         body = isolate_new_content(raw_body, prior_bodies, subject=subject)
         # Forwards carry the full thread inline — give more room

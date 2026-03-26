@@ -578,6 +578,9 @@ def _fetch_batch_context(db, user_id, filtered_emails):
 def _fetch_thread_emails_batch(db, user_id, filtered_emails):
     """Fetch prior thread emails for all conversations in a single query.
 
+    Excludes the current batch's own emails so that
+    isolate_new_content() won't match the email against itself.
+
     Returns:
         dict: conversation_id → list[dict] of prior email rows.
     """
@@ -588,6 +591,9 @@ def _fetch_thread_emails_batch(db, user_id, filtered_emails):
     })
     if not conv_ids:
         return {}
+
+    # IDs of emails in the current batch — exclude them from "prior" results
+    current_ids = {ed["_db_id"] for ed in filtered_emails if ed.get("_db_id")}
 
     try:
         result = (
@@ -605,6 +611,8 @@ def _fetch_thread_emails_batch(db, user_id, filtered_emails):
 
     thread_emails_map = {}
     for row in (result.data or []):
+        if row["id"] in current_ids:
+            continue
         cid = row["conversation_id"]
         thread_emails_map.setdefault(cid, []).append(row)
 

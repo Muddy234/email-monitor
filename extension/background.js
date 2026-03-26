@@ -425,15 +425,6 @@ function parseGetItemMessage(item) {
   const rawHtml = item.Body?.Value || "";
   const bodyText = htmlToText(rawHtml);
 
-  // Always log when body is empty to diagnose GetItem issues
-  if (!bodyText) {
-    console.warn(`[GetItem] Empty body for "${item.Subject}"`,
-      `| Body obj:`, item.Body,
-      `| Raw HTML length: ${rawHtml.length}`,
-      `| BodyType: ${item.Body?.BodyType}`,
-      `| First 200 chars: ${rawHtml.substring(0, 200)}`);
-  }
-
   return {
     subject: item.Subject || "",
     sender: item.From?.Mailbox?.EmailAddress || "",
@@ -875,21 +866,20 @@ async function detectAndUpdateAliases(userId, authEmail, sentEmails) {
 }
 
 async function syncEmailsToSupabase() {
-  console.log("[SYNC v2] syncEmailsToSupabase called");
   if (DEBUG) console.log("syncEmailsToSupabase called");
-  if (isSyncing) { console.warn("[SYNC v2] Skipped — isSyncing is true"); return { skipped: true }; }
+  if (isSyncing) { if (DEBUG) console.log("Skipped — isSyncing is true"); return { skipped: true }; }
   isSyncing = true;
 
   try {
     // Check both tokens exist
     if (!token || !token.token || isTokenExpired()) {
-      console.warn("[SYNC v2] Exiting — no valid Outlook token", { hasToken: !!token, hasTokenValue: !!token?.token, expired: token ? isTokenExpired() : "N/A" });
+      if (DEBUG) console.log("Exiting — no valid Outlook token");
       return { error: "No valid Outlook token" };
     }
 
     const session = await getSupabaseSession();
     if (!session || !session.access_token) {
-      console.warn("[SYNC v2] Exiting — no Supabase session");
+      if (DEBUG) console.log("Exiting — no Supabase session");
       return { error: "Not logged in to Supabase" };
     }
 
@@ -975,12 +965,6 @@ async function syncEmailsToSupabase() {
 
         // Enrich emails with body/recipients via batched GetItem
         const enriched = await enrichEmailsBatched(result.emails);
-
-        // Diagnostic: log body status for every email
-        console.log(`[SYNC v2] Enriched ${enriched.length} emails from "${folderInfo.displayName}":`);
-        for (const e of enriched) {
-          console.log(`  "${e.subject}" | body: ${e.body ? e.body.length + ' chars' : 'EMPTY'}`);
-        }
 
         // Transform to Supabase row format
         const rows = enriched.map((e) => ({
