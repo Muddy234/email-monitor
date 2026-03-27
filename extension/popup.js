@@ -53,31 +53,21 @@ function onboardingAtLeast(current, threshold) {
 
 async function fetchOnboardingStatus(session) {
   const uid = session.user?.id;
-  if (!uid) return { status: null, emailCount: 0 };
+  if (!uid) return null;
   try {
-    const headers = {
-      apikey: SUPABASE_ANON_KEY,
-      Authorization: `Bearer ${session.access_token}`,
-    };
-    const [profileResp, countResp] = await Promise.all([
-      fetch(
-        `${SUPABASE_URL}/rest/v1/profiles?id=eq.${uid}&select=onboarding_status`,
-        { headers }
-      ),
-      fetch(
-        `${SUPABASE_URL}/rest/v1/emails?user_id=eq.${uid}&select=id&limit=0`,
-        { headers: { ...headers, Prefer: "count=exact" } }
-      ),
-    ]);
-    const rows = profileResp.ok ? await profileResp.json() : [];
-    const range = countResp.headers.get("content-range") || "";
-    const emailCount = parseInt(range.split("/")[1] || "0", 10);
-    return {
-      status: rows?.[0]?.onboarding_status || null,
-      emailCount,
-    };
+    const resp = await fetch(
+      `${SUPABASE_URL}/rest/v1/profiles?id=eq.${uid}&select=onboarding_status`,
+      {
+        headers: {
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      }
+    );
+    const rows = resp.ok ? await resp.json() : [];
+    return rows?.[0]?.onboarding_status || null;
   } catch (_) {
-    return { status: null, emailCount: 0 };
+    return null;
   }
 }
 
@@ -291,7 +281,7 @@ async function checkSessionAndRender() {
     showStatusView(session);
   } else {
     // Check onboarding_status to determine correct view
-    const { status: obStatus } = await fetchOnboardingStatus(session);
+    const obStatus = await fetchOnboardingStatus(session);
     if (obStatus === "complete" || obStatus === "complete_partial") {
       await setState("complete");
       showStatusView(session);
@@ -346,8 +336,8 @@ async function updateSetupChecklist(session) {
   const hasToken = status && status.has_token && !status.token_expired;
   setCheck("checkOutlook", hasToken ? "done" : "pending");
 
-  // Fetch onboarding_status and email count from profiles
-  const { status: obStatus, emailCount } = await fetchOnboardingStatus(session);
+  // Fetch onboarding_status from profiles
+  const obStatus = await fetchOnboardingStatus(session);
 
   // Handle failed state
   const errorEl = document.getElementById("setupError");
@@ -370,14 +360,25 @@ async function updateSetupChecklist(session) {
   const styleDone = onboardingAtLeast(obStatus, "training");
   const allDone = obStatus === "complete" || obStatus === "complete_partial";
 
-  // Syncing emails
+  // Syncing emails — time-based progress (4 cycles × 45s = 180s)
+  const SYNC_DURATION_MS = 180_000;
   const syncProgress = document.getElementById("syncProgress");
   if (syncingDone) {
     setCheck("checkSyncing", "done");
     if (syncProgress) syncProgress.textContent = "";
+    chrome.storage.local.remove("syncStartedAt");
   } else if (hasToken && (obStatus || status?.last_sync)) {
     setCheck("checkSyncing", "active");
-    if (syncProgress) syncProgress.textContent = `(${emailCount} / 500)`;
+    const stored = await new Promise((r) =>
+      chrome.storage.local.get("syncStartedAt", (d) => r(d.syncStartedAt))
+    );
+    if (!stored) {
+      chrome.storage.local.set({ syncStartedAt: Date.now() });
+    }
+    const startedAt = stored || Date.now();
+    const elapsed = Date.now() - startedAt;
+    const pct = Math.min(99, Math.round((elapsed / SYNC_DURATION_MS) * 100));
+    if (syncProgress) syncProgress.textContent = `(${pct}%)`;
   } else {
     setCheck("checkSyncing", "pending");
     if (syncProgress) syncProgress.textContent = "";
