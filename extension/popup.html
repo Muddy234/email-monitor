@@ -244,13 +244,34 @@
       font-size: 13px;
     }
     .checklist li:last-child { border-bottom: none; }
-    .check-icon { font-size: 15px; flex-shrink: 0; }
+    .check-icon { font-size: 15px; flex-shrink: 0; position: relative; }
     .check-done { color: #10B981; }
     .check-pending { color: #D6D3D1; }
-    .check-active { color: #2C4F7C; animation: pulseDot 1.5s ease-in-out infinite; }
-    @keyframes pulseDot {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.3; }
+    .check-active {
+      color: #2C4F7C;
+      font-size: 17px;
+      animation: pulseScale 1.2s ease-in-out infinite;
+      filter: drop-shadow(0 0 4px rgba(44, 79, 124, 0.5));
+    }
+    .check-active::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      border: 2px solid rgba(44, 79, 124, 0.4);
+      transform: translate(-50%, -50%);
+      animation: ripple 1.2s ease-out infinite;
+    }
+    @keyframes pulseScale {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.6; transform: scale(1.15); }
+    }
+    @keyframes ripple {
+      0% { width: 16px; height: 16px; opacity: 0.6; }
+      100% { width: 28px; height: 28px; opacity: 0; }
     }
     .setup-error {
       display: none;
