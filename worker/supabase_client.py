@@ -805,10 +805,9 @@ class SupabaseWorkerClient:
                 entry["contact_type"] = stat["contact_type"]
             contacts_payload.append(entry)
 
-        import json
         self.client.rpc("increment_contact_stats", {
             "p_user_id": user_id,
-            "p_contacts": json.dumps(contacts_payload),
+            "p_contacts": contacts_payload,
         }).execute()
 
     # ------------------------------------------------------------------
