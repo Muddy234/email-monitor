@@ -256,6 +256,20 @@ async function checkSessionAndRender() {
   const state = await getState();
 
   if (!session || !session.access_token) {
+    // Check for pending signup (phone verify in progress)
+    const hasPending = await restorePendingSignup();
+    if (hasPending) {
+      showView("loginView");
+      showPhoneVerifyFlow();
+      // If code was already sent, jump to OTP input
+      if (pendingPhone) {
+        document.getElementById("phoneVerifyToggle").style.display = "none";
+        document.getElementById("phoneInputGroup").style.display = "none";
+        document.getElementById("codeInputGroup").style.display = "";
+        document.getElementById("verifyHint").textContent = "Enter the code sent to your phone";
+      }
+      return;
+    }
     if (state === "welcome") {
       showView("welcomeView");
     } else {
@@ -647,6 +661,39 @@ function openDashboardTab(path) {
 let isSignUpMode = false;
 let pendingUserId = null;
 let pendingPhone = null;
+let pendingEmail = null;
+let pendingPassword = null;
+
+// Persist pending signup state so phone verify survives popup close/reopen
+async function savePendingSignup() {
+  await chrome.storage.local.set({
+    pendingSignup: {
+      userId: pendingUserId,
+      phone: pendingPhone,
+      email: pendingEmail,
+      password: pendingPassword,
+    },
+  });
+}
+
+async function clearPendingSignup() {
+  pendingUserId = null;
+  pendingPhone = null;
+  pendingEmail = null;
+  pendingPassword = null;
+  await chrome.storage.local.remove("pendingSignup");
+}
+
+async function restorePendingSignup() {
+  const result = await chrome.storage.local.get("pendingSignup");
+  const ps = result.pendingSignup;
+  if (!ps?.userId) return false;
+  pendingUserId = ps.userId;
+  pendingPhone = ps.phone || null;
+  pendingEmail = ps.email || null;
+  pendingPassword = ps.password || null;
+  return true;
+}
 
 /**
  * Format a raw phone string to E.164.
@@ -748,10 +795,14 @@ document.getElementById("loginBtn").addEventListener("click", async () => {
       }
       if (result.access_token) {
         session = sessionFromResponse(result);
+        await clearPendingSignup();
       } else {
         // No session = email confirmation pending.
-        // Store userId for phone verify fallback.
+        // Persist state so phone verify survives popup close/reopen.
         pendingUserId = signupUserId;
+        pendingEmail = email;
+        pendingPassword = password;
+        await savePendingSignup();
         btn.disabled = false;
         btn.textContent = "Sign Up";
         showPhoneVerifyFlow();
@@ -762,6 +813,7 @@ document.getElementById("loginBtn").addEventListener("click", async () => {
       session = sessionFromResponse(result);
     }
 
+    await clearPendingSignup();
     await chrome.storage.local.set({ supabaseSession: session });
     await setWorkerActive(session.access_token, session.user.id, true);
 
@@ -837,6 +889,7 @@ document.getElementById("sendCodeBtn").addEventListener("click", async () => {
   try {
     await callEdgeFunction("phone-verify-start", { userId: pendingUserId, phone });
     pendingPhone = phone;
+    await savePendingSignup();
     document.getElementById("phoneInputGroup").style.display = "none";
     document.getElementById("codeInputGroup").style.display = "";
     document.getElementById("verifyHint").textContent = "Enter the code sent to your phone";
@@ -892,23 +945,26 @@ document.getElementById("verifyCodeBtn").addEventListener("click", async () => {
         });
       } catch (_) {}
 
+      await clearPendingSignup();
       chrome.runtime.sendMessage({ type: "supabaseSessionChanged" });
       await setState("setup");
       showSetupView(session);
     } else if (data.confirmed) {
       // Account confirmed but no auto-session — sign in with stored credentials
-      const email = document.getElementById("authEmail").value.trim();
-      const password = document.getElementById("authPassword").value;
+      const email = pendingEmail || document.getElementById("authEmail").value.trim();
+      const password = pendingPassword || document.getElementById("authPassword").value;
       if (email && password) {
         const loginResult = await authRequest("/token?grant_type=password", { email, password });
         const session = sessionFromResponse(loginResult);
         await chrome.storage.local.set({ supabaseSession: session });
         await setWorkerActive(session.access_token, session.user.id, true);
+        await clearPendingSignup();
         chrome.runtime.sendMessage({ type: "supabaseSessionChanged" });
         await setState("setup");
         showSetupView(session);
       } else {
         showError("Account confirmed. Please log in with your email and password.");
+        await clearPendingSignup();
         resetPhoneVerifyState();
       }
     } else {
@@ -939,6 +995,7 @@ async function performLogout() {
   await chrome.storage.local.remove("supabaseSession");
   await chrome.storage.local.remove("lastSyncTime");
   await chrome.storage.session.remove("exchangeToken");
+  await clearPendingSignup();
   await setState("login");
   chrome.runtime.sendMessage({ type: "supabaseSessionChanged" });
   showView("loginView");
