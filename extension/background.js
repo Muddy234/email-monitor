@@ -924,6 +924,18 @@ async function syncEmailsToSupabase() {
     const userId = session.user.id;
     if (DEBUG) console.log("userId:", userId);
 
+    // --- New-account detection: reset sync state on user change ---
+    await restoreSyncTime();
+    const stored = await chrome.storage.local.get("lastSyncUserId");
+    if (stored.lastSyncUserId && stored.lastSyncUserId !== userId) {
+      if (DEBUG) console.log("User changed — resetting lastSyncTime for full catchup");
+      lastSyncTime = null;
+      connectedOutlookEmail = null;
+      cachedFolders = null;
+      folderCacheTime = null;
+      await chrome.storage.local.remove(["lastSyncTime", "lastSyncUserId", "cachedFolders", "folderCacheTime"]);
+    }
+
     // --- Outlook account lock gate ---
     const outlookEmail = await getOutlookEmail(token.token);
     if (DEBUG) console.log("outlookEmail:", outlookEmail);
@@ -1089,6 +1101,7 @@ async function syncEmailsToSupabase() {
 
     lastSyncTime = new Date().toISOString();
     persistSyncTime();
+    chrome.storage.local.set({ lastSyncUserId: userId });
 
     // Auto-detect user's Outlook email aliases from sent items + auth email
     const authEmail = session.user?.email || "";
@@ -1260,7 +1273,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         connectedOutlookEmail = null;
         cachedFolders = null;
         folderCacheTime = null;
-        chrome.storage.local.remove(["cachedFolders", "folderCacheTime"]);
+        chrome.storage.local.remove(["cachedFolders", "folderCacheTime", "lastSyncTime", "lastSyncUserId"]);
         updateBadge();
       }
     });
