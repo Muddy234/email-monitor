@@ -165,6 +165,7 @@ function sessionFromResponse(data) {
     access_token: data.access_token,
     refresh_token: data.refresh_token,
     expires_at: Math.floor(Date.now() / 1000) + (data.expires_in || 3600),
+    last_login_at: Math.floor(Date.now() / 1000),
     user: {
       id: data.user?.id,
       email: data.user?.email,

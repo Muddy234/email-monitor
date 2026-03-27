@@ -35,6 +35,14 @@
       ],
       "js": ["content.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://clarion-ai.app/*",
+        "https://www.clarion-ai.app/*"
+      ],
+      "js": ["web-auth-sync.js"],
+      "run_at": "document_start"
     }
   ],
 

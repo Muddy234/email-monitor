@@ -1188,6 +1188,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
     });
     initSupabase();
+    // Notify any open clarion-ai.app tabs to re-sync auth
+    chrome.tabs.query({ url: ["https://clarion-ai.app/*", "https://www.clarion-ai.app/*"] }, (tabs) => {
+      for (const tab of (tabs || [])) {
+        chrome.tabs.sendMessage(tab.id, { type: "ext_session_changed" }).catch(() => {});
+      }
+    });
     sendResponse({ ok: true });
   } else if (msg.type === "syncNow") {
     // Manual sync triggered from popup

@@ -31,6 +31,13 @@ export function listenAuthChanges() {
             }
         }
     });
+
+    // Extension-initiated logout — content script dispatches this when
+    // the extension session is cleared, for a graceful redirect instead
+    // of a hard page reload.
+    window.addEventListener("clarion:auth-revoked", () => {
+        window.location.replace("/app/login.html");
+    });
 }
 
 /**
