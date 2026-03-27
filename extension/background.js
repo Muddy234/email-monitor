@@ -871,6 +871,9 @@ async function syncEmailsToSupabase() {
   isSyncing = true;
 
   try {
+    // Ensure token is restored from storage (SW may have just woken up)
+    await restoreToken();
+
     // Check both tokens exist
     if (!token || !token.token || isTokenExpired()) {
       if (DEBUG) console.log("Exiting — no valid Outlook token");
@@ -1157,18 +1160,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (!token || !token.token) updateBadge();
     sendResponse({ ok: true });
   } else if (msg.type === "getStatus") {
-    sendResponse({
-      has_token: !!(token && token.token),
-      token_expired: isTokenExpired(),
-      token_origin: token?.origin || null,
-      token_expires: token?.expiresOn
-        ? new Date(token.expiresOn * 1000).toISOString()
-        : null,
-      // Supabase state
-      last_sync: lastSyncTime,
-      realtime_connected: isRealtimeConnected(),
-      is_syncing: isSyncing,
+    // Ensure token is restored from storage before reporting status
+    // (service worker may have just woken up)
+    restoreToken().then(() => {
+      sendResponse({
+        has_token: !!(token && token.token),
+        token_expired: isTokenExpired(),
+        token_origin: token?.origin || null,
+        token_expires: token?.expiresOn
+          ? new Date(token.expiresOn * 1000).toISOString()
+          : null,
+        // Supabase state
+        last_sync: lastSyncTime,
+        realtime_connected: isRealtimeConnected(),
+        is_syncing: isSyncing,
+      });
     });
+    return true; // keep message channel open for async response
   } else if (msg.type === "supabaseSessionChanged") {
     // Clear cached token and folder cache if session was removed (logout)
     chrome.storage.local.get("supabaseSession", (result) => {
