@@ -184,10 +184,12 @@ class SupabaseWorkerClient:
             {"status": status}
         ).in_("id", email_ids).execute()
 
-    def mark_all_emails_processed(self, user_id, batch_size=1000):
-        """Mark all unprocessed emails for a user as processed (post-onboarding).
+    def mark_all_emails_onboarding(self, user_id, batch_size=1000):
+        """Mark all unprocessed emails for a user as 'onboarding'.
 
-        Batches updates to avoid Supabase statement timeouts on large tables.
+        Called at end of onboarding so the pipeline's claim RPC
+        (which only selects status='unprocessed') naturally skips them.
+        Batches updates to avoid Supabase statement timeouts.
         """
         total = 0
         while True:
@@ -203,7 +205,7 @@ class SupabaseWorkerClient:
             if not ids:
                 break
             self.client.table("emails").update(
-                {"status": "processed"}
+                {"status": "onboarding"}
             ).in_("id", ids).execute()
             total += len(ids)
         return total

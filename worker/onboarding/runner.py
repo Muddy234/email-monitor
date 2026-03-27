@@ -363,13 +363,14 @@ def run_onboarding(db, user_id, profile):
         except Exception:
             logger.exception("Stage 3: model training failed (non-fatal)")
 
-        # Mark all existing emails as processed BEFORE setting onboarding
-        # complete — this prevents the pipeline from claiming them.
+        # Mark all existing emails as 'onboarding' BEFORE setting onboarding
+        # complete — claim RPC only selects status='unprocessed', so these
+        # are naturally invisible to the pipeline.
         try:
-            count = db.mark_all_emails_processed(user_id)
-            logger.info(f"Marked {count} pre-onboarding emails as processed for user {user_id[:8]}...")
+            count = db.mark_all_emails_onboarding(user_id)
+            logger.info(f"Marked {count} emails as 'onboarding' for user {user_id[:8]}...")
         except Exception:
-            logger.exception(f"Failed to mark pre-onboarding emails as processed for user {user_id[:8]}...")
+            logger.exception(f"Failed to mark emails as 'onboarding' for user {user_id[:8]}...")
 
         # Mark complete — degraded if critical components are missing
         if missing_components:
