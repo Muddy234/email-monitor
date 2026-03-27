@@ -289,39 +289,32 @@ async function getOutlookEmail(accessToken) {
   // 2. Fetch most recent sent email and read the From address (reliable for personal accounts)
   try {
     const resp = await owaFetch("FindItem", {
-      __type: "FindItemJsonRequest:#Exchange",
-      Header: {
-        __type: "JsonRequestHeaders:#Exchange",
-        RequestServerVersion: "Exchange2016",
-      },
-      Body: {
-        __type: "FindItemRequest:#Exchange",
-        ItemShape: {
-          __type: "ItemResponseShape:#Exchange",
-          BaseShape: "IdOnly",
-          AdditionalProperties: [
-            { __type: "PropertyUri:#Exchange", FieldURI: "ItemLastModifiedTime" },
-            { __type: "PropertyUri:#Exchange", FieldURI: "From" },
-          ],
-        },
-        ParentFolderIds: [
-          { __type: "DistinguishedFolderId:#Exchange", Id: "sentitems" },
-        ],
-        Traversal: "Shallow",
-        Paging: {
-          __type: "IndexedPageView:#Exchange",
-          BasePoint: "Beginning",
-          Offset: 0,
-          MaxEntriesReturned: 1,
-        },
-        SortOrder: [
-          {
-            __type: "SortResults:#Exchange",
-            Order: "Descending",
-            Path: { __type: "PropertyUri:#Exchange", FieldURI: "DateTimeSent" },
-          },
+      __type: "FindItemRequest:#Exchange",
+      ItemShape: {
+        __type: "ItemResponseShape:#Exchange",
+        BaseShape: "IdOnly",
+        AdditionalProperties: [
+          { __type: "PropertyUri:#Exchange", FieldURI: "ItemLastModifiedTime" },
+          { __type: "PropertyUri:#Exchange", FieldURI: "From" },
         ],
       },
+      ParentFolderIds: [
+        { __type: "DistinguishedFolderId:#Exchange", Id: "sentitems" },
+      ],
+      Traversal: "Shallow",
+      Paging: {
+        __type: "IndexedPageView:#Exchange",
+        BasePoint: "Beginning",
+        Offset: 0,
+        MaxEntriesReturned: 1,
+      },
+      SortOrder: [
+        {
+          __type: "SortResults:#Exchange",
+          Order: "Descending",
+          Path: { __type: "PropertyUri:#Exchange", FieldURI: "DateTimeSent" },
+        },
+      ],
     });
     const items = resp?.Body?.ResponseMessages?.Items?.[0]?.RootFolder?.Items;
     const fromEmail = items?.[0]?.From?.Mailbox?.EmailAddress;
@@ -1195,10 +1188,32 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "token_update" && msg.data && msg.data.token) {
     // Layer 1: reject tokens from a different Outlook account (fail open)
     const incomingEmail = getTokenEmail(msg.data.token);
+    const incomingOrigin = msg.data.origin || "";
+
+    // Check 1: JWT-based email mismatch (works for org/work tokens)
+    let rejected = false;
     if (connectedOutlookEmail && incomingEmail && incomingEmail !== connectedOutlookEmail) {
-      if (DEBUG) console.warn(`Rejected token from ${incomingEmail} (locked to ${connectedOutlookEmail})`);
+      rejected = true;
+    }
+    // Check 2: Origin-based mismatch for opaque tokens (personal accounts)
+    // If we can't extract email from JWT, use origin to distinguish account types:
+    //   outlook.live.com = personal, everything else = work/org
+    if (!rejected && connectedOutlookEmail && !incomingEmail && incomingOrigin) {
+      try {
+        const originHost = new URL(incomingOrigin).hostname;
+        const isPersonalToken = originHost === "outlook.live.com";
+        const isPersonalLock = connectedOutlookEmail.endsWith("@outlook.com")
+          || connectedOutlookEmail.endsWith("@hotmail.com")
+          || connectedOutlookEmail.endsWith("@live.com");
+        // Reject if token type (personal vs work) doesn't match the locked account
+        if (isPersonalToken !== isPersonalLock) rejected = true;
+      } catch (_) {}
+    }
+
+    if (rejected) {
+      if (DEBUG) console.warn(`Rejected token from ${incomingEmail || incomingOrigin} (locked to ${connectedOutlookEmail})`);
       chrome.storage.local.set({
-        outlookMismatch: { expected: connectedOutlookEmail, actual: incomingEmail },
+        outlookMismatch: { expected: connectedOutlookEmail, actual: incomingEmail || incomingOrigin },
       });
       setBadge("mismatch");
       sendResponse({ ok: false, reason: "account_mismatch" });
