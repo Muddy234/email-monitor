@@ -176,15 +176,17 @@ class SupabaseWorkerClient:
             {"status": status}
         ).eq("id", email_id).execute()
 
-    def bulk_update_email_status(self, email_ids, status):
-        """Update status for multiple emails in a single query."""
+    def bulk_update_email_status(self, email_ids, status, batch_size=100):
+        """Update status for multiple emails, batched to avoid URL length limits."""
         if not email_ids:
             return
-        self.client.table("emails").update(
-            {"status": status}
-        ).in_("id", email_ids).execute()
+        for i in range(0, len(email_ids), batch_size):
+            batch = email_ids[i : i + batch_size]
+            self.client.table("emails").update(
+                {"status": status}
+            ).in_("id", batch).execute()
 
-    def mark_all_emails_onboarding(self, user_id, batch_size=1000):
+    def mark_all_emails_onboarding(self, user_id, batch_size=100):
         """Mark all unprocessed emails for a user as 'onboarding'.
 
         Called at end of onboarding so the pipeline's claim RPC
