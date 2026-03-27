@@ -369,14 +369,16 @@ async function updateSetupChecklist(session) {
     chrome.storage.local.remove("syncStartedAt");
   } else if (hasToken) {
     setCheck("checkSyncing", "active");
-    const stored = await new Promise((r) =>
+    const raw = await new Promise((r) =>
       chrome.storage.local.get("syncStartedAt", (d) => r(d.syncStartedAt))
     );
-    if (!stored) {
-      chrome.storage.local.set({ syncStartedAt: Date.now() });
+    const now = Date.now();
+    let startedAt = raw;
+    if (!startedAt || (now - startedAt) > SYNC_DURATION_MS) {
+      startedAt = now;
+      chrome.storage.local.set({ syncStartedAt: now });
     }
-    const startedAt = stored || Date.now();
-    const elapsed = Date.now() - startedAt;
+    const elapsed = now - startedAt;
     const pct = Math.min(99, Math.round((elapsed / SYNC_DURATION_MS) * 100));
     if (syncProgress) syncProgress.textContent = `(${pct}%)`;
   } else {
