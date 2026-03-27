@@ -985,13 +985,14 @@ async function syncEmailsToSupabase() {
     const maxEmails = lastSyncTime ? 50 : MAX_CATCHUP_EMAILS;
 
     // Discover mail folders from Outlook's sidebar DOM via chrome.scripting
-    let folders;
+    // Always start with Inbox (discovery only returns subfolders).
+    let folders = [{ id: null, displayName: "Inbox", isDistinguished: true }];
     try {
-      folders = await discoverMailFolders();
-      if (DEBUG) console.log(`Discovered ${folders.length} folders:`, folders.map(f => f.displayName));
+      const discovered = await discoverMailFolders();
+      if (DEBUG) console.log(`Discovered ${discovered.length} subfolders:`, discovered.map(f => f.displayName));
+      folders = folders.concat(discovered);
     } catch (err) {
-      if (DEBUG) console.warn("Folder discovery failed, falling back to inbox-only:", err.message);
-      folders = [{ id: null, displayName: "Inbox", isDistinguished: true }];
+      if (DEBUG) console.warn("Folder discovery failed, using inbox-only:", err.message);
     }
 
     // Loop through each mail folder sequentially
