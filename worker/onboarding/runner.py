@@ -377,6 +377,9 @@ def run_onboarding(db, user_id, profile):
                 completed_at=datetime.utcnow().isoformat(),
             )
 
+        db.mark_all_emails_processed(user_id)
+        logger.info(f"Marked all pre-onboarding emails as processed for user {user_id[:8]}...")
+
         logger.info(f"Onboarding {'partial' if missing_components else 'complete'} for user {user_id}")
         return True
 

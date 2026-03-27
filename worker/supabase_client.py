@@ -184,6 +184,12 @@ class SupabaseWorkerClient:
             {"status": status}
         ).in_("id", email_ids).execute()
 
+    def mark_all_emails_processed(self, user_id):
+        """Mark all unprocessed emails for a user as processed (post-onboarding)."""
+        self.client.table("emails").update(
+            {"status": "processed"}
+        ).eq("user_id", user_id).eq("status", "unprocessed").execute()
+
     # ------------------------------------------------------------------
     # Classifications
     # ------------------------------------------------------------------
@@ -339,7 +345,7 @@ class SupabaseWorkerClient:
     # Onboarding
     # ------------------------------------------------------------------
 
-    def get_users_needing_onboarding(self, min_emails=20, fallback_emails=5, fallback_days=3):
+    def get_users_needing_onboarding(self, min_emails=500, fallback_emails=5, fallback_days=3):
         """Find users who haven't completed onboarding and have enough emails.
 
         Eligibility: (email_count >= min_emails) OR
