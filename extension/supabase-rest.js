@@ -72,7 +72,7 @@ async function pushEmails(emails) {
  * Fetch the current user's profile (user_email_aliases, etc).
  */
 async function getProfile(userId) {
-  return supabaseRequest(`/profiles?id=eq.${userId}&select=user_email_aliases,connected_outlook_email`);
+  return supabaseRequest(`/profiles?id=eq.${userId}&select=user_email_aliases,connected_outlook_email,onboarding_completed_at`);
 }
 
 /**

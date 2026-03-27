@@ -943,9 +943,9 @@ async function syncEmailsToSupabase() {
     // --- Outlook account lock gate ---
     const outlookEmail = await getOutlookEmail(token.token);
     if (DEBUG) console.log("outlookEmail:", outlookEmail);
+    let profile;
     if (outlookEmail) {
       // Read profile to check connected_outlook_email
-      let profile;
       try {
         const profiles = await getProfile(userId);
         profile = profiles?.[0];
@@ -979,6 +979,12 @@ async function syncEmailsToSupabase() {
     } else {
       if (DEBUG) console.log("No outlookEmail found, skipping lock gate");
       await chrome.storage.local.remove("outlookMismatch");
+    }
+
+    // Force catchup mode if onboarding hasn't completed yet — we need 500+ emails
+    if (profile && !profile.onboarding_completed_at && lastSyncTime) {
+      if (DEBUG) console.log("Onboarding incomplete — forcing catchup mode");
+      lastSyncTime = null;
     }
 
     // Set limit: small for incremental syncs, larger for catch-up
