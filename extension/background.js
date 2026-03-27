@@ -23,7 +23,7 @@ importScripts(
 
 const EMAIL_SYNC_ALARM = "email-sync";
 const EMAIL_SYNC_PERIOD_MIN = 0.75; // 45 seconds (self-rescheduling)
-const MAX_CATCHUP_EMAILS = 6000;   // cap for first-time or stale syncs
+const MAX_CATCHUP_EMAILS = 1000;   // cap for first-time or stale syncs
 // OWA endpoint templates
 const OWA_ENDPOINTS = {
   "outlook.cloud.microsoft": "/owa/service.svc",
