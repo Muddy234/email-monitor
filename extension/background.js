@@ -97,19 +97,18 @@ function persistToken() {
 
 /** Restore token from chrome.storage.session on SW wake. */
 async function restoreToken() {
-  if (token) return; // already have one in memory
+  if (token && token.token) return; // already have a valid one in memory
   const result = await chrome.storage.session.get("exchangeToken");
-  if (result.exchangeToken) {
+  if (result.exchangeToken && result.exchangeToken.token) {
     token = result.exchangeToken;
   }
 }
 
-/** Check if the cached token is expired. */
+/** Check if the cached token is expired (with 2-min grace for MSAL refresh). */
 function isTokenExpired() {
   if (!token || !token.expiresOn) return true;
   const now = Math.floor(Date.now() / 1000);
-  const expired = now >= token.expiresOn;
-  return expired;
+  return now >= token.expiresOn + 120;
 }
 
 // ---------------------------------------------------------------------------
@@ -198,9 +197,6 @@ async function owaFetchViaTab(action, body) {
   if (!result) throw new Error("Tab OWA fetch returned no result");
   if (result.error) {
     if (result.status === 401 || result.status === 440) {
-      token.token = null;
-      persistToken();
-      updateBadge();
       throw new Error("TOKEN_EXPIRED");
     }
     throw new Error(`OWA ${result.status}: ${result.detail || "unknown"}`);
@@ -228,11 +224,7 @@ async function owaFetch(action, body) {
     },
     body: JSON.stringify(wrapRequest(action, body)),
   });
-  if (resp.status === 401) {
-    // Token expired — mark it and notify
-    token.token = null;
-    persistToken();
-    updateBadge();
+  if (resp.status === 401 || resp.status === 440) {
     throw new Error("TOKEN_EXPIRED");
   }
 
@@ -1149,13 +1141,13 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 // ---------------------------------------------------------------------------
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg.type === "token_update" && msg.data) {
+  if (msg.type === "token_update" && msg.data && msg.data.token) {
     token = msg.data;
     if (sender.tab?.id) outlookTabId = sender.tab.id;
     persistToken();
     updateBadge();
     sendResponse({ ok: true });
-  } else if (msg.type === "token_update" && !msg.data) {
+  } else if (msg.type === "token_update" && (!msg.data || !msg.data.token)) {
     // Content script found no token
     if (!token || !token.token) updateBadge();
     sendResponse({ ok: true });

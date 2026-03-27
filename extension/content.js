@@ -30,7 +30,7 @@ function findExchangeToken() {
       else if (t.includes(".default") && t.includes("m365.access")) priority = 1;
       else if (t.includes(".default")) priority = 2;
       else if (t.includes("mbi_ssl")) priority = 3;
-      if (priority >= 0 && priority < bestPriority) {
+      if (priority >= 0 && priority < bestPriority && entry.secret) {
         bestPriority = priority;
         best = {
           token: entry.secret,
