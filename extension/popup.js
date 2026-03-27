@@ -751,6 +751,12 @@ document.getElementById("getStartedBtn").addEventListener("click", async () => {
   showView("loginView");
 });
 
+// Phone verify → Back to login
+document.getElementById("backToLogin").addEventListener("click", async () => {
+  await clearPendingSignup();
+  resetPhoneVerifyState();
+});
+
 // Login / Sign Up
 document.getElementById("loginBtn").addEventListener("click", async () => {
   hideError();
