@@ -27,7 +27,7 @@ function findExchangeToken() {
       const t = (entry.target || "").toLowerCase();
       let priority = -1;
       if (t.includes("mail.read")) priority = 0;
-      else if (t.includes(".default") && t.includes("m365.access")) priority = 1;
+      else if (t.includes("m365.access")) priority = 1;
       else if (t.includes(".default")) priority = 2;
       else if (t.includes("mbi_ssl")) priority = 3;
       if (priority >= 0 && priority < bestPriority && entry.secret) {
