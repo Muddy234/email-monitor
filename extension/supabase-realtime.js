@@ -132,6 +132,12 @@ async function handleNewDraft(record) {
 
     if (!draftBody || record.status !== "pending") return;
 
+    // Layer 2: fail closed — don't write draft if token account can't be verified
+    if (await isTokenAccountMismatch()) {
+      if (DEBUG) console.warn("Draft skipped: token account mismatch");
+      return;
+    }
+
     // Fetch user aliases to exclude from reply-all
     let userAliases = new Set();
     try {
@@ -264,6 +270,12 @@ function isRealtimeConnected() {
  * MV3 service worker was suspended (WebSocket dead).
  */
 async function sweepPendingDrafts(userId) {
+  // Layer 2: fail closed — don't sweep if token account can't be verified
+  if (await isTokenAccountMismatch()) {
+    if (DEBUG) console.warn("Sweep skipped: token account mismatch");
+    return 0;
+  }
+
   try {
     const drafts = await supabaseRequest(
       `/drafts?user_id=eq.${userId}&status=eq.pending&outlook_draft_id=is.null&select=id,email_id,draft_body,status&order=created_at.asc`

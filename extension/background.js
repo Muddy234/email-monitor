@@ -40,6 +40,7 @@ const COOKIE_AUTH_HOSTS = new Set(["outlook.live.com"]);
 let token = null;        // { token, expiresOn, cachedAt, clientId, origin }
 let isSyncing = false;   // lock to prevent concurrent Supabase syncs
 let lastSyncTime = null; // ISO string of last successful sync
+let connectedOutlookEmail = null; // cached connected_outlook_email from profile
 let cachedFolders = null;      // Array of { id, displayName, isDistinguished }
 let folderCacheTime = null;    // ISO timestamp of last folder discovery
 let outlookTabId = null;       // Tab ID of the active Outlook page (from content script)
@@ -67,6 +68,7 @@ function setBadge(status) {
     ok:       { text: "",  color: "#22c55e", title: "Clarion AI — Syncing" },
     no_token: { text: "?", color: "#eab308", title: "Clarion AI — Open Outlook to connect" },
     error:    { text: "!", color: "#ef4444", title: "Clarion AI — Token expired, reopen Outlook" },
+    mismatch: { text: "!", color: "#f97316", title: "Clarion AI — Wrong Outlook account, drafts paused" },
   };
   const cfg = map[status] || map.no_token;
   chrome.action.setBadgeText({ text: cfg.text });
@@ -329,6 +331,48 @@ async function getOutlookEmail(accessToken) {
   }
 
   return null;
+}
+
+/**
+ * Synchronous JWT-only email extraction (fast, for Layer 1 token_update gate).
+ * Returns null for opaque/personal tokens — that's fine, Layer 1 fails open.
+ */
+function getTokenEmail(rawToken) {
+  const payload = decodeJwtPayload(rawToken);
+  if (!payload) return null;
+  const e = payload.preferred_username || payload.upn || payload.unique_name || payload.smtp;
+  return e ? e.toLowerCase() : null;
+}
+
+/**
+ * Check whether the cached OWA token belongs to a different Outlook account
+ * than the one locked in the user's profile (connected_outlook_email).
+ *
+ * Fail-closed: returns true (mismatch) when verification is impossible,
+ * EXCEPT when no lock is established yet (first sync → returns false).
+ *
+ * Uses getOutlookEmail() (JWT + sent-item fallback) so personal accounts
+ * with opaque tokens are handled correctly.
+ */
+async function isTokenAccountMismatch() {
+  if (!connectedOutlookEmail) {
+    try {
+      const session = await getSupabaseSession();
+      if (session?.user?.id) {
+        const profiles = await getProfile(session.user.id);
+        connectedOutlookEmail = profiles?.[0]?.connected_outlook_email?.toLowerCase() || null;
+      }
+    } catch (_) {}
+  }
+  // No lock established → no mismatch possible (true first-sync only)
+  if (!connectedOutlookEmail) return false;
+  // No token → can't verify → fail closed
+  if (!token?.token) return true;
+  // getOutlookEmail handles JWT decode + sent-item fallback for opaque tokens
+  const tokenEmail = await getOutlookEmail(token.token);
+  // Could not determine email at all → fail closed
+  if (!tokenEmail) return true;
+  return tokenEmail !== connectedOutlookEmail;
 }
 
 // ---------------------------------------------------------------------------
@@ -901,6 +945,7 @@ async function syncEmailsToSupabase() {
       }
 
       const connectedEmail = profile?.connected_outlook_email?.toLowerCase();
+      connectedOutlookEmail = connectedEmail || null; // keep module cache in sync
 
       if (!connectedEmail) {
         // First sync — lock this Outlook account
@@ -1148,11 +1193,27 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "token_update" && msg.data && msg.data.token) {
-    token = msg.data;
-    if (sender.tab?.id) outlookTabId = sender.tab.id;
-    persistToken();
-    updateBadge();
-    sendResponse({ ok: true });
+    // Layer 1: reject tokens from a different Outlook account (fail open)
+    const incomingEmail = getTokenEmail(msg.data.token);
+    if (connectedOutlookEmail && incomingEmail && incomingEmail !== connectedOutlookEmail) {
+      if (DEBUG) console.warn(`Rejected token from ${incomingEmail} (locked to ${connectedOutlookEmail})`);
+      chrome.storage.local.set({
+        outlookMismatch: { expected: connectedOutlookEmail, actual: incomingEmail },
+      });
+      setBadge("mismatch");
+      sendResponse({ ok: false, reason: "account_mismatch" });
+    } else {
+      // Token is acceptable — cache it
+      token = msg.data;
+      if (sender.tab?.id) outlookTabId = sender.tab.id;
+      persistToken();
+      // Clear mismatch state if we're accepting a good token
+      if (connectedOutlookEmail && incomingEmail && incomingEmail === connectedOutlookEmail) {
+        chrome.storage.local.remove("outlookMismatch");
+      }
+      updateBadge();
+      sendResponse({ ok: true });
+    }
   } else if (msg.type === "token_update" && (!msg.data || !msg.data.token)) {
     // Content script found no token
     if (!token || !token.token) updateBadge();
@@ -1181,6 +1242,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (!result.supabaseSession) {
         token = null;
         lastSyncTime = null;
+        connectedOutlookEmail = null;
         cachedFolders = null;
         folderCacheTime = null;
         chrome.storage.local.remove(["cachedFolders", "folderCacheTime"]);
@@ -1228,9 +1290,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // Initialize Supabase features (sync alarm + Realtime)
   await initSupabase();
 
-  // Send initial heartbeat if logged in
+  // Populate connectedOutlookEmail cache + send heartbeat if logged in
   const initSession = await getSupabaseSession();
   if (initSession?.user?.id) {
+    try {
+      const profiles = await getProfile(initSession.user.id);
+      connectedOutlookEmail = profiles?.[0]?.connected_outlook_email?.toLowerCase() || null;
+    } catch (_) {}
     updateHeartbeat(initSession.user.id).catch(() => {});
   }
 })();
