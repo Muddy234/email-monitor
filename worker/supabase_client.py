@@ -628,10 +628,8 @@ class SupabaseWorkerClient:
         Reads from the threads table, which stores per-thread aggregates
         populated during onboarding (total_messages, participation_rate, etc.).
 
-        Uses select("*") — the threads table is narrow and all columns are
-        relevant to scoring. Safe because all downstream consumers
-        (_build_thread_info, _update_response_labels) use .get() with defaults
-        and never iterate over row keys.
+        Batches .in_() calls to avoid PostgREST URL length limits
+        (Outlook conversation IDs are long base64 strings).
 
         Args:
             user_id: UUID string.
@@ -643,14 +641,20 @@ class SupabaseWorkerClient:
         if not conversation_ids:
             return {}
         unique = list(set(conversation_ids))
-        result = (
-            self.client.table("threads")
-            .select("*")
-            .eq("user_id", user_id)
-            .in_("conversation_id", unique)
-            .execute()
-        )
-        return {row["conversation_id"]: row for row in (result.data or [])}
+        merged = {}
+        CHUNK = 30
+        for i in range(0, len(unique), CHUNK):
+            chunk = unique[i:i + CHUNK]
+            result = (
+                self.client.table("threads")
+                .select("*")
+                .eq("user_id", user_id)
+                .in_("conversation_id", chunk)
+                .execute()
+            )
+            for row in (result.data or []):
+                merged[row["conversation_id"]] = row
+        return merged
 
     def fetch_user_topic_profile(self, user_id):
         """Fetch the user's topic profile (domains, keywords, stats).

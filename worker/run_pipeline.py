@@ -823,6 +823,30 @@ def process_user_batch_signals(db, user_id, profile, emails):
     draft_max_age_hours = int(os.environ.get("DRAFT_MAX_AGE_HOURS", "24"))
 
     try:
+        # ── Stage 0: Skip emails older than onboarding ──────────
+        onboarding_at = profile.get("onboarding_completed_at")
+        if onboarding_at:
+            pre_onboard_ids = []
+            post_emails = []
+            for em in emails:
+                rt = em.get("received_time") or ""
+                if rt and rt < onboarding_at:
+                    pre_onboard_ids.append(em["id"])
+                else:
+                    post_emails.append(em)
+            if pre_onboard_ids:
+                logger.info(f"  Skipping {len(pre_onboard_ids)} pre-onboarding emails")
+                db.bulk_update_email_status(pre_onboard_ids, "processed")
+            emails = post_emails
+            if not emails:
+                logger.info(f"  User {user_id[:8]}...: all emails pre-date onboarding")
+                db.update_pipeline_run(
+                    run_id, status="completed",
+                    emails_scanned=len(pre_onboard_ids), emails_processed=0,
+                    emails_classified=0, emails_drafted=0, drafts_generated=0,
+                )
+                return 0, 0
+
         # ── Stage 1: Filter ──────────────────────────────────────
         filtered = filter_emails(db, emails, user_id, config)
         if not filtered:
