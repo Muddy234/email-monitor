@@ -801,13 +801,18 @@ async function discoverMailFolders() {
         "search folders",
       ]);
       const folderEls = document.querySelectorAll('[role="treeitem"][data-folder-name]');
+      console.log(`[Clarion] discoverMailFolders: found ${folderEls.length} treeitem elements`);
       if (!folderEls.length) return null;
       const folders = [];
       const seen = new Set();
+      const skippedLevel1 = [];
       folderEls.forEach(el => {
         const name = el.getAttribute("data-folder-name") || "";
         if (!name || SKIP.has(name.toLowerCase())) return;
-        if (el.getAttribute("aria-level") === "1") return;
+        if (el.getAttribute("aria-level") === "1") {
+          skippedLevel1.push(name);
+          return;
+        }
         const reactKey = Object.keys(el).find(k => k.startsWith("__reactFiber"));
         if (!reactKey) return;
         let current = el[reactKey];
@@ -828,6 +833,7 @@ async function discoverMailFolders() {
         const displayName = title.split(" - ")[0].trim() || name;
         folders.push({ id: folderId, displayName, isDistinguished: !!distinguishedFolderId });
       });
+      console.log(`[Clarion] discoverMailFolders: ${folders.length} usable, ${skippedLevel1.length} skipped (level-1: ${skippedLevel1.join(", ")})`);
       return folders.length > 0 ? folders : null;
     },
   });
@@ -995,11 +1001,14 @@ async function syncEmailsToSupabase() {
     let folders = [{ id: null, displayName: "Inbox", isDistinguished: true }];
     try {
       const discovered = await discoverMailFolders();
-      if (DEBUG) console.log(`Discovered ${discovered.length} subfolders:`, discovered.map(f => f.displayName));
-      folders = folders.concat(discovered);
+      // Filter out any discovered "Inbox" — we already prepend it above
+      const filtered = discovered.filter(f => f.displayName.toLowerCase() !== "inbox");
+      console.log(`[Clarion] Discovered ${discovered.length} subfolders (${discovered.length - filtered.length} duplicate Inbox removed):`, filtered.map(f => f.displayName));
+      folders = folders.concat(filtered);
     } catch (err) {
-      if (DEBUG) console.warn("Folder discovery failed, using inbox-only:", err.message);
+      console.warn(`[Clarion] Folder discovery failed (${err.message}), using inbox-only`);
     }
+    console.log(`[Clarion] Syncing ${folders.length} folder(s), maxEmails=${maxEmails}/folder:`, folders.map(f => f.displayName));
 
     // Loop through each mail folder sequentially
     let totalSynced = 0;
@@ -1019,9 +1028,9 @@ async function syncEmailsToSupabase() {
         }
 
         const result = await handleGetEmails(fetchParams);
+        console.log(`[Clarion] Folder "${folderInfo.displayName}": ${result.emails?.length || 0} emails (total in view: ${result.total})`);
 
         if (!result.emails || result.emails.length === 0) {
-          if (DEBUG) console.log(`No emails found in folder "${folderInfo.displayName}"`);
           continue;
         }
 
