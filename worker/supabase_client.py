@@ -316,12 +316,13 @@ class SupabaseWorkerClient:
         """Update a pipeline_run entry.
 
         Accepted kwargs: status, emails_scanned, emails_processed,
-        drafts_generated, log_output, error_message, finished_at.
+        emails_classified, emails_drafted, drafts_generated,
+        log_output, error_message, finished_at.
         """
         if not run_id:
             return
         update = {k: v for k, v in kwargs.items() if v is not None}
-        if "finished_at" not in update and update.get("status") in ("completed", "failed"):
+        if "finished_at" not in update and update.get("status") in ("completed", "failed", "partial_failure"):
             update["finished_at"] = datetime.utcnow().isoformat()
         self.client.table("pipeline_runs").update(update).eq("id", run_id).execute()
 

@@ -825,7 +825,8 @@ def process_user_batch_signals(db, user_id, profile, emails):
             logger.info(f"  User {user_id[:8]}...: all emails filtered out")
             db.update_pipeline_run(
                 run_id, status="completed",
-                emails_scanned=len(emails), emails_processed=0, drafts_generated=0,
+                emails_scanned=len(emails), emails_processed=0,
+                emails_classified=0, emails_drafted=0, drafts_generated=0,
             )
             return 0, 0
 
@@ -1057,6 +1058,8 @@ def process_user_batch_signals(db, user_id, profile, emails):
                     })
                 elif not email_age_ok:
                     logger.info(f"  Skipping draft (too old): {ed.get('subject', '?')[:60]}")
+                elif not config.get("enable_draft_generation", True):
+                    logger.info(f"  Skipping draft (generation disabled): {ed.get('subject', '?')[:60]}")
             else:
                 # Not draft-worthy — check if notable
                 is_notable = (
@@ -1188,6 +1191,9 @@ def process_user_batch_signals(db, user_id, profile, emails):
                 draft_body = draft_results.get(db_id)
 
                 if not draft_body:
+                    logger.info(
+                        f"  Batch result missing for {db_id[:8]}, trying fallback..."
+                    )
                     cleaned, fallback_usage, thinking = draft_generator.generate_draft(
                         candidate["email_data"], candidate["action_context"]
                     )
@@ -1206,6 +1212,14 @@ def process_user_batch_signals(db, user_id, profile, emails):
                         f"  Draft generated for: "
                         f"{candidate['email_data'].get('subject', '?')[:60]}"
                     )
+                else:
+                    subject = candidate["email_data"].get("subject", "?")[:60]
+                    source = "fallback" if not draft_body else "batch"
+                    logger.warning(
+                        f"  Draft DROPPED for '{subject}' "
+                        f"(source={source}, draft_body={'truthy' if draft_body else 'None'}, "
+                        f"cleaned=None)"
+                    )
 
                 # Store thinking as summary on response_event
                 if thinking:
@@ -1216,11 +1230,25 @@ def process_user_batch_signals(db, user_id, profile, emails):
                     except Exception as e:
                         logger.warning(f"  Failed to store draft thinking for {db_id[:8]}: {e}")
 
+        # Detect partial failure: drafts expected but some/all dropped
+        status = "completed"
+        error_msg = None
+        if draft_candidates and drafts_generated < len(draft_candidates):
+            dropped = len(draft_candidates) - drafts_generated
+            status = "partial_failure"
+            error_msg = (
+                f"{dropped}/{len(draft_candidates)} drafts failed to generate"
+            )
+            logger.warning(f"  Pipeline partial_failure: {error_msg}")
+
         db.update_pipeline_run(
-            run_id, status="completed",
+            run_id, status=status,
             emails_scanned=len(emails),
             emails_processed=emails_processed,
+            emails_classified=emails_processed,
+            emails_drafted=drafts_generated,
             drafts_generated=drafts_generated,
+            error_message=error_msg,
         )
         return emails_processed, drafts_generated
 

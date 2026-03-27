@@ -50,10 +50,12 @@ async function loadRuns() {
                 ? `<span class="em-badge em-badge-green">completed</span>`
                 : run.status === "failed"
                 ? `<span class="em-badge em-badge-red">failed</span>`
+                : run.status === "partial_failure"
+                ? `<span class="em-badge em-badge-amber">partial failure</span>`
                 : `<span class="em-badge em-badge-amber">${escapeHtml(run.status)}</span>`;
 
             const hasDetail = run.error_message || run.log_output;
-            const rowClass = run.status === "failed" ? " em-row-failed" : "";
+            const rowClass = (run.status === "failed" || run.status === "partial_failure") ? " em-row-failed" : "";
 
             return `
                 <tr class="em-table-clickable${rowClass}" data-run-id="${run.id}">
