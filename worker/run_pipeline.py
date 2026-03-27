@@ -136,6 +136,9 @@ def filter_emails(db_client, emails, user_id, config):
     deferred_ids = []
 
     for email in emails:
+        if not isinstance(email, dict):
+            logger.warning(f"  Skipping non-dict email row (type={type(email).__name__})")
+            continue
         email_data = supabase_row_to_email_data(email)
 
         # Defer emails with empty bodies — likely synced before GetItem

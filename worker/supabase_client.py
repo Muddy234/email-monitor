@@ -102,7 +102,16 @@ class SupabaseWorkerClient:
             "claim_unprocessed_emails",
             {"p_user_id": user_id, "p_limit": limit},
         ).execute()
-        return result.data or []
+        data = result.data or []
+        # Guard against PostgREST returning a string instead of list[dict]
+        # — .extend(string) would explode into one item per character.
+        if isinstance(data, str):
+            logger.error(f"claim_unprocessed_emails returned string ({len(data)} chars) — skipping")
+            return []
+        if data and not isinstance(data[0], dict):
+            logger.error(f"claim_unprocessed_emails returned non-dict rows (type={type(data[0])}) — skipping")
+            return []
+        return data
 
     def reset_stuck_processing(self):
         """Reset orphaned emails stuck in 'processing' status.
