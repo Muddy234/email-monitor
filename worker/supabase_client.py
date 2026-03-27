@@ -678,15 +678,18 @@ class SupabaseWorkerClient:
     # Active users
     # ------------------------------------------------------------------
 
-    def get_active_user_ids(self):
+    def get_active_user_ids(self, onboarded_only=False):
         """Return user IDs where worker_active is true."""
-        result = (
+        query = (
             self.client.table("profiles")
-            .select("id")
+            .select("id, onboarding_completed_at")
             .eq("worker_active", True)
-            .execute()
         )
-        return [row["id"] for row in (result.data or [])]
+        result = query.execute()
+        rows = result.data or []
+        if onboarded_only:
+            rows = [r for r in rows if r.get("onboarding_completed_at")]
+        return [row["id"] for row in rows]
 
     # ------------------------------------------------------------------
     # Response events

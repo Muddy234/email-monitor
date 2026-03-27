@@ -257,7 +257,7 @@ def main():
 
         # -- Model re-training check -----------------------------------
         try:
-            for uid in db.get_active_user_ids():
+            for uid in db.get_active_user_ids(onboarded_only=True):
                 if _shutdown:
                     break
                 if check_retrain_needed(db, uid):
