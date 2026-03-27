@@ -197,6 +197,9 @@ async function owaFetchViaTab(action, body) {
   if (!result) throw new Error("Tab OWA fetch returned no result");
   if (result.error) {
     if (result.status === 401 || result.status === 440) {
+      token.expiresOn = 0; // mark expired — content script will overwrite with fresh token
+      persistToken();
+      updateBadge();
       throw new Error("TOKEN_EXPIRED");
     }
     throw new Error(`OWA ${result.status}: ${result.detail || "unknown"}`);
@@ -225,6 +228,9 @@ async function owaFetch(action, body) {
     body: JSON.stringify(wrapRequest(action, body)),
   });
   if (resp.status === 401 || resp.status === 440) {
+    token.expiresOn = 0;
+    persistToken();
+    updateBadge();
     throw new Error("TOKEN_EXPIRED");
   }
 
