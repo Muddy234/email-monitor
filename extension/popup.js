@@ -367,7 +367,7 @@ async function updateSetupChecklist(session) {
     setCheck("checkSyncing", "done");
     if (syncProgress) syncProgress.textContent = "";
     chrome.storage.local.remove("syncStartedAt");
-  } else if (hasToken && (obStatus || status?.last_sync)) {
+  } else if (hasToken) {
     setCheck("checkSyncing", "active");
     const stored = await new Promise((r) =>
       chrome.storage.local.get("syncStartedAt", (d) => r(d.syncStartedAt))
