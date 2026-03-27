@@ -53,22 +53,31 @@ function onboardingAtLeast(current, threshold) {
 
 async function fetchOnboardingStatus(session) {
   const uid = session.user?.id;
-  if (!uid) return null;
+  if (!uid) return { status: null, emailCount: 0 };
   try {
-    const resp = await fetch(
-      `${SUPABASE_URL}/rest/v1/profiles?id=eq.${uid}&select=onboarding_status`,
-      {
-        headers: {
-          apikey: SUPABASE_ANON_KEY,
-          Authorization: `Bearer ${session.access_token}`,
-        },
-      }
-    );
-    if (!resp.ok) return null;
-    const rows = await resp.json();
-    return rows?.[0]?.onboarding_status || null;
+    const headers = {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${session.access_token}`,
+    };
+    const [profileResp, countResp] = await Promise.all([
+      fetch(
+        `${SUPABASE_URL}/rest/v1/profiles?id=eq.${uid}&select=onboarding_status`,
+        { headers }
+      ),
+      fetch(
+        `${SUPABASE_URL}/rest/v1/emails?user_id=eq.${uid}&select=id&limit=0`,
+        { headers: { ...headers, Prefer: "count=exact" } }
+      ),
+    ]);
+    const rows = profileResp.ok ? await profileResp.json() : [];
+    const range = countResp.headers.get("content-range") || "";
+    const emailCount = parseInt(range.split("/")[1] || "0", 10);
+    return {
+      status: rows?.[0]?.onboarding_status || null,
+      emailCount,
+    };
   } catch (_) {
-    return null;
+    return { status: null, emailCount: 0 };
   }
 }
 
@@ -282,7 +291,7 @@ async function checkSessionAndRender() {
     showStatusView(session);
   } else {
     // Check onboarding_status to determine correct view
-    const obStatus = await fetchOnboardingStatus(session);
+    const { status: obStatus } = await fetchOnboardingStatus(session);
     if (obStatus === "complete" || obStatus === "complete_partial") {
       await setState("complete");
       showStatusView(session);
@@ -337,8 +346,8 @@ async function updateSetupChecklist(session) {
   const hasToken = status && status.has_token && !status.token_expired;
   setCheck("checkOutlook", hasToken ? "done" : "pending");
 
-  // Fetch onboarding_status from profiles
-  const obStatus = await fetchOnboardingStatus(session);
+  // Fetch onboarding_status and email count from profiles
+  const { status: obStatus, emailCount } = await fetchOnboardingStatus(session);
 
   // Handle failed state
   const errorEl = document.getElementById("setupError");
@@ -362,12 +371,16 @@ async function updateSetupChecklist(session) {
   const allDone = obStatus === "complete" || obStatus === "complete_partial";
 
   // Syncing emails
+  const syncProgress = document.getElementById("syncProgress");
   if (syncingDone) {
     setCheck("checkSyncing", "done");
+    if (syncProgress) syncProgress.textContent = "";
   } else if (hasToken && (obStatus || status?.last_sync)) {
     setCheck("checkSyncing", "active");
+    if (syncProgress) syncProgress.textContent = `(${emailCount} / 500)`;
   } else {
     setCheck("checkSyncing", "pending");
+    if (syncProgress) syncProgress.textContent = "";
   }
 
   // Learning your email behavior

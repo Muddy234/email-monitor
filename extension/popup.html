@@ -247,6 +247,7 @@
     .check-icon { font-size: 15px; flex-shrink: 0; position: relative; }
     .check-done { color: #10B981; }
     .check-pending { color: #D6D3D1; }
+    .sync-progress { font-size: 11px; color: #78716C; }
     .check-active {
       color: #2C4F7C;
       font-size: 17px;
@@ -449,7 +450,7 @@
       </li>
       <li>
         <span class="check-icon" id="checkSyncing">&#x2B58;</span>
-        <span>Syncing emails</span>
+        <span>Syncing emails <span id="syncProgress" class="sync-progress"></span></span>
       </li>
       <li>
         <span class="check-icon" id="checkBehavior">&#x2B58;</span>
