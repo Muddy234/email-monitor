@@ -927,13 +927,17 @@ async function syncEmailsToSupabase() {
     // --- New-account detection: reset sync state on user change ---
     await restoreSyncTime();
     const stored = await chrome.storage.local.get("lastSyncUserId");
-    if (stored.lastSyncUserId && stored.lastSyncUserId !== userId) {
-      if (DEBUG) console.log("User changed — resetting lastSyncTime for full catchup");
+    if (!stored.lastSyncUserId || stored.lastSyncUserId !== userId) {
+      // No stored user (first run after update) or different user — full catchup
+      if (stored.lastSyncUserId) {
+        if (DEBUG) console.log("User changed — resetting lastSyncTime for full catchup");
+      }
       lastSyncTime = null;
       connectedOutlookEmail = null;
       cachedFolders = null;
       folderCacheTime = null;
-      await chrome.storage.local.remove(["lastSyncTime", "lastSyncUserId", "cachedFolders", "folderCacheTime"]);
+      await chrome.storage.local.remove(["lastSyncTime", "cachedFolders", "folderCacheTime"]);
+      await chrome.storage.local.set({ lastSyncUserId: userId });
     }
 
     // --- Outlook account lock gate ---
