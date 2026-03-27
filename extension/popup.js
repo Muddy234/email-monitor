@@ -740,6 +740,7 @@ function resetPhoneVerifyState() {
   document.getElementById("codeInputGroup").style.display = "none";
   document.getElementById("phoneVerifyToggle").style.display = "";
   document.getElementById("loginBtn").style.display = "";
+  document.getElementById("toggleAuth").style.display = "";
   document.getElementById("nameGroup").style.display = isSignUpMode ? "" : "none";
   document.getElementById("authEmail").parentElement.style.display = "";
   document.getElementById("authPassword").parentElement.style.display = "";
