@@ -570,6 +570,25 @@ class SupabaseWorkerClient:
         )
         return {row["email"]: row for row in (result.data or [])}
 
+    def fetch_feedback_summary(self, user_id, sender_emails):
+        """Fetch aggregated feedback per sender for prompt injection.
+
+        Returns:
+            dict: {sender_email: {positive_count, negative_count,
+                   top_correction_category, top_correction_value}}
+        """
+        if not sender_emails:
+            return {}
+        try:
+            result = self.client.rpc(
+                "get_feedback_summary",
+                {"p_user_id": user_id, "p_sender_emails": list(set(sender_emails))},
+            ).execute()
+            return {row["sender_email"]: row for row in (result.data or [])}
+        except Exception as e:
+            logger.warning(f"Feedback summary fetch failed: {e}")
+            return {}
+
     def fetch_thread_stats(self, user_id, conversation_ids):
         """Batch-fetch thread aggregate stats for multiple conversation IDs.
 

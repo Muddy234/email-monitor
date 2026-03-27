@@ -19,6 +19,7 @@ from pipeline.prompts import (
 )
 from pipeline.signal_extractor import (
     extract_signals, extract_signals_batch_params, parse_signal_response,
+    build_feedback_hint,
 )
 from pipeline.pre_process import (
     pre_process_email, resolve_sender_tier, compute_thread_meta,
@@ -843,9 +844,17 @@ def process_user_batch_signals(db, user_id, profile, emails):
         # Retroactive response labeling
         _update_response_labels(db, user_id, threads_map, user_aliases)
 
+        # Fetch feedback summary for prompt injection
+        all_sender_emails = [
+            (ed.get("sender_email") or ed.get("sender") or "").lower()
+            for ed in filtered
+        ]
+        feedback_map = db.fetch_feedback_summary(user_id, all_sender_emails)
+
         logger.info(
             f"  Context: {len(contacts_map)} contacts, "
-            f"{len(threads_map)} threads, {len(domain_tiers)} domain tiers"
+            f"{len(threads_map)} threads, {len(domain_tiers)} domain tiers, "
+            f"{len(feedback_map)} senders with feedback"
         )
 
         try:
@@ -896,6 +905,9 @@ def process_user_batch_signals(db, user_id, profile, emails):
                     user_position = "CC"
                     break
 
+            # Build feedback hint for this sender
+            feedback_hint = build_feedback_hint(feedback_map.get(sender_email))
+
             # Build batch request
             req = extract_signals_batch_params(
                 email_body=clean_body,
@@ -913,6 +925,7 @@ def process_user_batch_signals(db, user_id, profile, emails):
                 cc_field=ed.get("cc_field") or "",
                 contact_type=contact.get("contact_type", "") if contact else "",
                 significance=contact.get("relationship_significance", "") if contact else "",
+                feedback_hint=feedback_hint,
             )
             batch_requests.append(req)
 
@@ -961,6 +974,7 @@ def process_user_batch_signals(db, user_id, profile, emails):
                         thread_depth=ctx["thread_depth"],
                         has_unanswered=False,
                         api_key=api_key,
+                        feedback_hint=build_feedback_hint(feedback_map.get(ctx["sender_email"])),
                     )
                     if fallback_usage:
                         db.record_token_usage(user_id, "haiku", "signals", fallback_usage)

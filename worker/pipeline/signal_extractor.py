@@ -68,6 +68,7 @@ Context format:
 Line 1 — Sender: sender_name sender_email|tier|contact_type|significance|thread_depth|unanswered
 Line 2 — User: USER user_name|user_email|position (TO or CC)
 Line 3 — Recipients: TO: addr1;addr2 | CC: addr1;addr2
+Line 4 (optional) — Feedback: User correction history for this sender. Treat as soft bias, not override. Still evaluate the email on its own merits.
 
 Example 1 (action for user — direct request with deadline):
 Input: Jane Smith jane@lender.com|C|external_lender|high|1|false
@@ -119,11 +120,44 @@ Output: {"mc":true,"ar":true,"ub":false,"dl":false,"rt":"ans","target":"user","p
 """
 
 
+FEEDBACK_THRESHOLD = 2
+
+
+def build_feedback_hint(feedback_row):
+    """Convert aggregated feedback into a prompt hint string.
+
+    Returns empty string if below threshold or no actionable feedback.
+    """
+    if not feedback_row:
+        return ""
+
+    pos = feedback_row.get("positive_count", 0)
+    neg = feedback_row.get("negative_count", 0)
+    category = feedback_row.get("top_correction_category")
+    value = feedback_row.get("top_correction_value")
+
+    parts = []
+
+    if pos >= FEEDBACK_THRESHOLD:
+        parts.append(f"User confirmed {pos} emails from this sender as correctly classified.")
+
+    if neg >= FEEDBACK_THRESHOLD and category:
+        if category == "wrong_priority" and value in ("high", "med", "low"):
+            parts.append(f"User corrected {neg} emails from this sender to {value} priority.")
+        elif category == "no_response_needed":
+            parts.append(f"User indicated {neg} emails from this sender didn't need a response.")
+        elif category == "response_needed":
+            parts.append(f"User indicated {neg} emails from this sender needed a response (were missed).")
+
+    return " ".join(parts)
+
+
 def build_signal_prompt(email_body, subject, sender_name, sender_email,
                         sender_tier, thread_depth, has_unanswered,
                         user_name="", user_email="", user_position="UNKNOWN",
                         to_field="", cc_field="",
-                        contact_type="", significance=""):
+                        contact_type="", significance="",
+                        feedback_hint=""):
     """Build the user message for the signal extraction call."""
     sender_line = (
         f"{sender_name} {sender_email}"
@@ -135,7 +169,11 @@ def build_signal_prompt(email_body, subject, sender_name, sender_email,
     )
     user_line = f"USER: {user_name}|{user_email}|{user_position}"
     recip_line = f"TO: {to_field or '(none)'} | CC: {cc_field or '(none)'}"
-    return f"{sender_line}\n{user_line}\n{recip_line}\nS:{subject}\n\n{email_body}"
+    lines = [sender_line, user_line, recip_line]
+    if feedback_hint:
+        lines.append(f"Feedback: {feedback_hint}")
+    lines.append(f"S:{subject}")
+    return "\n".join(lines) + f"\n\n{email_body}"
 
 
 def extract_signals(email_body, subject, sender_name, sender_email,
@@ -143,7 +181,7 @@ def extract_signals(email_body, subject, sender_name, sender_email,
                     user_name="", user_email="", user_position="UNKNOWN",
                     to_field="", cc_field="",
                     contact_type="", significance="",
-                    api_key=None):
+                    api_key=None, feedback_hint=""):
     """Call Haiku to extract signals and decisions for a single email.
 
     Returns:
@@ -156,6 +194,7 @@ def extract_signals(email_body, subject, sender_name, sender_email,
         user_name=user_name, user_email=user_email,
         user_position=user_position, to_field=to_field, cc_field=cc_field,
         contact_type=contact_type, significance=significance,
+        feedback_hint=feedback_hint,
     )
 
     try:
@@ -182,7 +221,8 @@ def extract_signals_batch_params(email_body, subject, sender_name,
                                  user_name="", user_email="",
                                  user_position="UNKNOWN",
                                  to_field="", cc_field="",
-                                 contact_type="", significance=""):
+                                 contact_type="", significance="",
+                                 feedback_hint=""):
     """Build a Batches API request dict for signal extraction."""
     user_message = build_signal_prompt(
         email_body, subject, sender_name, sender_email,
@@ -190,6 +230,7 @@ def extract_signals_batch_params(email_body, subject, sender_name,
         user_name=user_name, user_email=user_email,
         user_position=user_position, to_field=to_field, cc_field=cc_field,
         contact_type=contact_type, significance=significance,
+        feedback_hint=feedback_hint,
     )
 
     return {
