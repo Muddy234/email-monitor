@@ -184,11 +184,29 @@ class SupabaseWorkerClient:
             {"status": status}
         ).in_("id", email_ids).execute()
 
-    def mark_all_emails_processed(self, user_id):
-        """Mark all unprocessed emails for a user as processed (post-onboarding)."""
-        self.client.table("emails").update(
-            {"status": "processed"}
-        ).eq("user_id", user_id).eq("status", "unprocessed").execute()
+    def mark_all_emails_processed(self, user_id, batch_size=1000):
+        """Mark all unprocessed emails for a user as processed (post-onboarding).
+
+        Batches updates to avoid Supabase statement timeouts on large tables.
+        """
+        total = 0
+        while True:
+            result = (
+                self.client.table("emails")
+                .select("id")
+                .eq("user_id", user_id)
+                .eq("status", "unprocessed")
+                .limit(batch_size)
+                .execute()
+            )
+            ids = [r["id"] for r in (result.data or [])]
+            if not ids:
+                break
+            self.client.table("emails").update(
+                {"status": "processed"}
+            ).in_("id", ids).execute()
+            total += len(ids)
+        return total
 
     # ------------------------------------------------------------------
     # Classifications
