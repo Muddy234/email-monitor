@@ -13,7 +13,7 @@ export async function initOnboarding() {
     if (!user) { panel.innerHTML = `<div class="em-empty">Not authenticated.</div>`; return; }
 
     const [profileRes, contactsRes, topicRes, scoringRes] = await Promise.all([
-        supabase.from("profiles").select("writing_style_guide, style_sample_count, onboarding_status, onboarding_completed_at").eq("id", user.id).single(),
+        supabase.from("profiles").select("writing_style_guide, style_extracted_feature_count, onboarding_status, onboarding_completed_at").eq("id", user.id).single(),
         supabase.from("contacts").select("*").eq("user_id", user.id).order("emails_per_month", { ascending: false }),
         supabase.from("user_topic_profile").select("*").eq("user_id", user.id).single(),
         supabase.from("scoring_parameters").select("*").eq("user_id", user.id).single(),
@@ -74,7 +74,7 @@ function renderStyleGuide(profile) {
     }
     el.innerHTML = `
         <div style="margin-bottom:10px; display:flex; gap:12px; font-size:12px; color:var(--em-slate-500)">
-            <span>Samples: ${profile.style_sample_count || 0}</span>
+            <span>Features Extracted: ${profile.style_extracted_feature_count || 0}</span>
             <span>Completed: ${formatDate(profile.onboarding_completed_at)}</span>
         </div>
         <div class="em-style-guide-text">${escapeHtml(profile.writing_style_guide)}</div>

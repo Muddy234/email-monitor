@@ -122,8 +122,18 @@ def synthesize_style_guide(style_features, contact_profiles):
     Returns:
         str: Plain text style guide, or None on failure.
     """
+    # Guide quality cascade Layer 2: extracted feature minimum (see plan §cascade)
+    MIN_STYLE_FEATURES = 15
+
     if not style_features:
         logger.warning("No style features to synthesize")
+        return None, {}
+
+    if len(style_features) < MIN_STYLE_FEATURES:
+        logger.warning(
+            f"Only {len(style_features)} style features extracted "
+            f"(need {MIN_STYLE_FEATURES}) — skipping style guide synthesis"
+        )
         return None, {}
 
     # Build contact_type lookup from profiles
@@ -141,9 +151,15 @@ def synthesize_style_guide(style_features, contact_profiles):
         feat_copy["contact_type"] = contact_type_map.get(recipient, "unknown")
         enriched.append(feat_copy)
 
-    # Format for Sonnet
+    # Guide quality cascade Layer 3: soft prompt constraint (see plan §cascade)
+    sample_note = (
+        "small — focus on consistent patterns only, "
+        "avoid generalizing from single occurrences"
+        if len(enriched) < 30 else "adequate"
+    )
     prompt_text = (
-        f"Writing pattern analysis from {len(enriched)} sent emails:\n\n"
+        f"Writing pattern analysis from {len(enriched)} sent emails"
+        f" (sample size: {sample_note}):\n\n"
         + json.dumps(enriched)
     )
 
@@ -178,8 +194,18 @@ def synthesize_behavioral_profile(behavioral_features, contact_profiles):
     Returns:
         str: Plain text behavioral profile, or None on failure.
     """
+    # Guide quality cascade Layer 2: extracted feature minimum (see plan §cascade)
+    MIN_BEHAVIORAL_FEATURES = 10
+
     if not behavioral_features:
         logger.warning("No behavioral features to synthesize")
+        return None, {}
+
+    if len(behavioral_features) < MIN_BEHAVIORAL_FEATURES:
+        logger.warning(
+            f"Only {len(behavioral_features)} behavioral features extracted "
+            f"(need {MIN_BEHAVIORAL_FEATURES}) — skipping behavioral profile synthesis"
+        )
         return None, {}
 
     # Format authoritative contact profiles for reconciliation
@@ -200,8 +226,15 @@ def synthesize_behavioral_profile(behavioral_features, contact_profiles):
             + "\n".join(profile_lines)
         )
 
+    # Guide quality cascade Layer 3: soft prompt constraint (see plan §cascade)
+    sample_note = (
+        "small — only report patterns observed in 3+ emails, "
+        "state \"insufficient data\" for dimensions without clear patterns"
+        if len(behavioral_features) < 20 else "adequate"
+    )
     prompt_text = (
-        f"Behavioral pattern analysis from {len(behavioral_features)} sent emails:\n\n"
+        f"Behavioral pattern analysis from {len(behavioral_features)} sent emails"
+        f" (sample size: {sample_note}):\n\n"
         + json.dumps(behavioral_features)
         + profiles_block
     )

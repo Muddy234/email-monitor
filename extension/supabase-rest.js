@@ -72,7 +72,7 @@ async function pushEmails(emails) {
  * Fetch the current user's profile (user_email_aliases, etc).
  */
 async function getProfile(userId) {
-  return supabaseRequest(`/profiles?id=eq.${userId}&select=user_email_aliases,connected_outlook_email,onboarding_completed_at`);
+  return supabaseRequest(`/profiles?id=eq.${userId}&select=user_email_aliases,connected_outlook_email,onboarding_completed_at,initial_sync_complete`);
 }
 
 /**
@@ -110,6 +110,17 @@ async function updateDraftStatus(draftId, status, outlookDraftId) {
   return supabaseRequest(`/drafts?id=eq.${draftId}`, {
     method: "PATCH",
     body,
+  });
+}
+
+/**
+ * Signal that the extension has completed its first full folder sync.
+ * Idempotent — the eq.false filter makes it a no-op if already set.
+ */
+async function setInitialSyncComplete(userId) {
+  return supabaseRequest(`/profiles?id=eq.${userId}&initial_sync_complete=eq.false`, {
+    method: "PATCH",
+    body: { initial_sync_complete: true },
   });
 }
 

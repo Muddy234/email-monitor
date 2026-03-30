@@ -75,7 +75,7 @@ def run_onboarding(db, user_id, profile):
 
         # ── Phase 1: Collect ─────────────────────────────────────
         db.update_onboarding_status(user_id, "collecting")
-        email_data = collect_onboarding_emails(db, user_id, aliases, days=180, max_emails=500)
+        email_data = collect_onboarding_emails(db, user_id, aliases, days=180, max_emails=1500)
         received = email_data["received"]
         sent = email_data["sent"]
 
@@ -83,6 +83,17 @@ def run_onboarding(db, user_id, profile):
             logger.warning(f"Only {len(received)} received emails — too few for onboarding")
             db.update_onboarding_status(user_id, "failed")
             return False
+
+        # Guide quality cascade Layer 1: raw sent email minimum (see plan §cascade)
+        MIN_SENT_FOR_GUIDES = 30
+        if len(sent) < MIN_SENT_FOR_GUIDES:
+            logger.warning(
+                f"Only {len(sent)} sent emails (need {MIN_SENT_FOR_GUIDES}) — "
+                f"onboarding will complete without style/behavior guides"
+            )
+            skip_guides = True
+        else:
+            skip_guides = False
 
         # ── Phase 2: Full statistical extraction ──────────────────
         db.update_onboarding_status(user_id, "statistics")
@@ -273,43 +284,51 @@ def run_onboarding(db, user_id, profile):
         style_guide = None
         behavioral_profile = None
 
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            f_topics = executor.submit(
-                synthesize_topics,
+        if skip_guides:
+            logger.info("Skipping style guide + behavioral profile (insufficient sent emails)")
+            # Still synthesize topics — they don't depend on sent emails
+            topic_result, topic_usage = synthesize_topics(
                 extraction_result.get("keyword_frequencies", {}),
             )
-            f_guide = executor.submit(
-                synthesize_style_guide,
-                style_result.get("style_features", []) if style_result else [],
-                contact_profiles,
-            )
-            f_behavioral = executor.submit(
-                synthesize_behavioral_profile,
-                behavioral_result.get("behavioral_features", []) if behavioral_result else [],
-                contact_profiles,
-            )
-            topic_result, topic_usage = f_topics.result()
             _merge_usage(sonnet_usage, topic_usage)
-            style_guide, style_usage = f_guide.result()
-            _merge_usage(sonnet_usage, style_usage)
-            try:
-                behavioral_profile, behavioral_usage = f_behavioral.result()
-                _merge_usage(sonnet_usage, behavioral_usage)
-            except Exception:
-                logger.exception("Phase 4C-3: behavioral profile synthesis raised")
-
-        # Retry behavioral profile once if it failed — this drives every
-        # future draft's decision posture, so transient failures are costly.
-        if not behavioral_profile and behavioral_result:
-            logger.info("Retrying behavioral profile synthesis (1 of 1)...")
-            try:
-                behavioral_profile, retry_usage = synthesize_behavioral_profile(
-                    behavioral_result.get("behavioral_features", []),
+        else:
+            with ThreadPoolExecutor(max_workers=3) as executor:
+                f_topics = executor.submit(
+                    synthesize_topics,
+                    extraction_result.get("keyword_frequencies", {}),
+                )
+                f_guide = executor.submit(
+                    synthesize_style_guide,
+                    style_result.get("style_features", []) if style_result else [],
                     contact_profiles,
                 )
-                _merge_usage(sonnet_usage, retry_usage)
-            except Exception:
-                logger.exception("Phase 4C-3: behavioral profile retry also failed")
+                f_behavioral = executor.submit(
+                    synthesize_behavioral_profile,
+                    behavioral_result.get("behavioral_features", []) if behavioral_result else [],
+                    contact_profiles,
+                )
+                topic_result, topic_usage = f_topics.result()
+                _merge_usage(sonnet_usage, topic_usage)
+                style_guide, style_usage = f_guide.result()
+                _merge_usage(sonnet_usage, style_usage)
+                try:
+                    behavioral_profile, behavioral_usage = f_behavioral.result()
+                    _merge_usage(sonnet_usage, behavioral_usage)
+                except Exception:
+                    logger.exception("Phase 4C-3: behavioral profile synthesis raised")
+
+            # Retry behavioral profile once if it failed — this drives every
+            # future draft's decision posture, so transient failures are costly.
+            if not behavioral_profile and behavioral_result:
+                logger.info("Retrying behavioral profile synthesis (1 of 1)...")
+                try:
+                    behavioral_profile, retry_usage = synthesize_behavioral_profile(
+                        behavioral_result.get("behavioral_features", []),
+                        contact_profiles,
+                    )
+                    _merge_usage(sonnet_usage, retry_usage)
+                except Exception:
+                    logger.exception("Phase 4C-3: behavioral profile retry also failed")
 
         # Record Sonnet usage from all synthesis phases (4A + 4B + 4C-2 + 4C-3)
         db.record_token_usage(user_id, "sonnet", "onboarding_synthesis", sonnet_usage)
@@ -338,8 +357,13 @@ def run_onboarding(db, user_id, profile):
 
         try:
             if style_guide:
-                sample_count = style_result.get("sample_count", 0) if style_result else 0
-                db.update_writing_style(user_id, style_guide, sample_count)
+                extracted_count = len(style_result.get("style_features", [])) if style_result else 0
+                sampled_count = style_result.get("sample_count", 0) if style_result else 0
+                db.update_writing_style(user_id, style_guide, extracted_count)
+                logger.info(
+                    f"Style guide saved: {extracted_count} features extracted "
+                    f"from {sampled_count} sampled emails"
+                )
         except Exception as e:
             logger.error(f"Stage 2: update_writing_style failed: {e}")
 

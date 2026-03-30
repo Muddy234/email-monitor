@@ -22,7 +22,7 @@ export async function initDraftTester() {
 
     const { data: profile } = await supabase
         .from("profiles")
-        .select("writing_style_guide, style_sample_count, display_name, user_email_aliases, behavioral_profile")
+        .select("writing_style_guide, style_extracted_feature_count, display_name, user_email_aliases, behavioral_profile")
         .eq("id", user.id)
         .single();
 

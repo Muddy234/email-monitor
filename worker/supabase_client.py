@@ -367,19 +367,20 @@ class SupabaseWorkerClient:
     # Onboarding
     # ------------------------------------------------------------------
 
-    def get_users_needing_onboarding(self, min_emails=500, fallback_emails=5, fallback_days=3):
+    def get_users_needing_onboarding(self, min_emails=500):
         """Find users who haven't completed onboarding and have enough emails.
 
-        Eligibility: (email_count >= min_emails) OR
-                     (email_count >= fallback_emails AND account_age > fallback_days).
-        Users with 0 emails after fallback_days are skipped (extension likely not installed).
+        Eligibility: initial_sync_complete = true AND email_count >= min_emails.
+        The initial_sync_complete flag is set by the extension after its first
+        full folder sync completes, preventing race conditions where onboarding
+        triggers before sent emails are synced.
 
         Returns:
             list[str]: User IDs ready for onboarding.
         """
         result = (
             self.client.table("profiles")
-            .select("id, onboarding_status, created_at")
+            .select("id, onboarding_status, initial_sync_complete")
             .is_("onboarding_completed_at", "null")
             .execute()
         )
@@ -387,11 +388,13 @@ class SupabaseWorkerClient:
             return []
 
         ready = []
-        now = datetime.utcnow()
         for row in result.data:
             uid = row["id"]
             status = row.get("onboarding_status")
             if status and status not in ("pending", "failed"):
+                continue
+
+            if not row.get("initial_sync_complete"):
                 continue
 
             count_result = (
@@ -404,14 +407,6 @@ class SupabaseWorkerClient:
 
             if email_count >= min_emails:
                 ready.append(uid)
-                continue
-
-            # Time-based fallback for quiet inboxes
-            created_at = row.get("created_at")
-            if created_at and email_count >= fallback_emails:
-                account_age = now - datetime.fromisoformat(created_at.replace("Z", "+00:00")).replace(tzinfo=None)
-                if account_age.days >= fallback_days:
-                    ready.append(uid)
 
         return ready
 
@@ -555,18 +550,18 @@ class SupabaseWorkerClient:
             row, on_conflict="user_id"
         ).execute()
 
-    def update_writing_style(self, user_id, style_guide, sample_count):
+    def update_writing_style(self, user_id, style_guide, extracted_count):
         """Store the writing style guide on the user's profile.
 
         Args:
             user_id: UUID string.
             style_guide: Plain text style guide.
-            sample_count: Number of sent emails analyzed.
+            extracted_count: Number of style features successfully extracted.
         """
         self.client.table("profiles").update({
             "writing_style_guide": style_guide,
             "style_profiled_at": datetime.utcnow().isoformat(),
-            "style_sample_count": sample_count,
+            "style_extracted_feature_count": extracted_count,
         }).eq("id", user_id).execute()
 
     def update_behavioral_profile(self, user_id, profile_text):

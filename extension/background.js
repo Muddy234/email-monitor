@@ -41,6 +41,7 @@ let token = null;        // { token, expiresOn, cachedAt, clientId, origin }
 let isSyncing = false;   // lock to prevent concurrent Supabase syncs
 let lastSyncTime = null; // ISO string of last successful sync
 let connectedOutlookEmail = null; // cached connected_outlook_email from profile
+let hasCompletedFolderSync = false; // Set true after first successful folder discovery
 let cachedFolders = null;      // Array of { id, displayName, isDistinguished }
 let folderCacheTime = null;    // ISO timestamp of last folder discovery
 let outlookTabId = null;       // Tab ID of the active Outlook page (from content script)
@@ -793,13 +794,47 @@ async function discoverMailFolders() {
   const results = await chrome.scripting.executeScript({
     target: { tabId: outlookTabId },
     world: "MAIN",
-    func: () => {
+    func: async () => {
       const SKIP = new Set([
         "favorites", "sent items", "drafts", "deleted items", "junk email",
         "outbox", "conversation history", "archive",
         "sync issues", "rss feeds", "rss subscriptions", "notes",
         "search folders",
       ]);
+
+      // Skip expand/collapse if user is actively interacting with the tab —
+      // programmatic collapse could fight with their clicks on the folder tree.
+      // Falls back to visible-only discovery (same as today's behavior).
+      if (!document.hasFocus()) {
+        // Expand collapsed folder tree items to reveal nested subfolders
+        const expandable = document.querySelectorAll(
+          '[role="treeitem"][data-folder-name][aria-expanded="false"]'
+        );
+        for (const el of expandable) {
+          const name = (el.getAttribute("data-folder-name") || "").toLowerCase();
+          const SKIP_EXPAND = new Set([
+            "favorites", "sent items", "drafts", "deleted items", "junk email",
+            "outbox", "conversation history", "archive",
+            "sync issues", "rss feeds", "rss subscriptions", "notes",
+            "search folders",
+          ]);
+          if (SKIP_EXPAND.has(name)) continue;
+          el.querySelector('[role="button"], .ms-Button, [data-icon-name="ChevronRight"]')?.click();
+        }
+
+        // Wait for DOM to render children of expanded folders
+        const countBefore = document.querySelectorAll('[role="treeitem"][data-folder-name]').length;
+        const POLL_INTERVAL_MS = 100;
+        const POLL_TIMEOUT_MS = 2000;
+        let elapsed = 0;
+        while (elapsed < POLL_TIMEOUT_MS) {
+          await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
+          elapsed += POLL_INTERVAL_MS;
+          const countNow = document.querySelectorAll('[role="treeitem"][data-folder-name]').length;
+          if (countNow > countBefore) break;
+        }
+      }
+
       const folderEls = document.querySelectorAll('[role="treeitem"][data-folder-name]');
       console.log(`[Clarion] discoverMailFolders: found ${folderEls.length} treeitem elements`);
       if (!folderEls.length) return null;
@@ -834,6 +869,26 @@ async function discoverMailFolders() {
         folders.push({ id: folderId, displayName, isDistinguished: !!distinguishedFolderId });
       });
       console.log(`[Clarion] discoverMailFolders: ${folders.length} usable, ${skippedLevel1.length} skipped (level-1: ${skippedLevel1.join(", ")})`);
+
+      // Restore collapsed state (only if we expanded above)
+      if (!document.hasFocus()) {
+        const expandedNow = document.querySelectorAll(
+          '[role="treeitem"][data-folder-name][aria-expanded="true"]'
+        );
+        for (const el of expandedNow) {
+          const name = (el.getAttribute("data-folder-name") || "").toLowerCase();
+          // Only collapse items we would have expanded (non-SKIP folders)
+          const SKIP_EXPAND = new Set([
+            "favorites", "sent items", "drafts", "deleted items", "junk email",
+            "outbox", "conversation history", "archive",
+            "sync issues", "rss feeds", "rss subscriptions", "notes",
+            "search folders",
+          ]);
+          if (SKIP_EXPAND.has(name)) continue;
+          el.querySelector('[role="button"], .ms-Button, [data-icon-name="ChevronDown"]')?.click();
+        }
+      }
+
       return folders.length > 0 ? folders : null;
     },
   });
@@ -959,6 +1014,12 @@ async function syncEmailsToSupabase() {
         if (DEBUG) console.warn("getProfile failed:", err.message);
       }
 
+      // Seed hasCompletedFolderSync from profile (survives MV3 service worker kills)
+      if (profile?.initial_sync_complete) {
+        hasCompletedFolderSync = true;
+        console.log("[Clarion] hasCompletedFolderSync seeded from profile (initial_sync_complete=true)");
+      }
+
       const connectedEmail = profile?.connected_outlook_email?.toLowerCase();
       connectedOutlookEmail = connectedEmail || null; // keep module cache in sync
 
@@ -987,20 +1048,28 @@ async function syncEmailsToSupabase() {
       await chrome.storage.local.remove("outlookMismatch");
     }
 
-    // Force catchup mode if onboarding hasn't completed yet — we need 500+ emails
-    if (profile && !profile.onboarding_completed_at && lastSyncTime) {
-      if (DEBUG) console.log("Onboarding incomplete — forcing catchup mode");
-      lastSyncTime = null;
+    // Force catchup mode only during the first burst before folder discovery succeeds
+    if (profile && !profile.onboarding_completed_at && lastSyncTime && !hasCompletedFolderSync) {
+      const syncAgeMs = Date.now() - new Date(lastSyncTime).getTime();
+      const thresholdMs = 2 * EMAIL_SYNC_PERIOD_MIN * 60 * 1000; // 90s (2 × 45s cycle)
+      if (syncAgeMs < thresholdMs) {
+        if (DEBUG) console.log("Onboarding incomplete, first catchup burst — forcing catchup mode");
+        lastSyncTime = null;
+      }
     }
 
-    // Set limit: small for incremental syncs, larger for catch-up
-    const maxEmails = lastSyncTime ? 50 : MAX_CATCHUP_EMAILS;
+    // Set limit: larger during pre-onboarding initial sync, normal otherwise
+    const isInitialSync = profile && !profile.onboarding_completed_at && !hasCompletedFolderSync;
+    const maxEmails = isInitialSync ? 200 : (lastSyncTime ? 50 : MAX_CATCHUP_EMAILS);
+    console.log(`[Clarion] Sync mode: isInitialSync=${isInitialSync}, hasCompletedFolderSync=${hasCompletedFolderSync}, maxEmails=${maxEmails}`);
 
     // Discover mail folders from Outlook's sidebar DOM via chrome.scripting
     // Always start with Inbox (discovery only returns subfolders).
     let folders = [{ id: null, displayName: "Inbox", isDistinguished: true }];
     try {
       const discovered = await discoverMailFolders();
+      hasCompletedFolderSync = true; // Discovery succeeded — sidebar was readable
+      console.log("[Clarion] hasCompletedFolderSync set to true (folder discovery succeeded)");
       // Filter out any discovered "Inbox" — we already prepend it above
       const filtered = discovered.filter(f => f.displayName.toLowerCase() !== "inbox");
       console.log(`[Clarion] Discovered ${discovered.length} subfolders (${discovered.length - filtered.length} duplicate Inbox removed):`, filtered.map(f => f.displayName));
@@ -1129,6 +1198,16 @@ async function syncEmailsToSupabase() {
 
     // Update heartbeat so the worker knows we're active
     updateHeartbeat(userId).catch(() => {});
+
+    // Signal sync completion to worker (gates onboarding)
+    if (hasCompletedFolderSync && profile && !profile.onboarding_completed_at && !profile.initial_sync_complete) {
+      console.log("[Clarion] Signaling initial_sync_complete to Supabase");
+      setInitialSyncComplete(userId).then(() => {
+        console.log("[Clarion] initial_sync_complete set successfully");
+      }).catch((err) => {
+        console.warn("[Clarion] Failed to set initial_sync_complete:", err.message);
+      });
+    }
 
     return { synced: totalSynced, sent_synced: sentCount };
   } catch (err) {

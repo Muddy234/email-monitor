@@ -219,6 +219,15 @@ describe ALL modes with clear labels for when each applies. The draft \
 generator will select the appropriate mode based on the recipient's \
 contact_type.
 
+SAMPLE SIZE RULES:
+- If the sample contains fewer than 30 emails, explicitly state which patterns \
+are well-supported vs. tentative.
+- Never use phrases like "always", "consistently", or "predominantly" for \
+patterns observed in fewer than 5 emails — use "observed in N emails" instead.
+- If a dimension lacks enough data to identify a pattern, write: "Insufficient \
+data to determine [dimension] patterns." Do NOT speculate or fill in with \
+generic professional defaults.
+
 Do NOT invent a name, title, or heading for the guide. Do not reference the \
 user by name. Start directly with the style patterns.
 
@@ -392,5 +401,13 @@ style guide governs HOW it is written (tone, vocabulary, pleasantries, structure
 Do not repeat style information here.
 - Do NOT invent a name, title, or heading for the profile. Do not reference the \
 user by name. Start directly with the behavioral rules.
+
+SAMPLE SIZE RULES:
+- If the sample contains fewer than 20 emails, only generate rules for \
+dimensions where the pattern appears in 3+ emails.
+- For dimensions with fewer than 3 supporting examples, write: "No consistent \
+pattern observed for [dimension] due to insufficient data. The draft model \
+should use neutral behavior."
+- Never extrapolate a single email into a general rule.
 
 Output as plain text, not JSON."""

@@ -97,6 +97,29 @@ def collect_onboarding_emails(db, user_id, user_aliases, days=120, max_emails=No
     received, filtered_count = pre_filter_emails(received)
     filtered_count += sent_filtered
 
+    # Log filter ratio so we can validate the over-fetch multiplier
+    clean_count = len(received) + len(sent)
+    if total > 0:
+        logger.info(
+            f"Pre-filter: {total} fetched, {filtered_count} removed "
+            f"({filtered_count/total*100:.0f}% noise), {clean_count} clean"
+        )
+
+    # Cap at 500 clean emails, preserving sent emails first
+    MAX_ONBOARDING_EMAILS = 500
+    MAX_SENT_RESERVED = 150  # never discard sent emails that downstream phases need
+
+    if clean_count > MAX_ONBOARDING_EMAILS:
+        kept_sent = sorted(sent, key=lambda e: e.get("received_time") or "", reverse=True)[:MAX_SENT_RESERVED]
+        remaining_slots = MAX_ONBOARDING_EMAILS - len(kept_sent)
+        kept_received = sorted(received, key=lambda e: e.get("received_time") or "", reverse=True)[:remaining_slots]
+        received = kept_received
+        sent = kept_sent
+        logger.info(
+            f"Capped to {MAX_ONBOARDING_EMAILS} clean emails "
+            f"(sent floor: {len(sent)}, received: {len(received)})"
+        )
+
     logger.info(
         f"Split: {len(received)} received, {len(sent)} sent, "
         f"{filtered_count} filtered out"
