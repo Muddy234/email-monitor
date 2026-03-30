@@ -343,6 +343,10 @@ _META_COMMENTARY_PATTERNS = [
     re.compile(r"\n\s*(?:Note|Caveat|Disclaimer|Important):?\s.+$", re.IGNORECASE | re.DOTALL),
     re.compile(r"\n\s*(?:This (?:profile|guide) (?:is |was )(?:based on|generated|derived).+)$", re.IGNORECASE | re.DOTALL),
     re.compile(r"\n\s*(?:\*\*?Note\*?\*?:?\s.+)$", re.IGNORECASE | re.DOTALL),
+    # Catch false "Data Limitations" / "Caveats" sections Sonnet sometimes hallucinates
+    re.compile(r"\n\s*\*?\*?Data Limitations?\*?\*?:?\s*.+$", re.IGNORECASE | re.DOTALL),
+    re.compile(r"\n\s*\*?\*?Limitations?\*?\*?:?\s*.+$", re.IGNORECASE | re.DOTALL),
+    re.compile(r"\n\s*\*?\*?Caveats?\*?\*?:?\s*.+$", re.IGNORECASE | re.DOTALL),
 ]
 
 

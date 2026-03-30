@@ -219,6 +219,11 @@ describe ALL modes with clear labels for when each applies. The draft \
 generator will select the appropriate mode based on the recipient's \
 contact_type.
 
+SCOPE BOUNDARY: This guide covers WRITING STYLE ONLY — tone, vocabulary, \
+greetings, structure, pleasantries. Do NOT include IF-THEN behavioral rules \
+about decision-making, response completeness, commitment patterns, or scope \
+behavior. Those belong in a separate behavioral profile.
+
 SAMPLE SIZE RULES:
 - If the sample contains fewer than 30 emails, explicitly state which patterns \
 are well-supported vs. tentative.
@@ -401,6 +406,17 @@ style guide governs HOW it is written (tone, vocabulary, pleasantries, structure
 Do not repeat style information here.
 - Do NOT invent a name, title, or heading for the profile. Do not reference the \
 user by name. Start directly with the behavioral rules.
+
+OUTPUT STRUCTURE RULES:
+- Output EXACTLY 4 sections, one per dimension. Do NOT write a summary, \
+overview, or high-level section before the detailed rules.
+- Each dimension appears ONCE. Never repeat a dimension with different levels \
+of detail.
+- Do NOT add a "Data Limitations", "Caveats", or "Notes" section. The sample \
+size context is provided in the input header — trust it. If the header says \
+"adequate", generate rules with full confidence and no hedging.
+- Do NOT claim the profile is based on fewer emails than are provided in the \
+input data. The email count in the input header is the ground truth.
 
 SAMPLE SIZE RULES:
 - If the sample contains fewer than 20 emails, only generate rules for \
