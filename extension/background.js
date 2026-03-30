@@ -617,7 +617,7 @@ async function handleGetItemBatch(emails) {
     } else {
       // Fall back to basic FindItem data for failed/missing items
       fallbackCount++;
-      console.warn(`[GetItem] Fallback for "${emails[i].subject}"`,
+      if (DEBUG) console.warn(`[GetItem] Fallback for "${emails[i].subject}"`,
         `| ResponseCode: ${ri?.ResponseCode || "MISSING"}`,
         `| Has Items: ${!!ri?.Items?.[0]}`);
       results.push(emails[i]);
@@ -836,7 +836,6 @@ async function discoverMailFolders() {
       }
 
       const folderEls = document.querySelectorAll('[role="treeitem"][data-folder-name]');
-      console.log(`[Clarion] discoverMailFolders: found ${folderEls.length} treeitem elements`);
       if (!folderEls.length) return null;
       const folders = [];
       const seen = new Set();
@@ -868,7 +867,7 @@ async function discoverMailFolders() {
         const displayName = title.split(" - ")[0].trim() || name;
         folders.push({ id: folderId, displayName, isDistinguished: !!distinguishedFolderId });
       });
-      console.log(`[Clarion] discoverMailFolders: ${folders.length} usable, ${skippedLevel1.length} skipped (level-1: ${skippedLevel1.join(", ")})`);
+      // (logging removed — runs in page context where DEBUG is unavailable)
 
       // Restore collapsed state (only if we expanded above)
       if (!document.hasFocus()) {
@@ -1017,7 +1016,7 @@ async function syncEmailsToSupabase() {
       // Seed hasCompletedFolderSync from profile (survives MV3 service worker kills)
       if (profile?.initial_sync_complete) {
         hasCompletedFolderSync = true;
-        console.log("[Clarion] hasCompletedFolderSync seeded from profile (initial_sync_complete=true)");
+        if (DEBUG) console.log("[Clarion] hasCompletedFolderSync seeded from profile (initial_sync_complete=true)");
       }
 
       const connectedEmail = profile?.connected_outlook_email?.toLowerCase();
@@ -1029,11 +1028,11 @@ async function syncEmailsToSupabase() {
           if (DEBUG) console.log("Locking Outlook account:", outlookEmail);
           await setConnectedOutlookEmail(userId, outlookEmail);
         } catch (err) {
-          console.warn("Failed to lock Outlook email:", err.message);
+          if (DEBUG) console.warn("Failed to lock Outlook email:", err.message);
         }
       } else if (connectedEmail !== outlookEmail) {
         // Mismatch — abort sync
-        console.warn(`Outlook mismatch: expected=${connectedEmail}, got=${outlookEmail}`);
+        if (DEBUG) console.warn(`Outlook mismatch: expected=${connectedEmail}, got=${outlookEmail}`);
         await chrome.storage.local.set({
           outlookMismatch: { expected: connectedEmail, actual: outlookEmail },
         });
@@ -1061,7 +1060,7 @@ async function syncEmailsToSupabase() {
     // Set limit: larger during pre-onboarding initial sync, normal otherwise
     const isInitialSync = profile && !profile.onboarding_completed_at && !hasCompletedFolderSync;
     const maxEmails = isInitialSync ? 200 : (lastSyncTime ? 50 : MAX_CATCHUP_EMAILS);
-    console.log(`[Clarion] Sync mode: isInitialSync=${isInitialSync}, hasCompletedFolderSync=${hasCompletedFolderSync}, maxEmails=${maxEmails}`);
+    if (DEBUG) console.log(`[Clarion] Sync mode: isInitialSync=${isInitialSync}, hasCompletedFolderSync=${hasCompletedFolderSync}, maxEmails=${maxEmails}`);
 
     // Discover mail folders from Outlook's sidebar DOM via chrome.scripting
     // Always start with Inbox (discovery only returns subfolders).
@@ -1069,15 +1068,15 @@ async function syncEmailsToSupabase() {
     try {
       const discovered = await discoverMailFolders();
       hasCompletedFolderSync = true; // Discovery succeeded — sidebar was readable
-      console.log("[Clarion] hasCompletedFolderSync set to true (folder discovery succeeded)");
+      if (DEBUG) console.log("[Clarion] hasCompletedFolderSync set to true (folder discovery succeeded)");
       // Filter out any discovered "Inbox" — we already prepend it above
       const filtered = discovered.filter(f => f.displayName.toLowerCase() !== "inbox");
-      console.log(`[Clarion] Discovered ${discovered.length} subfolders (${discovered.length - filtered.length} duplicate Inbox removed):`, filtered.map(f => f.displayName));
+      if (DEBUG) console.log(`[Clarion] Discovered ${discovered.length} subfolders (${discovered.length - filtered.length} duplicate Inbox removed):`, filtered.map(f => f.displayName));
       folders = folders.concat(filtered);
     } catch (err) {
-      console.warn(`[Clarion] Folder discovery failed (${err.message}), using inbox-only`);
+      if (DEBUG) console.warn(`[Clarion] Folder discovery failed (${err.message}), using inbox-only`);
     }
-    console.log(`[Clarion] Syncing ${folders.length} folder(s), maxEmails=${maxEmails}/folder:`, folders.map(f => f.displayName));
+    if (DEBUG) console.log(`[Clarion] Syncing ${folders.length} folder(s), maxEmails=${maxEmails}/folder:`, folders.map(f => f.displayName));
 
     // Loop through each mail folder sequentially
     let totalSynced = 0;
@@ -1097,7 +1096,7 @@ async function syncEmailsToSupabase() {
         }
 
         const result = await handleGetEmails(fetchParams);
-        console.log(`[Clarion] Folder "${folderInfo.displayName}": ${result.emails?.length || 0} emails (total in view: ${result.total})`);
+        if (DEBUG) console.log(`[Clarion] Folder "${folderInfo.displayName}": ${result.emails?.length || 0} emails (total in view: ${result.total})`);
 
         if (!result.emails || result.emails.length === 0) {
           continue;
@@ -1137,7 +1136,7 @@ async function syncEmailsToSupabase() {
         if (DEBUG) console.log(`Synced ${rows.length} emails from "${folderInfo.displayName}"`);
       } catch (err) {
         // Per-folder errors are non-blocking — log and continue to next folder
-        console.error(`Error syncing folder "${folderInfo.displayName}":`, err.message);
+        if (DEBUG) console.error(`Error syncing folder "${folderInfo.displayName}":`, err.message);
       }
     }
 
@@ -1201,11 +1200,11 @@ async function syncEmailsToSupabase() {
 
     // Signal sync completion to worker (gates onboarding)
     if (hasCompletedFolderSync && profile && !profile.onboarding_completed_at && !profile.initial_sync_complete) {
-      console.log("[Clarion] Signaling initial_sync_complete to Supabase");
+      if (DEBUG) console.log("[Clarion] Signaling initial_sync_complete to Supabase");
       setInitialSyncComplete(userId).then(() => {
-        console.log("[Clarion] initial_sync_complete set successfully");
+        if (DEBUG) console.log("[Clarion] initial_sync_complete set successfully");
       }).catch((err) => {
-        console.warn("[Clarion] Failed to set initial_sync_complete:", err.message);
+        if (DEBUG) console.warn("[Clarion] Failed to set initial_sync_complete:", err.message);
       });
     }
 
