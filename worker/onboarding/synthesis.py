@@ -49,7 +49,7 @@ def synthesize_contacts(contact_freq, response_rates, extractions):
         prompt=prompt_text,
         system_prompt=SONNET_CONTACT_PROFILE_PROMPT,
         model="sonnet",
-        max_tokens=4096,
+        max_tokens=12288,
         temperature=0,
         cache_system_prompt=True,
     )
