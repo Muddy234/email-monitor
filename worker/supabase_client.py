@@ -156,7 +156,7 @@ class SupabaseWorkerClient:
             self.client.table("profiles")
             .select("*")
             .eq("id", user_id)
-            .single()
+            .maybe_single()
             .execute()
         )
         return result.data or {}
