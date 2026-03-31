@@ -141,7 +141,7 @@ header p { color:var(--text-muted); font-size:14px; }
 <header>
   <h1>Clarion AI — Pipeline flow</h1>
   <p>End-to-end data flow from extension sync through onboarding to normal processing. Click any phase or step to expand.</p>
-  <p style="margin-top:4px;font-family:var(--mono);font-size:11px;color:var(--text-dim)">Generated: 2026-03-31 17:20 UTC</p>
+  <p style="margin-top:4px;font-family:var(--mono);font-size:11px;color:var(--text-dim)">Generated: 2026-03-31 17:31 UTC</p>
 </header>
 <div class="legend">
   <div class="legend-item"><div class="legend-dot" style="background:var(--blue)"></div>writes</div>
@@ -191,55 +191,49 @@ header p { color:var(--text-muted); font-size:14px; }
         <div class="step-detail"><p>On first sync (when <code>profile.connected_outlook_email</code> is null), locks the Outlook account by calling <code>setConnectedOutlookEmail(userId, outlookEmail)</code>. On subsequent syncs, verifies the token account matches the lock and aborts with <code>{error: "OUTLOOK_MISMATCH"}</code> if it doesn't. Clears stale mismatch state on match or if no outlookEmail is found.</p></div>
       </div>
       <div class="step" onclick="toggleStep(this)">
-        <div class="step-head"><span class="step-num">06</span><span class="step-name">force-catchup-mode</span></div>
-        <div class="step-desc">Resets lastSyncTime if onboarding incomplete and sync age &lt; 90s. Forces catchup fetch sizes on next cycle.</div>
-        <div class="step-meta"><span class="step-tag tag-gate">gate · onboarding incomplete + sync age &lt; 2× cycle</span></div>
-        <div class="step-detail"><p>During early onboarding (when <code>onboarding_completed_at</code> is null, <code>lastSyncTime</code> exists, and <code>hasCompletedFolderSync</code> is false), resets <code>lastSyncTime = null</code> if sync age is under <code>2 × EMAIL_SYNC_PERIOD_MIN</code> (90 seconds). This forces the next fetch to use the larger <code>MAX_CATCHUP_EMAILS</code> limit rather than the incremental 50-email window.</p></div>
-      </div>
-      <div class="step" onclick="toggleStep(this)">
-        <div class="step-head"><span class="step-num">07</span><span class="step-name">set-email-cap</span></div>
-        <div class="step-desc">isInitialSync → 200/folder. Otherwise: 50/folder (or 1000 catchup).</div>
-        <div class="step-meta"><span class="step-tag tag-gate">gate · cap varies by state</span></div>
-        <div class="step-detail"><p>Determines the <code>maxEmails</code> per-folder cap: <strong>200</strong> if <code>isInitialSync</code> (onboarding incomplete AND folders not yet discovered), <strong>50</strong> if <code>lastSyncTime</code> exists (incremental mode), or <code>MAX_CATCHUP_EMAILS</code> for a full catchup. Logs the sync mode state for debugging.</p></div>
-      </div>
-      <div class="step" onclick="toggleStep(this)">
-        <div class="step-head"><span class="step-num">08</span><span class="step-name">folder-discovery</span></div>
+        <div class="step-head"><span class="step-num">06</span><span class="step-name">folder-discovery</span></div>
         <div class="step-desc">Reads Outlook sidebar DOM for subfolder IDs. On success, sets hasCompletedFolderSync = true.</div>
         <div class="step-meta"><span class="step-tag tag-reads">reads · Outlook DOM</span><span class="step-tag tag-nonfatal">failure → inbox only</span></div>
         <div class="step-detail"><p>Calls <code>discoverMailFolders()</code> to read the Outlook sidebar DOM via <code>chrome.scripting</code>, returning subfolder IDs. Prepends a hardcoded Inbox entry (distinguished folder), filters duplicate "Inbox" results, and sets <code>hasCompletedFolderSync = true</code> on success. Fails silently and continues with inbox-only if the DOM is unreachable.</p></div>
       </div>
       <div class="step" onclick="toggleStep(this)">
-        <div class="step-head"><span class="step-num">09</span><span class="step-name">per-folder-fetch-push</span></div>
+        <div class="step-head"><span class="step-num">07</span><span class="step-name">set-email-cap</span></div>
+        <div class="step-desc">Pre-onboarding → 500/folder. Post-onboarding → 50/folder.</div>
+        <div class="step-meta"><span class="step-tag tag-gate">gate · onboarding_completed_at</span></div>
+        <div class="step-detail"><p>Determines the <code>maxEmails</code> per-folder cap: <strong>200</strong> if <code>isInitialSync</code> (onboarding incomplete AND folders not yet discovered), <strong>50</strong> if <code>lastSyncTime</code> exists (incremental mode), or <code>MAX_CATCHUP_EMAILS</code> for a full catchup. Logs the sync mode state for debugging.</p></div>
+      </div>
+      <div class="step" onclick="toggleStep(this)">
+        <div class="step-head"><span class="step-num">08</span><span class="step-name">per-folder-fetch-push</span></div>
         <div class="step-desc">For each folder: handleGetEmails() → enrichEmailsBatched() → pushEmails() to Supabase.</div>
         <div class="step-meta"><span class="step-tag tag-writes">writes · emails table</span><span class="step-tag tag-nonfatal">per-folder errors non-blocking</span></div>
         <div class="step-detail"><p>Loops through each folder sequentially: <code>handleGetEmails()</code> → <code>enrichEmailsBatched()</code> → maps rows with user_id, email_ref, subject, sender, body (capped at 50 KB), recipients, etc. → <code>pushEmails()</code> to Supabase. Status defaults to "unprocessed" via DB trigger. Per-folder failures are non-blocking; the loop continues to the next folder.</p></div>
       </div>
       <div class="step" onclick="toggleStep(this)">
-        <div class="step-head"><span class="step-num">10</span><span class="step-name">sent-items-sync</span></div>
+        <div class="step-head"><span class="step-num">09</span><span class="step-name">sent-items-sync</span></div>
         <div class="step-desc">Separate fetch for Sent Items. Status set to completed (not queued for drafts).</div>
         <div class="step-meta"><span class="step-tag tag-writes">writes · emails table (status=completed)</span></div>
         <div class="step-detail"><p>Separate non-blocking fetch via <code>handleGetSentItems()</code> with the same <code>maxSentEmails</code> cap logic (50 if incremental, else <code>MAX_CATCHUP_EMAILS</code>). Enriches via <code>enrichEmailsBatched()</code>, transforms rows with <code>status: "completed"</code> (intentionally not queued for draft generation), and pushes to Supabase. Sent item failure doesn't block inbox sync completion.</p></div>
       </div>
       <div class="step" onclick="toggleStep(this)">
-        <div class="step-head"><span class="step-num">11</span><span class="step-name">persist-lastSyncTime</span></div>
+        <div class="step-head"><span class="step-num">10</span><span class="step-name">persist-lastSyncTime</span></div>
         <div class="step-desc">Saves sync timestamp after all folder fetches complete. Persisted to chrome.storage.local.</div>
         <div class="step-meta"><span class="step-tag tag-writes">writes · lastSyncTime + chrome.storage.local</span></div>
         <div class="step-detail"><p>Sets <code>lastSyncTime = new Date().toISOString()</code> and calls <code>persistSyncTime()</code> to write to <code>chrome.storage.local</code> after all folder and sent fetches complete. Also stores <code>lastSyncUserId</code> to track account identity. This timestamp gates incremental vs. catchup mode in future cycles (steps 06 and 07).</p></div>
       </div>
       <div class="step" onclick="toggleStep(this)">
-        <div class="step-head"><span class="step-num">12</span><span class="step-name">alias-detection</span></div>
+        <div class="step-head"><span class="step-num">11</span><span class="step-name">alias-detection</span></div>
         <div class="step-desc">Detects email aliases from sent items + auth email. Updates profiles.user_email_aliases in Supabase.</div>
         <div class="step-meta"><span class="step-tag tag-writes">writes · profiles.user_email_aliases</span></div>
         <div class="step-detail"><p>Calls <code>detectAndUpdateAliases(userId, authEmail, sentEnriched)</code> using the auth email from <code>session.user.email</code> and sender addresses extracted from sent items. Updates <code>profiles.user_email_aliases</code> in Supabase so downstream classification can correctly identify the user's own messages.</p></div>
       </div>
       <div class="step" onclick="toggleStep(this)">
-        <div class="step-head"><span class="step-num">13</span><span class="step-name">heartbeat</span></div>
+        <div class="step-head"><span class="step-num">12</span><span class="step-name">heartbeat</span></div>
         <div class="step-desc">Updates last_heartbeat_at so the worker knows the extension is active.</div>
         <div class="step-meta"><span class="step-tag tag-writes">writes · profiles.last_heartbeat_at</span></div>
         <div class="step-detail"><p>Calls <code>updateHeartbeat(userId)</code> (errors caught silently via <code>.catch(() => {})</code>) to update <code>profiles.last_heartbeat_at</code>. The Python worker uses this timestamp to determine whether the extension is active — if stale for more than 15 minutes, the worker falls back to business-hours heuristics.</p></div>
       </div>
       <div class="step" onclick="toggleStep(this)">
-        <div class="step-head"><span class="step-num">14</span><span class="step-name">signal-initial-sync</span></div>
+        <div class="step-head"><span class="step-num">13</span><span class="step-name">signal-initial-sync</span></div>
         <div class="step-desc">If hasCompletedFolderSync=true AND initial_sync_complete=false → PATCHes to true.</div>
         <div class="step-meta"><span class="step-tag tag-writes">writes · profiles.initial_sync_complete</span><span class="step-tag tag-nonfatal">PATCH failure → retries next cycle</span></div>
         <div class="step-detail"><p>If <code>hasCompletedFolderSync === true</code> AND <code>profile.initial_sync_complete === false</code>, calls <code>setInitialSyncComplete(userId)</code> to PATCH the flag to true in Supabase, gating the Phase B onboarding pipeline. Runs after ALL folder syncs complete to prevent the "flag set but emails not landed" race. Per-folder failures in step 09 are non-blocking, so partial folder coverage is possible — the <code>email_count >= 500</code> gate in Phase B mitigates this.</p></div>

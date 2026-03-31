@@ -1,0 +1,9 @@
+[
+  {
+    "subject": "Q1 Tax Filing - Discrepancy in Revenue Recognition",
+    "sender_name": "Bobby Axelrod",
+    "sender_email": "bobby.axelrod5522@gmail.com",
+    "body": "Nate,\n\nWhile preparing your Q1 estimated tax filing, I found a discrepancy in revenue recognition. You have $142,000 in invoices marked as revenue in Q1, but $38,000 of that appears to be for services not yet delivered (contracts signed but work starts in Q2).\n\nUnder accrual accounting, we should probably defer that $38,000 to Q2, which would reduce your Q1 estimated tax payment by roughly $9,500. However, if your cash flow situation favors paying more now to avoid a larger Q2 hit, we could keep it as-is.\n\nI need you to confirm: (1) whether those contracts have any deliverables completed in Q1 that would justify partial recognition, (2) your preference on timing of the tax payment, and (3) whether you want me to adjust the books now or wait until we have the full Q2 picture.\n\nFiling deadline for the estimate is April 15th, so I need a decision by April 10th.\n\nBobby Axelrod, CPA\nAxelrod Advisory Services",
+    "to_field": "nate.mcbride23@outlook.com"
+  }
+]
