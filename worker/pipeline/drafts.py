@@ -386,6 +386,13 @@ Generate the reply body text only (no subject, no headers)."""
 
         cleaned = cleaned.strip()
 
+        # Check for Sonnet rejection marker
+        if cleaned.startswith("NO_DRAFT_NEEDED:"):
+            reason = cleaned[len("NO_DRAFT_NEEDED:"):].strip()
+            subject = email_data.get("subject", "unknown")
+            logger.info(f"  Draft REJECTED by model for '{subject}': {reason}")
+            return None
+
         if len(cleaned) < 20:
             subject = email_data.get("subject", "unknown")
             logger.warning(f"  Draft too short for '{subject}' ({len(cleaned)} chars)")

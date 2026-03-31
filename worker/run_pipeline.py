@@ -850,7 +850,7 @@ def process_user_batch_signals(db, user_id, profile, emails):
                     )
                     return 0, 0
 
-        # @pipeline step="accumulate-emails" num="24" desc="Processes users where onboarding_completed_at is not null. New emails get signal extraction + draft generation." reads="emails (status=unprocessed)" writes="drafts table"
+        # @pipeline step="accumulate-emails" num="28" desc="Processes users where onboarding_completed_at is not null. New emails get signal extraction + draft generation." reads="emails (status=unprocessed)" writes="drafts table"
         # @pipeline harden="Three-layer draft composition" body="Each draft now uses three profile layers: the <strong>style guide</strong> (how to write), the <strong>behavioral profile</strong> (how to express decisions), and the <strong>preference profile</strong> (what to decide). The preference layer resolves the direction of decisions using Investment Orientation and Positional Stance categories. All three layers are loaded from the profiles table on each draft generation call. Null layers are omitted from the prompt — graceful degradation, not failure."
 
         # ── Stage 1: Filter ──────────────────────────────────────
@@ -996,7 +996,10 @@ def process_user_batch_signals(db, user_id, profile, emails):
         for db_id, ctx in email_context.items():
             if db_id not in batch_results or batch_results[db_id] is None:
                 ed = ctx["ed"]
-                clean_body = pre_process_email(ed)
+                conv_id = ctx["conv_id"]
+                fallback_threads = thread_emails_map.get(conv_id, []) if conv_id else []
+                prior_bodies = [te["body"] for te in fallback_threads if te.get("body")]
+                clean_body = pre_process_email(ed, prior_bodies=prior_bodies)
                 try:
                     signals, fallback_usage = extract_signals(
                         email_body=clean_body,

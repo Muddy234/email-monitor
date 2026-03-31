@@ -47,7 +47,8 @@ When ar=false, set target="user" (default, ignored).
 Key heuristics for target:
 - If body addresses someone by name ("Wes please...", "John, can you...") and that name is NOT USER → target=other.
 - If USER is in CC (not TO):
-  - If the email content is clearly relevant to USER's work (financial terms, project details, deals USER would manage) AND significance is high or critical → target=user or target=unclear, NOT target=other. CC does not mean uninvolved.
+  - Terminal/confirmatory override: If the newest message is a short acknowledgment or confirmation directed at a named TO recipient ("Thanks, Jenny", "Will do", "I'll handle X"), treat as target=other and draft=false — even if the thread involves financial/project terms. The CC-relevance exception below only applies when the sender is asking USER to act or raising new substance that USER must weigh in on, not when someone is confirming they will handle something themselves.
+  - If the email content is clearly relevant to USER's work (financial terms, project details, deals USER would manage) AND significance is high or critical AND the sender is requesting action or raising new substance that USER must weigh in on → target=user or target=unclear, NOT target=other. CC does not mean uninvolved.
   - Otherwise, if the action doesn't reference USER → target=other.
 - If USER is sole TO recipient → target=user.
 - If body uses "all" / "everyone" / "team" language → target=all.
@@ -116,7 +117,15 @@ USER: Nate McBride|nmcbride@arete-collective.com|CC
 TO: tlutz@acrisure.com | CC: nmcbride@arete-collective.com;tmills@arete-collective.com
 S:Re: Limestone Springs — Deposit Bond
 Tyler, can you get on a call this week to discuss the deposit structure and funding timeline?
-Output: {"mc":true,"ar":true,"ub":false,"dl":false,"rt":"ans","target":"user","pri":"med","draft":true,"reason":"Deposit bond discussion involves financial terms USER manages. CC position doesn't override substantive relevance."}\
+Output: {"mc":true,"ar":true,"ub":false,"dl":false,"rt":"ans","target":"user","pri":"med","draft":true,"reason":"Deposit bond discussion involves financial terms USER manages. CC position doesn't override substantive relevance."}
+
+Example 7 (USER is CC — sender confirms they will handle action, no response needed):
+Input: Tyler Mills tmills@arete-collective.com|I|internal_colleague|high|8|false
+USER: Nate McBride|nmcbride@arete-collective.com|CC
+TO: Jenny@PaladinRiskManagement.com | CC: nmcbride@arete-collective.com
+S:RE: Loraloma at Thomas Ranch - Hill & Wilkinson (GC)
+Thanks, Jenny. I will get the Prime Addendum signed by both parties.
+Output: {"mc":false,"ar":false,"ub":false,"dl":false,"rt":"none","target":"other","pri":"low","draft":false,"reason":"Internal colleague confirming to external contact they will handle signing. USER is CC for visibility only — no action needed."}\
 """
 
 

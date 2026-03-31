@@ -350,11 +350,19 @@ def pre_process_email(email_data, prior_bodies=None):
 
     Args:
         email_data: dict with 'body' and 'subject' keys.
-        prior_bodies: Unused, kept for call-site compatibility.
+        prior_bodies: list[str] of prior thread email bodies for
+            content isolation. When provided, isolate_new_content()
+            strips quoted/replied text so Haiku sees only the newest
+            message.
 
     Returns:
         str: Truncated email body ready for Haiku.
     """
     body = email_data.get("body") or ""
+    subject = email_data.get("subject")
+
+    if prior_bodies:
+        body = isolate_new_content(body, prior_bodies, subject=subject)
+
     body = truncate_smart(body, max_tokens=2500)
     return body
