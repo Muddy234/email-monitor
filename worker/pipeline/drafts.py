@@ -26,7 +26,7 @@ class DraftGenerator:
 
         self.api_key = config.get("anthropic_api_key")  # None → env var
 
-    def _build_draft_prompt(self, email_data, action_context):
+    def _build_draft_prompt(self, email_data, action_context, revision_notes=None):
         """Build the user prompt for draft generation.
 
         Uses enrichment data (reason, archetype, sender/thread briefings)
@@ -135,6 +135,9 @@ EMAIL BODY:
 {context_block}{sender_context_block}{thread_block}{style_block}{behavioral_block}{preference_block}
 
 Generate the reply body text only (no subject, no headers)."""
+
+        if revision_notes:
+            prompt += f"\n\n{revision_notes}"
 
         logger.debug(f"Draft prompt assembled: {len(prompt)} chars "
                      f"(body={len(body)}, style={len(style_guide)}, "
@@ -305,8 +308,13 @@ Generate the reply body text only (no subject, no headers)."""
             },
         }
 
-    def generate_draft(self, email_data, action_context):
+    def generate_draft(self, email_data, action_context, revision_notes=None):
         """Generate a draft via the Anthropic Messages API.
+
+        Args:
+            email_data: Email data dict.
+            action_context: Dict with classification and enrichment context.
+            revision_notes: Optional QC feedback for retry attempts.
 
         Returns:
             tuple: (cleaned_draft, usage_dict, thinking_text)
@@ -314,7 +322,9 @@ Generate the reply body text only (no subject, no headers)."""
         """
         from .api_client import call_claude, resolve_model
 
-        prompt_text = self._build_draft_prompt(email_data, action_context)
+        prompt_text = self._build_draft_prompt(
+            email_data, action_context, revision_notes=revision_notes,
+        )
 
         try:
             raw_output, usage = call_claude(

@@ -24,6 +24,9 @@ from pipeline.signal_extractor import (
 from pipeline.pre_process import (
     pre_process_email, resolve_sender_tier, compute_thread_meta,
 )
+from pipeline.quality_check import (
+    QCConfig, parse_qc_config, check_draft_quality, build_revision_notes,
+)
 
 logger = logging.getLogger("worker")
 
@@ -803,6 +806,7 @@ def _apply_contact_overrides(signals, contact):
 # Signal extraction pipeline (replaces scorer + classify)
 # ---------------------------------------------------------------------------
 
+# @pipeline phase="d" badge="PHASE D" title="Normal processing" system="Railway worker · each cycle"
 def process_user_batch_signals(db, user_id, profile, emails):
     """Process emails using the signal extraction pipeline.
 
@@ -845,6 +849,9 @@ def process_user_batch_signals(db, user_id, profile, emails):
                         emails_classified=0, emails_drafted=0, drafts_generated=0,
                     )
                     return 0, 0
+
+        # @pipeline step="accumulate-emails" num="24" desc="Processes users where onboarding_completed_at is not null. New emails get signal extraction + draft generation." reads="emails (status=unprocessed)" writes="drafts table"
+        # @pipeline harden="Three-layer draft composition" body="Each draft now uses three profile layers: the <strong>style guide</strong> (how to write), the <strong>behavioral profile</strong> (how to express decisions), and the <strong>preference profile</strong> (what to decide). The preference layer resolves the direction of decisions using Investment Orientation and Positional Stance categories. All three layers are loaded from the profiles table on each draft generation call. Null layers are omitted from the prompt — graceful degradation, not failure."
 
         # ── Stage 1: Filter ──────────────────────────────────────
         filtered = filter_emails(db, emails, user_id, config)
@@ -1230,39 +1237,113 @@ def process_user_batch_signals(db, user_id, profile, emails):
                 logger.warning(f"  Batch draft generation failed: {e}")
                 draft_results = {}
 
+            # Parse QC config once per user from style guide
+            user_name = config.get("draft_user_name", "")
+            style_guide = profile.get("writing_style_guide") or ""
+            qc_config_base = parse_qc_config(
+                user_name=user_name,
+                recipient_name="",
+                style_guide=style_guide,
+            )
+
             for candidate in draft_candidates:
                 db_id = candidate["db_id"]
                 draft_body = draft_results.get(db_id)
+                ed = candidate["email_data"]
+                subject = ed.get("subject", "?")[:60]
 
+                # --- Generate or validate draft ---
                 if not draft_body:
                     logger.info(
                         f"  Batch result missing for {db_id[:8]}, trying fallback..."
                     )
                     cleaned, fallback_usage, thinking = draft_generator.generate_draft(
-                        candidate["email_data"], candidate["action_context"]
+                        ed, candidate["action_context"]
                     )
                     if fallback_usage:
                         db.record_token_usage(user_id, "sonnet", "draft", fallback_usage)
                 else:
-                    # Batch path: extract thinking before validation strips it
                     thinking = DraftGenerator._extract_thinking(draft_body)
-                    cleaned = draft_generator._validate_output(
-                        draft_body, candidate["email_data"]
-                    )
+                    cleaned = draft_generator._validate_output(draft_body, ed)
+
+                # --- QC check + retry ---
+                quality_issues = None
+                quality_retry_count = 0
+
                 if cleaned:
-                    db.insert_draft(db_id, user_id, cleaned)
-                    drafts_generated += 1
-                    logger.info(
-                        f"  Draft generated for: "
-                        f"{candidate['email_data'].get('subject', '?')[:60]}"
+                    # Build per-candidate QC config
+                    recipients = ed.get("recipients") or []
+                    recipient_count = len([
+                        r for r in recipients
+                        if r.get("type") in (1, 2) and r.get("address")
+                    ])
+                    qc_config = QCConfig(
+                        user_name=qc_config_base.user_name,
+                        recipient_name=ed.get("sender_name", ""),
+                        multi_recipient=recipient_count > 2,
+                        greetings_expected=qc_config_base.greetings_expected,
+                        signoff_expected=qc_config_base.signoff_expected,
+                        target_word_range=qc_config_base.target_word_range,
                     )
+
+                    qc = check_draft_quality(cleaned, qc_config)
+                    cleaned = qc.draft
+
+                    if qc.auto_fixed:
+                        logger.info(
+                            f"  QC auto-fixed for {db_id[:8]}: {qc.auto_fixed}"
+                        )
+
+                    if not qc.passed:
+                        logger.info(
+                            f"  QC failed for {db_id[:8]}: {qc.issues}, retrying..."
+                        )
+                        revision_notes = build_revision_notes(qc, user_name)
+                        retry_cleaned, retry_usage, retry_thinking = (
+                            draft_generator.generate_draft(
+                                ed, candidate["action_context"],
+                                revision_notes=revision_notes,
+                            )
+                        )
+                        quality_retry_count = 1
+                        if retry_usage:
+                            db.record_token_usage(
+                                user_id, "sonnet", "draft", retry_usage,
+                            )
+                        if retry_thinking:
+                            thinking = retry_thinking
+
+                        if retry_cleaned:
+                            retry_qc = check_draft_quality(retry_cleaned, qc_config)
+                            cleaned = retry_qc.draft
+                            if not retry_qc.passed:
+                                quality_issues = retry_qc.issues
+                                logger.warning(
+                                    f"  QC retry also failed for {db_id[:8]}: "
+                                    f"{retry_qc.issues}, delivering with issues"
+                                )
+                        else:
+                            # Retry returned nothing — use original
+                            quality_issues = qc.issues
+                            logger.warning(
+                                f"  QC retry returned nothing for {db_id[:8]}, "
+                                f"using original with issues"
+                            )
+
+                if cleaned:
+                    db.insert_draft(
+                        db_id, user_id, cleaned,
+                        quality_issues=quality_issues,
+                        quality_retry_count=quality_retry_count,
+                    )
+                    drafts_generated += 1
+                    logger.info(f"  Draft generated for: {subject}")
                 else:
-                    subject = candidate["email_data"].get("subject", "?")[:60]
                     source = "fallback" if not draft_body else "batch"
                     logger.warning(
                         f"  Draft DROPPED for '{subject}' "
-                        f"(source={source}, draft_body={'truthy' if draft_body else 'None'}, "
-                        f"cleaned=None)"
+                        f"(source={source}, draft_body="
+                        f"{'truthy' if draft_body else 'None'}, cleaned=None)"
                     )
 
                 # Store thinking as summary on response_event

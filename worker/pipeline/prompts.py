@@ -79,7 +79,7 @@ Content rules (what the reply does — governed by behavioral profile and thinki
 Format rules (how the reply is written — governed by style guide):
 - Sound like the user wrote it personally — match their typical sentence length, vocabulary, and level of formality.
 - Adjust tone based on recipient: more formal for external legal/lender contacts, conversational for internal colleagues.
-- Close with the style guide's sign-off greeting followed by {user_name} on the next line. If no style guide, default to "Best regards,". Do not add timeline commitments the user did not authorize.
+- Close with the style guide's sign-off greeting followed by {user_name} on the next line (name only — do not include job title or company). If no style guide, default to "Best regards,". Do not add timeline commitments the user did not authorize.
 
 If a WRITING STYLE GUIDE is provided, follow it closely — it was derived from analyzing the user's actual sent emails and captures their voice, common phrases, and communication patterns.
 
