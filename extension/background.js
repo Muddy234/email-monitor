@@ -1199,7 +1199,8 @@ async function syncEmailsToSupabase() {
     updateHeartbeat(userId).catch(() => {});
 
     // Signal sync completion to worker (gates onboarding)
-    if (hasCompletedFolderSync && profile && !profile.onboarding_completed_at && !profile.initial_sync_complete) {
+    // Allow signal even after onboarding re-runs (onboarding_completed_at may be set)
+    if (hasCompletedFolderSync && profile && !profile.initial_sync_complete) {
       if (DEBUG) console.log("[Clarion] Signaling initial_sync_complete to Supabase");
       setInitialSyncComplete(userId).then(() => {
         if (DEBUG) console.log("[Clarion] initial_sync_complete set successfully");
