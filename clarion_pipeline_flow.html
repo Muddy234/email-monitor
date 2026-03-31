@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Clarion AI — Pipeline flow</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0f1117;
+  --bg-card: #181b24;
+  --bg-card-hover: #1e2230;
+  --bg-raised: #232736;
+  --border: rgba(255,255,255,0.06);
+  --border-hover: rgba(255,255,255,0.12);
+  --text: #e2e4ea;
+  --text-muted: #8b8fa4;
+  --text-dim: #555a6e;
+  --blue: #4d9ef6;
+  --blue-bg: rgba(77,158,246,0.08);
+  --blue-border: rgba(77,158,246,0.2);
+  --coral: #e8693c;
+  --coral-bg: rgba(232,105,60,0.08);
+  --coral-border: rgba(232,105,60,0.2);
+  --purple: #8b7bdf;
+  --purple-bg: rgba(139,123,223,0.08);
+  --purple-border: rgba(139,123,223,0.2);
+  --teal: #34c891;
+  --teal-bg: rgba(52,200,145,0.08);
+  --teal-border: rgba(52,200,145,0.2);
+  --amber: #e8a838;
+  --amber-bg: rgba(232,168,56,0.08);
+  --amber-border: rgba(232,168,56,0.2);
+  --red: #e05252;
+  --red-bg: rgba(224,82,82,0.08);
+  --red-border: rgba(224,82,82,0.2);
+  --green: #5cb85c;
+  --mono: 'JetBrains Mono', monospace;
+  --sans: 'DM Sans', -apple-system, sans-serif;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:var(--sans); line-height:1.6; min-height:100vh; }
+.container { max-width:1080px; margin:0 auto; padding:40px 24px 80px; }
+
+header { margin-bottom:48px; }
+header h1 { font-size:28px; font-weight:700; letter-spacing:-0.5px; margin-bottom:6px; }
+header p { color:var(--text-muted); font-size:14px; }
+
+.legend { display:flex; gap:20px; flex-wrap:wrap; margin-bottom:32px; padding:14px 18px; background:var(--bg-card); border:1px solid var(--border); border-radius:10px; }
+.legend-item { display:flex; align-items:center; gap:7px; font-size:12px; color:var(--text-muted); font-family:var(--mono); }
+.legend-dot { width:10px; height:10px; border-radius:3px; }
+
+.connector { display:flex; justify-content:center; padding:8px 0; }
+.connector-line { width:2px; height:32px; background:linear-gradient(to bottom, var(--border-hover), transparent); position:relative; }
+.connector-line::after { content:''; position:absolute; bottom:-3px; left:-3px; width:8px; height:8px; border-right:2px solid var(--text-dim); border-bottom:2px solid var(--text-dim); transform:rotate(45deg); }
+.connector-label { font-size:11px; font-family:var(--mono); color:var(--text-dim); text-align:center; padding-top:2px; }
+
+.phase { border:1px solid var(--border); border-radius:12px; background:var(--bg-card); overflow:hidden; transition:border-color 0.2s; }
+.phase:hover { border-color:var(--border-hover); }
+.phase-header { padding:18px 22px; cursor:pointer; display:flex; align-items:center; gap:14px; user-select:none; }
+.phase-header:hover { background:var(--bg-card-hover); }
+.phase-badge { font-family:var(--mono); font-size:11px; font-weight:600; padding:3px 10px; border-radius:6px; white-space:nowrap; letter-spacing:0.3px; }
+.phase-title { font-size:16px; font-weight:600; flex:1; }
+.phase-system { font-family:var(--mono); font-size:11px; color:var(--text-dim); padding:3px 8px; border:1px solid var(--border); border-radius:5px; }
+.phase-chevron { color:var(--text-dim); transition:transform 0.25s; font-size:18px; }
+.phase.open .phase-chevron { transform:rotate(90deg); }
+
+.phase-body { display:none; border-top:1px solid var(--border); }
+.phase.open .phase-body { display:block; }
+
+.step-list { padding:16px 22px; }
+.step { padding:14px 16px; border-radius:8px; margin-bottom:8px; border:1px solid transparent; transition:all 0.15s; cursor:pointer; }
+.step:hover { background:var(--bg-raised); border-color:var(--border); }
+.step:last-child { margin-bottom:0; }
+.step-head { display:flex; align-items:baseline; gap:10px; margin-bottom:4px; }
+.step-num { font-family:var(--mono); font-size:11px; color:var(--text-dim); min-width:28px; }
+.step-name { font-weight:500; font-size:14px; }
+.step-desc { font-size:13px; color:var(--text-muted); padding-left:38px; }
+.step-meta { display:flex; gap:8px; padding-left:38px; margin-top:8px; flex-wrap:wrap; }
+.step-tag { font-family:var(--mono); font-size:10px; padding:2px 8px; border-radius:4px; }
+.tag-writes { background:var(--blue-bg); color:var(--blue); border:1px solid var(--blue-border); }
+.tag-reads { background:var(--teal-bg); color:var(--teal); border:1px solid var(--teal-border); }
+.tag-gate { background:var(--coral-bg); color:var(--coral); border:1px solid var(--coral-border); }
+.tag-fatal { background:var(--red-bg); color:var(--red); border:1px solid rgba(224,82,82,0.25); }
+.tag-nonfatal { background:var(--amber-bg); color:var(--amber); border:1px solid var(--amber-border); }
+.tag-new { background:var(--purple-bg); color:var(--purple); border:1px solid var(--purple-border); }
+
+.parallel-block { margin:16px 22px; padding:18px; background:var(--bg-raised); border-radius:10px; border:1px solid var(--border); }
+.parallel-label { font-family:var(--mono); font-size:11px; color:var(--text-dim); margin-bottom:12px; letter-spacing:0.5px; text-transform:uppercase; }
+.parallel-row { display:flex; gap:10px; flex-wrap:wrap; }
+.parallel-box { flex:1; min-width:140px; padding:12px 14px; border-radius:8px; border:1px solid var(--border); background:var(--bg-card); }
+.parallel-box h4 { font-size:13px; font-weight:600; margin-bottom:4px; }
+.parallel-box p { font-size:11px; color:var(--text-muted); line-height:1.5; }
+.parallel-box.dashed { border-style:dashed; opacity:0.7; }
+.parallel-box .skip-note { font-family:var(--mono); font-size:10px; color:var(--amber); margin-top:6px; }
+.parallel-box .new-note { font-family:var(--mono); font-size:10px; color:var(--purple); margin-top:6px; }
+
+.parallel-connector { display:flex; justify-content:center; padding:6px 0; }
+.parallel-connector-line { width:1px; height:20px; background:var(--border-hover); }
+
+.gate-box { margin:0 22px 16px; padding:16px 18px; background:var(--coral-bg); border:1px solid var(--coral-border); border-radius:10px; }
+.gate-box h4 { font-size:13px; font-weight:600; color:var(--coral); margin-bottom:8px; font-family:var(--mono); }
+.gate-box ul { list-style:none; padding:0; }
+.gate-box li { font-size:12px; color:var(--text-muted); padding:3px 0; padding-left:16px; position:relative; }
+.gate-box li::before { content:'\2192'; position:absolute; left:0; color:var(--coral); }
+
+.failure-box { margin:0 22px 16px; padding:14px 18px; border-radius:10px; }
+.failure-box.fatal { background:var(--red-bg); border:1px solid rgba(224,82,82,0.2); }
+.failure-box.nonfatal { background:var(--amber-bg); border:1px solid var(--amber-border); }
+.failure-box h4 { font-size:12px; font-weight:600; font-family:var(--mono); margin-bottom:4px; }
+.failure-box.fatal h4 { color:var(--red); }
+.failure-box.nonfatal h4 { color:var(--amber); }
+.failure-box p { font-size:12px; color:var(--text-muted); }
+
+.section-divider { padding:0 22px 16px; }
+.section-divider span { font-family:var(--mono); font-size:11px; color:var(--text-dim); letter-spacing:0.5px; text-transform:uppercase; display:flex; align-items:center; gap:10px; }
+.section-divider span::after { content:''; flex:1; height:1px; background:var(--border); }
+
+.harden-callout { margin:16px 22px; padding:14px 18px; background:rgba(139,123,223,0.06); border:1px solid var(--purple-border); border-radius:10px; }
+.harden-callout h4 { font-size:12px; font-weight:600; color:var(--purple); font-family:var(--mono); margin-bottom:6px; }
+.harden-callout p { font-size:12px; color:var(--text-muted); line-height:1.6; }
+
+.step-detail { display:none; margin-top:10px; padding:12px 14px; padding-left:38px; background:var(--bg-raised); border-radius:8px; border:1px solid var(--border); }
+.step.open .step-detail { display:block; }
+.step-detail p { font-size:12px; color:var(--text-muted); line-height:1.7; margin-bottom:6px; }
+.step-detail code { font-family:var(--mono); font-size:11px; background:rgba(255,255,255,0.05); padding:1px 5px; border-radius:3px; color:var(--text); }
+
+.gen-timestamp { text-align:center; padding:24px 0 0; font-family:var(--mono); font-size:11px; color:var(--text-dim); }
+
+@media (max-width:700px) {
+  .parallel-row { flex-direction:column; }
+  .parallel-box { min-width:unset; }
+  .legend { gap:12px; }
+  .phase-header { padding:14px 16px; }
+  .step-list { padding:12px 16px; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+<header>
+  <h1>Clarion AI — Pipeline flow</h1>
+  <p>End-to-end data flow from extension sync through onboarding to normal processing. Click any phase or step to expand.</p>
+  <p style="margin-top:4px;font-family:var(--mono);font-size:11px;color:var(--text-dim)">Generated: 2026-03-31 17:20 UTC</p>
+</header>
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot" style="background:var(--blue)"></div>writes</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--teal)"></div>reads</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--coral)"></div>gate</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--red)"></div>fatal failure</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--amber)"></div>non-fatal</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--purple)"></div>new (preference)</div>
+</div>
+<div class="phase" id="phase-a">
+  <div class="phase-header" onclick="togglePhase('phase-a')">
+    <span class="phase-badge" style="background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue-border)">PHASE A</span>
+    <span class="phase-title">Extension sync loop</span>
+    <span class="phase-system">Chrome ext. · 45s cycle</span>
+    <span class="phase-chevron">&rsaquo;</span>
+  </div>
+  <div class="phase-body">
+    <div class="step-list">
+      <div class="step" onclick="toggleStep(this)">
+        <div class="step-head"><span class="step-num">01</span><span class="step-name">token-check</span></div>
+        <div class="step-desc">Validates Outlook token + Supabase session. Bails if either missing or expired.</div>
+        <div class="step-meta"><span class="step-tag tag-gate">gate · both tokens required</span></div>
+        <div class="step-detail"><p>Validates both the Outlook token via <code>isTokenExpired()</code> and the Supabase session via <code>getSupabaseSession()</code>. Bails immediately with an error object if either is missing or expired. Extracts <code>userId</code> from <code>session.user.id</code> for all downstream steps.</p></div>
+      </div>
+      <div class="step" onclick="toggleStep(this)">
+        <div class="step-head"><span class="step-num">02</span><span class="step-name">user-change-detection</span></div>
+        <div class="step-desc">If different user than last sync, wipes lastSyncTime, cachedFolders, connectedOutlookEmail.</div>
+        <div class="step-meta"><span class="step-tag tag-writes">writes · resets in-memory state</span></div>
+        <div class="step-detail"><p>Compares the current <code>userId</code> against <code>lastSyncUserId</code> stored in <code>chrome.storage.local</code>. If they differ (or on first run), resets <code>lastSyncTime</code>, <code>connectedOutlookEmail</code>, <code>cachedFolders</code>, and <code>folderCacheTime</code> to force a full catchup on account switch. Stores the new <code>lastSyncUserId</code> to prevent repeated resets.</p></div>
+      </div>
+      <div class="step" onclick="toggleStep(this)">
+        <div class="step-head"><span class="step-num">03</span><span class="step-name">profile-fetch</span></div>
+        <div class="step-desc">Gets connected_outlook_email, onboarding_completed_at, initial_sync_complete from Supabase.</div>
+        <div class="step-meta"><span class="step-tag tag-reads">reads · profiles table</span></div>
+        <div class="step-detail"><p>Fetches the user's profile from Supabase via <code>getProfile(userId)</code> to retrieve <code>connected_outlook_email</code>, <code>onboarding_completed_at</code>, and <code>initial_sync_complete</code> flags. Extracts <code>outlookEmail</code> from the token via <code>getOutlookEmail(token.token)</code>. Profile data gates subsequent account-lock and sync-mode logic.</p></div>
+      </div>
+      <div class="step" onclick="toggleStep(this)">
+        <div class="step-head"><span class="step-num">04</span><span class="step-name">seed-folder-sync</span></div>
+        <div class="step-desc">If initial_sync_complete=true in DB, sets in-memory flag. Survives MV3 service worker kills.</div>
+        <div class="step-meta"><span class="step-tag tag-reads">reads · profile.initial_sync_complete</span></div>
+        <div class="step-detail"><p>Sets the in-memory flag <code>hasCompletedFolderSync = true</code> if <code>profile.initial_sync_complete === true</code>, restoring folder discovery state that would otherwise be lost when the MV3 service worker terminates. This allows subsequent syncs to skip DOM polling and use the cached folder list.</p></div>
+      </div>
+      <div class="step" onclick="toggleStep(this)">
+        <div class="step-head"><span class="step-num">05</span><span class="step-name">outlook-account-lock</span></div>
+        <div class="step-desc">First sync locks connected_outlook_email. Subsequent syncs verify token matches the lock.</div>
+        <div class="step-meta"><span class="step-tag tag-writes">writes · profiles.connected_outlook_email</span><span class="step-tag tag-gate">gate · mismatch = abort</span></div>
+        <div class="step-detail"><p>On first sync (when <code>profile.connected_outlook_email</code> is null), locks the Outlook account by calling <code>setConnectedOutlookEmail(userId, outlookEmail)</code>. On subsequent syncs, verifies the token account matches the lock and aborts with <code>{error: "OUTLOOK_MISMATCH"}</code> if it doesn't. Clears stale mismatch state on match or if no outlookEmail is found.</p></div>
+      </div>
+      <div class="step" onclick="toggleStep(this)">
+        <div class="step-head"><span class="step-num">06</span><span class="step-name">force-catchup-mode</span></div>
+        <div class="step-desc">Resets lastSyncTime if onboarding incomplete and sync age &lt; 90s. Forces catchup fetch sizes on next cycle.</div>
+        <div class="step-meta"><span class="step-tag tag-gate">gate · onboarding incomplete + sync age &lt; 2× cycle</span></div>
+        <div class="step-detail"><p>During early onboarding (when <code>onboarding_completed_at</code> is null, <code>lastSyncTime</code> exists, and <code>hasCompletedFolderSync</code> is false), resets <code>lastSyncTime = null</code> if sync age is under <code>2 × EMAIL_SYNC_PERIOD_MIN</code> (90 seconds). This forces the next fetch to use the larger <code>MAX_CATCHUP_EMAILS</code> limit rather than the incremental 50-email window.</p></div>
+      </div>
+      <div class="step" onclick="toggleStep(this)">
+        <div class="step-head"><span class="step-num">07</span><span class="step-name">set-email-cap</span></div>
+        <div class="step-desc">isInitialSync → 200/folder. Otherwise: 50/folder (or 1000 catchup).</div>
+        <div class="step-meta"><span class="step-tag tag-gate">gate · cap varies by state</span></div>
+        <div class="step-detail"><p>Determines the <code>maxEmails</code> per-folder cap: <strong>200</strong> if <code>isInitialSync</code> (onboarding incomplete AND folders not yet discovered), <strong>50</strong> if <code>lastSyncTime</code> exists (incremental mode), or <code>MAX_CATCHUP_EMAILS</code> for a full catchup. Logs the sync mode state for debugging.</p></div>
+      </div>
+      <div class="step" onclick="toggleStep(this)">
+        <div class="step-head"><span class="step-num">08</span><span class="step-name">folder-discovery</span></div>
+        <div class="step-desc">Reads Outlook sidebar DOM for subfolder IDs. On success, sets hasCompletedFolderSync = true.</div>
+        <div class="step-meta"><span class="step-tag tag-reads">reads · Outlook DOM</span><span class="step-tag tag-nonfatal">failure → inbox only</span></div>
+        <div class="step-detail"><p>Calls <code>discoverMailFolders()</code> to read the Outlook sidebar DOM via <code>chrome.scripting</code>, returning subfolder IDs. Prepends a hardcoded Inbox entry (distinguished folder), filters duplicate "Inbox" results, and sets <code>hasCompletedFolderSync = true</code> on success. Fails silently and continues with inbox-only if the DOM is unreachable.</p></div>
+      </div>
+      <div class="step" onclick="toggleStep(this)">
+        <div class="step-head"><span class="step-num">09</span><span class="step-name">per-folder-fetch-push</span></div>
+        <div class="step-desc">For each folder: handleGetEmails() → enrichEmailsBatched() → pushEmails() to Supabase.</div>
+        <div class="step-meta"><span class="step-tag tag-writes">writes · emails table</span><span class="step-tag tag-nonfatal">per-folder errors non-blocking</span></div>
+        <div class="step-detail"><p>Loops through each folder sequentially: <code>handleGetEmails()</code> → <code>enrichEmailsBatched()</code> → maps rows with user_id, email_ref, subject, sender, body (capped at 50 KB), recipients, etc. → <code>pushEmails()</code> to Supabase. Status defaults to "unprocessed" via DB trigger. Per-folder failures are non-blocking; the loop continues to the next folder.</p></div>
+      </div>
+      <div class="step" onclick="toggleStep(this)">
+        <div class="step-head"><span class="step-num">10</span><span class="step-name">sent-items-sync</span></div>
+        <div class="step-desc">Separate fetch for Sent Items. Status set to completed (not queued for drafts).</div>
+        <div class="step-meta"><span class="step-tag tag-writes">writes · emails table (status=completed)</span></div>
+        <div class="step-detail"><p>Separate non-blocking fetch via <code>handleGetSentItems()</code> with the same <code>maxSentEmails</code> cap logic (50 if incremental, else <code>MAX_CATCHUP_EMAILS</code>). Enriches via <code>enrichEmailsBatched()</code>, transforms rows with <code>status: "completed"</code> (intentionally not queued for draft generation), and pushes to Supabase. Sent item failure doesn't block inbox sync completion.</p></div>
+      </div>
+      <div class="step" onclick="toggleStep(this)">
+        <div class="step-head"><span class="step-num">11</span><span class="step-name">persist-lastSyncTime</span></div>
+        <div class="step-desc">Saves sync timestamp after all folder fetches complete. Persisted to chrome.storage.local.</div>
+        <div class="step-meta"><span class="step-tag tag-writes">writes · lastSyncTime + chrome.storage.local</span></div>
+        <div class="step-detail"><p>Sets <code>lastSyncTime = new Date().toISOString()</code> and calls <code>persistSyncTime()</code> to write to <code>chrome.storage.local</code> after all folder and sent fetches complete. Also stores <code>lastSyncUserId</code> to track account identity. This timestamp gates incremental vs. catchup mode in future cycles (steps 06 and 07).</p></div>
+      </div>
+      <div class="step" onclick="toggleStep(this)">
+        <div class="step-head"><span class="step-num">12</span><span class="step-name">alias-detection</span></div>
+        <div class="step-desc">Detects email aliases from sent items + auth email. Updates profiles.user_email_aliases in Supabase.</div>
+        <div class="step-meta"><span class="step-tag tag-writes">writes · profiles.user_email_aliases</span></div>
+        <div class="step-detail"><p>Calls <code>detectAndUpdateAliases(userId, authEmail, sentEnriched)</code> using the auth email from <code>session.user.email</code> and sender addresses extracted from sent items. Updates <code>profiles.user_email_aliases</code> in Supabase so downstream classification can correctly identify the user's own messages.</p></div>
+      </div>
+      <div class="step" onclick="toggleStep(this)">
+        <div class="step-head"><span class="step-num">13</span><span class="step-name">heartbeat</span></div>
+        <div class="step-desc">Updates last_heartbeat_at so the worker knows the extension is active.</div>
+        <div class="step-meta"><span class="step-tag tag-writes">writes · profiles.last_heartbeat_at</span></div>
+        <div class="step-detail"><p>Calls <code>updateHeartbeat(userId)</code> (errors caught silently via <code>.catch(() => {})</code>) to update <code>profiles.last_heartbeat_at</code>. The Python worker uses this timestamp to determine whether the extension is active — if stale for more than 15 minutes, the worker falls back to business-hours heuristics.</p></div>
+      </div>
+      <div class="step" onclick="toggleStep(this)">
+        <div class="step-head"><span class="step-num">14</span><span class="step-name">signal-initial-sync</span></div>
+        <div class="step-desc">If hasCompletedFolderSync=true AND initial_sync_complete=false → PATCHes to true.</div>
+        <div class="step-meta"><span class="step-tag tag-writes">writes · profiles.initial_sync_complete</span><span class="step-tag tag-nonfatal">PATCH failure → retries next cycle</span></div>
+        <div class="step-detail"><p>If <code>hasCompletedFolderSync === true</code> AND <code>profile.initial_sync_complete === false</code>, calls <code>setInitialSyncComplete(userId)</code> to PATCH the flag to true in Supabase, gating the Phase B onboarding pipeline. Runs after ALL folder syncs complete to prevent the "flag set but emails not landed" race. Per-folder failures in step 09 are non-blocking, so partial folder coverage is possible — the <code>email_count >= 500</code> gate in Phase B mitigates this.</p></div>
+      </div>
+    </div>
+    <div class="harden-callout">
+      <h4>Hardening note</h4>
+      <p>Step 14 runs after ALL folder syncs complete, preventing the 'flag set but emails not landed' race. But per-folder failures in step 09 are non-blocking — a user could have initial_sync_complete=true with only partial folder coverage. The email_count >= 500 gate in Phase B mitigates this.</p>
+    </div>
+  </div>
+</div>
+
+<div class="connector"><div><div class="connector-line"></div><div class="connector-label">emails + profiles + sync flag → Supabase</div></div></div>
+
+<div class="phase" id="phase-b">
+  <div class="phase-header" onclick="togglePhase('phase-b')">
+    <span class="phase-badge" style="background:var(--coral-bg);color:var(--coral);border:1px solid var(--coral-border)">PHASE B</span>
+    <span class="phase-title">Worker picks up onboarding</span>
+    <span class="phase-system">Railway worker · each cycle</span>
+    <span class="phase-chevron">&rsaquo;</span>
+  </div>
+  <div class="phase-body">
+    <div class="gate-box">
+      <h4>Onboarding gate — all four must pass</h4>
+      <ul>
+        <li><code>onboarding_completed_at IS NULL — not already onboarded</code></li>
+        <li><code>onboarding_status is null, pending, or failed — not currently running</code></li>
+        <li><code>initial_sync_complete = true — extension confirmed folder sync</code></li>
+        <li><code>email_count &gt;= 500 — enough data for meaningful profiles</code></li>
+      </ul>
+    </div>
+    <div class="step-list">
+      <div class="step" onclick="toggleStep(this)">
+        <div class="step-head"><span class="step-num">15</span><span class="step-name">get-users-needing-onboarding</span></div>
+        <div class="step-desc">Queries profiles table with all four gate conditions. Returns list of eligible user IDs.</div>
+        <div class="step-meta"><span class="step-tag tag-reads">reads · profiles table</span></div>
+        <div class="step-detail"><p>Queries the <code>profiles</code> table with four gate conditions: <code>onboarding_completed_at IS NULL</code>, <code>onboarding_status</code> in <code>{null, pending, failed}</code>, <code>initial_sync_complete = true</code>, and <code>email_count >= 500</code>. Returns a list of eligible user IDs that haven't been onboarded yet, filtering out users still syncing or with insufficient email volume for meaningful profiling.</p></div>
+      </div>
+      <div class="step" onclick="toggleStep(this)">
+        <div class="step-head"><span class="step-num">16</span><span class="step-name">run-onboarding</span></div>
+        <div class="step-desc">Calls into runner.py to execute the three-stage pipeline.</div>
+        <div class="step-meta"><span class="step-tag tag-writes">writes · onboarding_status = running</span></div>
+        <div class="step-detail"><p>Invokes <code>run_onboarding(db, uid, profile)</code> from <code>runner.py</code>, which executes the full three-stage onboarding pipeline. Sets <code>onboarding_status</code> to "running" on entry. <strong>Edge case:</strong> if the function crashes before completion, status remains "running" and blocks all future attempts — the stuck-onboarding recovery in <code>_recover_stuck_onboarding()</code> resets these to "pending" on worker restart.</p></div>
+      </div>
+    </div>
+    <div class="harden-callout">
+      <h4>Hardening note</h4>
+      <p>If step 12 crashes before completion, onboarding_status stays 'running' — the gate condition (status in {null, pending, failed}) blocks all future attempts. Consider a timeout or heartbeat mechanism that resets 'running' to 'failed' after N minutes of inactivity.</p>
+    </div>
+  </div>
+</div>
+
+<div class="connector"><div><div class="connector-line"></div><div class="connector-label">run_onboarding()</div></div></div>
+
+<div class="phase" id="phase-c">
+  <div class="phase-header" onclick="togglePhase('phase-c')">
+    <span class="phase-badge" style="background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple-border)">PHASE C</span>
+    <span class="phase-title">Onboarding pipeline</span>
+    <span class="phase-system">Railway worker · runner.py</span>
+    <span class="phase-chevron">&rsaquo;</span>
+  </div>
+  <div class="phase-body">
+    <div class="section-divider"><span>Stage 1 — Ingest (pure Python)</span></div>
+    <div class="step-list">
+      <div class="step" onclick="toggleStep(this)">
+        <div class="step-head"><span class="step-num">17</span><span class="step-name">collect-emails</span></div>
+        <div class="step-desc">Fetches 1500 emails over 180 days, filters spam/noise, caps at 500. Requires &gt;= 10 received.</div>
+        <div class="step-meta"><span class="step-tag tag-reads">reads · emails table</span><span class="step-tag tag-fatal">&lt; 10 received → fail immediately</span></div>
+        <div class="step-detail"><p>Calls <code>collect_onboarding_emails()</code> which fetches up to 1500 emails over 180 days, filters spam/noise using blacklist senders (<code>noreply@</code>, <code>mailer-daemon@</code>, etc.) and subject patterns (<code>accepted:</code>, <code>declined:</code>, etc.), removes calendar invites (iCalendar content) and empty bodies (&lt;10 chars), then caps at 500. <strong>Fatal:</strong> fewer than 10 received emails aborts immediately with status "failed".</p></div>
+      </div>
+      <div class="step" onclick="toggleStep(this)">
+        <div class="step-head"><span class="step-num">18</span><span class="step-name">style-gate</span></div>
+        <div class="step-desc">If &lt; 30 sent emails, sets skip_guides = True. Onboarding continues without style/behavioral guides.</div>
+        <div class="step-meta"><span class="step-tag tag-gate">gate · 30 sent minimum for guides</span></div>
+        <div class="step-detail"><p>If fewer than 30 sent emails exist, sets <code>skip_guides = True</code>. Onboarding continues without style or behavioral guides. This cascades downstream: style guide synthesis requires ≥15 features (<code>MIN_STYLE_FEATURES</code>), and behavioral synthesis requires ≥10 features (<code>MIN_BEHAVIORAL_FEATURES</code>). All guide dependencies fail gracefully, enabling partial onboarding (<code>complete_partial</code> status).</p></div>
+      </div>
+      <div class="step" onclick="toggleStep(this)">
+        <div class="step-head"><span class="step-num">19</span><span class="step-name">stats-extraction</span></div>
+        <div class="step-desc">Extracts contacts, response events, threads, domains, user profile baseline.</div>
+        <div class="step-meta"><span class="step-tag tag-reads">reads · collected emails</span></div>
+        <div class="step-detail"><p>Calls <code>extract_all()</code> which runs pure-Python analysis on 180 days of collected emails: extracts <code>response_events</code> (reply counts, timing), <code>threads</code> (message grouping), <code>domains</code>, and per-contact frequencies (frequency, reply rates, <code>avg_response_time_hours</code>, <code>response_rate_30d/90d</code>, <code>smoothed_rate</code>). Builds the baseline <code>user_topic_profile</code> (aggregate statistics, no AI). Returns a structured extraction dict.</p></div>
+      </div>
+      <div class="step" onclick="toggleStep(this)">
+        <div class="step-head"><span class="step-num">20</span><span class="step-name">persist-stage1</span></div>
+        <div class="step-desc">Writes response_events, threads, domains, contacts, topic profile to DB.</div>
+        <div class="step-meta"><span class="step-tag tag-writes">writes · multiple tables</span><span class="step-tag tag-fatal">any write failure → status failed</span></div>
+        <div class="step-detail"><p>Writes Stage 1 extraction results to DB: <code>upsert_response_events()</code>, <code>upsert_threads()</code>, <code>upsert_domains()</code>, <code>upsert_contacts()</code> (stats-only, no AI enrichment yet), and the baseline <code>topic_profile</code>. <strong>Fatal:</strong> any write failure sets status "failed" and aborts. If all succeed, core user data persists before AI phases begin (graceful degradation).</p></div>
+      </div>
+    </div>
+    <div class="section-divider"><span>Stage 2 — AI enrichment (Haiku + Sonnet)</span></div>
+    <div class="parallel-block">
+      <div class="parallel-label">Haiku extraction — 3 parallel passes</div>
+      <div class="parallel-row">
+        <div class="parallel-box" style="border-color:var(--blue-border)">
+          <h4 style="color:var(--blue)">Email features</h4>
+          <p>Received emails. Signal extraction: consequence, action request, bottleneck, deadline, response type.</p>
+          <div style="margin-top:6px"><span class="step-tag tag-fatal">failure → abort onboarding</span></div>
+        </div>
+        <div class="parallel-box" style="border-color:var(--blue-border)">
+          <h4 style="color:var(--blue)">Style features</h4>
+          <p>Sent emails. Greetings, sign-offs, formality, sentence structure, verbal habits, punctuation.</p>
+          <div style="margin-top:6px"><span class="step-tag tag-nonfatal">failure → skip style guide</span></div>
+        </div>
+        <div class="parallel-box" style="border-color:var(--blue-border)">
+          <h4 style="color:var(--blue)">Behavioral features</h4>
+          <p>Sent + received pairs. Decision type, commitment pattern, scope behavior. + decision quotes for preference extraction.</p>
+          <div style="margin-top:6px"><span class="step-tag tag-nonfatal">failure → skip behavioral + preference</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="harden-callout">
+      <h4>Hardening note — Haiku fan-in</h4>
+      <p>Behavioral extraction failure now kills both the behavioral profile AND the preference profile, because decision quotes are extracted alongside behavioral features. If behavioral Haiku returns a malformed response, decision_moments defaults to [] and preference synthesis receives nothing.</p>
+    </div>
+    <div class="step-list">
+      <div class="step" onclick="toggleStep(this)">
+        <div class="step-head"><span class="step-num">22</span><span class="step-name">contact-synthesis</span></div>
+        <div class="step-desc">Sonnet synthesizes up to 50 contact profiles. Falls back to stats-only if Sonnet fails.</div>
+        <div class="step-meta"><span class="step-tag tag-writes">writes · contact_profiles</span><span class="step-tag tag-reads">reads · Stage 1 contacts</span><span class="step-tag tag-nonfatal">failure → stats-only fallback</span></div>
+        <div class="step-detail"><p>Calls <code>synthesize_contacts()</code> which aggregates per-contact stats (frequency, reply_rate, avg_response_time) with Haiku extractions (email type, keywords), then submits to Sonnet to infer up to 50 contact profiles with org, role, <code>expertise_areas</code>, <code>contact_type</code>, <code>relationship_significance</code>, and <code>relationship_summary</code>. <strong>Non-fatal fallback:</strong> if Sonnet fails, uses <code>_fallback_contact_profiles()</code> (stats-only, no enrichment).</p></div>
+      </div>
+    </div>
+    <div class="parallel-block">
+      <div class="parallel-label">Sonnet synthesis — 4 parallel passes</div>
+      <div class="parallel-row">
+        <div class="parallel-box" style="border-color:var(--purple-border)">
+          <h4 style="color:var(--purple)">Topics</h4>
+          <p>Keyword frequency analysis → topic taxonomy. Always runs.</p>
+        </div>
+        <div class="parallel-box dashed" style="border-color:var(--amber-border)">
+          <h4 style="color:var(--amber)">Style guide</h4>
+          <p>Style features → writing style guide (tone, formality, habits).</p>
+          <div class="skip-note">Skipped if skip_guides</div>
+        </div>
+        <div class="parallel-box dashed" style="border-color:var(--amber-border)">
+          <h4 style="color:var(--amber)">Behavioral</h4>
+          <p>Behavioral features → behavioral profile (decision, commitment, scope).</p>
+          <div class="skip-note">Skipped if skip_guides</div>
+        </div>
+        <div class="parallel-box" style="border-color:var(--purple-border)">
+          <h4 style="color:var(--purple)">Preference</h4>
+          <p>Decision quotes → investment orientation + positional stance categories.</p>
+          <div class="new-note">NEW · always runs · own threshold (8 decisions/trait)</div>
+        </div>
+      </div>
+    </div>
+    <div class="step-list">
+      <div class="step" onclick="toggleStep(this)">
+        <div class="step-head"><span class="step-num">24</span><span class="step-name">persist-stage2</span></div>
+        <div class="step-desc">Writes topic profile, style guide, behavioral profile, preference profile to DB.</div>
+        <div class="step-meta"><span class="step-tag tag-writes">writes · profiles table (guides + preference)</span><span class="step-tag tag-new">writes · preference_profile (JSONB)</span></div>
+        <div class="step-detail"><p>Writes all AI enrichments to DB: <code>upsert_topic_profile()</code>, <code>update_writing_style()</code>, <code>update_behavioral_profile()</code>, <code>update_preference_profile()</code> (JSONB column). Tracks <code>missing_components</code> (style_guide, behavioral_profile) for degraded completion status. Preference profile absence does <strong>not</strong> degrade status — it's an optional additive layer.</p></div>
+      </div>
+    </div>
+    <div class="section-divider"><span>Stage 3 — Completion</span></div>
+    <div class="step-list">
+      <div class="step" onclick="toggleStep(this)">
+        <div class="step-head"><span class="step-num">25</span><span class="step-name">train-classifier</span></div>
+        <div class="step-desc">Trains per-user importance model from email features.</div>
+        <div class="step-meta"><span class="step-tag tag-nonfatal">failure → non-fatal</span></div>
+        <div class="step-detail"><p>Calls <code>train_user_model(db, user_id)</code> which fetches <code>response_events</code> (requires ≥30 events, uses defaults if insufficient), computes <code>global_rate</code> (fraction of emails responded to), derives lift factors from boolean features (<code>user_position</code>, <code>subject_type</code>, <code>msg_type</code>, <code>recipient_count_bins</code>, <code>thread_depth_bins</code>), detects recurring patterns (cadence, same-sender sequences), fits isotonic regression, and computes triage thresholds (<code>hard_gate</code> at 0.01, <code>soft_gate</code> at 0.03). Stores <code>scoring_parameters</code> JSON to profiles table. Non-fatal on failure.</p></div>
+      </div>
+      <div class="step" onclick="toggleStep(this)">
+        <div class="step-head"><span class="step-num">26</span><span class="step-name">mark-existing-emails</span></div>
+        <div class="step-desc">Sets all user&#x27;s emails to status onboarding so they aren&#x27;t re-processed.</div>
+        <div class="step-meta"><span class="step-tag tag-writes">writes · emails.status = onboarding</span></div>
+        <div class="step-detail"><p>Bulk updates all emails that were part of the onboarding sample to status "onboarding". This prevents them from being picked up by <code>accumulate_emails()</code> in Phase D. Only emails arriving <strong>after</strong> this step will be processed for drafts.</p></div>
+      </div>
+      <div class="step" onclick="toggleStep(this)">
+        <div class="step-head"><span class="step-num">27</span><span class="step-name">mark-complete</span></div>
+        <div class="step-desc">Sets onboarding_status = complete (or complete_partial) and writes onboarding_completed_at.</div>
+        <div class="step-meta"><span class="step-tag tag-writes">writes · profiles.onboarding_completed_at</span></div>
+        <div class="step-detail"><p>Sets <code>onboarding_status</code> to "complete" (or "complete_partial" if style_guide or behavioral_profile is missing) and writes <code>onboarding_completed_at</code> timestamp. <code>complete_partial</code> is set when style or behavioral guides are missing (<code>skip_guides</code> was true, or synthesis failed). A missing preference profile does NOT trigger <code>complete_partial</code> — the preference layer is additive. Setting <code>onboarding_completed_at</code> is the gate that unlocks Phase D normal processing.</p></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="connector"><div><div class="connector-line"></div><div class="connector-label">onboarding_completed_at set → unlocks normal processing</div></div></div>
+
+<div class="phase" id="phase-d">
+  <div class="phase-header" onclick="togglePhase('phase-d')">
+    <span class="phase-badge" style="background:var(--teal-bg);color:var(--teal);border:1px solid var(--teal-border)">PHASE D</span>
+    <span class="phase-title">Normal processing</span>
+    <span class="phase-system">Railway worker · each cycle</span>
+    <span class="phase-chevron">&rsaquo;</span>
+  </div>
+  <div class="phase-body">
+    <div class="step-list">
+      <div class="step" onclick="toggleStep(this)">
+        <div class="step-head"><span class="step-num">28</span><span class="step-name">accumulate-emails</span></div>
+        <div class="step-desc">Processes users where onboarding_completed_at is not null. New emails get signal extraction + draft generation.</div>
+        <div class="step-meta"><span class="step-tag tag-writes">writes · drafts table</span><span class="step-tag tag-reads">reads · emails (status=unprocessed)</span></div>
+        <div class="step-detail"><p>Only runs for onboarded users. Picks up emails that arrived after step 26 (status="unprocessed"). For each email: runs signal extraction (5 Haiku signals via Anthropic Batches API), applies the chain-of-thought draft generation with the three-layer profile (style + behavioral + preference), and writes the draft. The preference profile is loaded alongside the other two guides and injected into the draft prompt. If <code>preference_profile</code> is null, the preference section is simply omitted. QC check validates greeting/sign-off presence and word count; retries once with revision notes on failure.</p></div>
+      </div>
+    </div>
+    <div class="harden-callout">
+      <h4>Three-layer draft composition</h4>
+      <p>Each draft now uses three profile layers: the <strong>style guide</strong> (how to write), the <strong>behavioral profile</strong> (how to express decisions), and the <strong>preference profile</strong> (what to decide). The preference layer resolves the direction of decisions using Investment Orientation and Positional Stance categories. All three layers are loaded from the profiles table on each draft generation call. Null layers are omitted from the prompt — graceful degradation, not failure.</p>
+    </div>
+  </div>
+</div>
+</div>
+<script>
+function togglePhase(id) {
+  document.getElementById(id).classList.toggle('open');
+}
+function toggleStep(el) {
+  el.classList.toggle('open');
+  event.stopPropagation();
+}
+</script>
+</body>
+</html>

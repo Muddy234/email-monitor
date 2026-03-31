@@ -1,0 +1,2 @@
+Run from root folder of email monitor
+python -m docs.pipeline_extractor.extract

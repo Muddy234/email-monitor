@@ -242,18 +242,25 @@ def main():
     except Exception as e:
         logger.error(f"Stuck onboarding recovery error: {e}")
 
+    # @pipeline phase="b" badge="PHASE B" title="Worker picks up onboarding" system="Railway worker · each cycle"
+    # @pipeline connector="connector-b" label="run_onboarding()"
+    # @pipeline gate="Onboarding gate — all four must pass" standalone="true" condition-1="onboarding_completed_at IS NULL — not already onboarded" condition-2="onboarding_status is null, pending, or failed — not currently running" condition-3="initial_sync_complete = true — extension confirmed folder sync" condition-4="email_count >= 500 — enough data for meaningful profiles"
     while not _shutdown:
         # -- Onboarding check ------------------------------------------
         try:
+            # @pipeline step="get-users-needing-onboarding" num="15" desc="Queries profiles table with all four gate conditions. Returns list of eligible user IDs." reads="profiles table"
             pending = db.get_users_needing_onboarding()
             for uid in pending:
                 if _shutdown:
                     break
                 profile = db.fetch_user_config(uid)
                 logger.info(f"Running onboarding for user {uid[:8]}...")
+                # @pipeline step="run-onboarding" num="16" desc="Calls into runner.py to execute the three-stage pipeline." writes="onboarding_status = running"
                 run_onboarding(db, uid, profile)
         except Exception as e:
             logger.error(f"Onboarding check error: {e}")
+
+        # @pipeline harden="Hardening note" body="If step 12 crashes before completion, onboarding_status stays 'running' — the gate condition (status in {null, pending, failed}) blocks all future attempts. Consider a timeout or heartbeat mechanism that resets 'running' to 'failed' after N minutes of inactivity."
 
         # -- Model re-training check -----------------------------------
         try:

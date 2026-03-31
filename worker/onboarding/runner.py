@@ -50,6 +50,8 @@ from onboarding.synthesis import (
 logger = logging.getLogger("worker.onboarding")
 
 
+# @pipeline phase="c" badge="PHASE C" title="Onboarding pipeline" system="Railway worker · runner.py"
+# @pipeline connector="connector-c" label="onboarding_completed_at set → unlocks normal processing"
 def run_onboarding(db, user_id, profile):
     """Execute the full onboarding pipeline for a user.
 
@@ -74,6 +76,9 @@ def run_onboarding(db, user_id, profile):
         # STAGE 1: Ingest & Persist  (pure Python, no AI)
         # ================================================================
 
+        # @pipeline divider="Stage 1 — Ingest (pure Python)"
+
+        # @pipeline step="collect-emails" num="17" desc="Fetches 1500 emails over 180 days, filters spam/noise, caps at 500. Requires >= 10 received." reads="emails table" fatal="< 10 received → fail immediately"
         # ── Phase 1: Collect ─────────────────────────────────────
         db.update_onboarding_status(user_id, "collecting")
         email_data = collect_onboarding_emails(db, user_id, aliases, days=180, max_emails=1500)
@@ -85,6 +90,7 @@ def run_onboarding(db, user_id, profile):
             db.update_onboarding_status(user_id, "failed")
             return False
 
+        # @pipeline step="style-gate" num="18" desc="If < 30 sent emails, sets skip_guides = True. Onboarding continues without style/behavioral guides." gate="30 sent minimum for guides"
         # Guide quality cascade Layer 1: raw sent email minimum (see plan §cascade)
         MIN_SENT_FOR_GUIDES = 30
         if len(sent) < MIN_SENT_FOR_GUIDES:
@@ -96,6 +102,7 @@ def run_onboarding(db, user_id, profile):
         else:
             skip_guides = False
 
+        # @pipeline step="stats-extraction" num="19" desc="Extracts contacts, response events, threads, domains, user profile baseline." reads="collected emails"
         # ── Phase 2: Full statistical extraction ──────────────────
         db.update_onboarding_status(user_id, "statistics")
         all_emails = received + sent
@@ -117,6 +124,7 @@ def run_onboarding(db, user_id, profile):
         logger.info(f"Phase 2 complete: {len(extraction['response_events'])} events, "
                     f"{len(extraction['contacts'])} contacts")
 
+        # @pipeline step="persist-stage1" num="20" desc="Writes response_events, threads, domains, contacts, topic profile to DB." writes="multiple tables" fatal="any write failure → status failed"
         # ── Persist Stage 1 data to DB ────────────────────────────
         db.update_onboarding_status(user_id, "persisting")
         stage1_failures = []
@@ -178,6 +186,15 @@ def run_onboarding(db, user_id, profile):
         # ================================================================
         # STAGE 2: AI Enrichment  (Haiku + Sonnet)
         # ================================================================
+
+        # @pipeline divider="Stage 2 — AI enrichment (Haiku + Sonnet)"
+
+        # @pipeline parallel="haiku-extraction" label="Haiku extraction — 3 parallel passes"
+        # @pipeline parallel-box="haiku-email" group="haiku-extraction" title="Email features" desc="Received emails. Signal extraction: consequence, action request, bottleneck, deadline, response type." color="blue" fatal="failure → abort onboarding"
+        # @pipeline parallel-box="haiku-style" group="haiku-extraction" title="Style features" desc="Sent emails. Greetings, sign-offs, formality, sentence structure, verbal habits, punctuation." color="blue" nonfatal="failure → skip style guide"
+        # @pipeline parallel-box="haiku-behavioral" group="haiku-extraction" title="Behavioral features" desc="Sent + received pairs. Decision type, commitment pattern, scope behavior. + decision quotes for preference extraction." color="blue" nonfatal="failure → skip behavioral + preference"
+
+        # @pipeline harden="Hardening note — Haiku fan-in" body="Behavioral extraction failure now kills both the behavioral profile AND the preference profile, because decision quotes are extracted alongside behavioral features. If behavioral Haiku returns a malformed response, decision_moments defaults to [] and preference synthesis receives nothing."
 
         # ── Phase 3 + 4C-1 + 4C-1b: Parallel Haiku extraction ────
         db.update_onboarding_status(user_id, "extracting")
@@ -251,6 +268,7 @@ def run_onboarding(db, user_id, profile):
             if behavioral_result else []
         )
 
+        # @pipeline step="contact-synthesis" num="22" desc="Sonnet synthesizes up to 50 contact profiles. Falls back to stats-only if Sonnet fails." reads="Stage 1 contacts" writes="contact_profiles" nonfatal="failure → stats-only fallback"
         # ── Phase 4A: Contact profile synthesis ──────────────────
         db.update_onboarding_status(user_id, "synthesizing")
 
@@ -283,6 +301,12 @@ def run_onboarding(db, user_id, profile):
         except Exception as e:
             logger.error(f"Stage 2: upsert enriched contacts failed: {e}")
             # Non-fatal — stats-only contacts from Stage 1 are already in DB
+
+        # @pipeline parallel="sonnet-synthesis" label="Sonnet synthesis — 4 parallel passes"
+        # @pipeline parallel-box="sonnet-topics" group="sonnet-synthesis" title="Topics" desc="Keyword frequency analysis → topic taxonomy. Always runs." color="purple"
+        # @pipeline parallel-box="sonnet-style" group="sonnet-synthesis" title="Style guide" desc="Style features → writing style guide (tone, formality, habits)." color="amber" dashed="true" skip-note="Skipped if skip_guides"
+        # @pipeline parallel-box="sonnet-behavioral" group="sonnet-synthesis" title="Behavioral" desc="Behavioral features → behavioral profile (decision, commitment, scope)." color="amber" dashed="true" skip-note="Skipped if skip_guides"
+        # @pipeline parallel-box="sonnet-preference" group="sonnet-synthesis" title="Preference" desc="Decision quotes → investment orientation + positional stance categories." color="purple" new-note="NEW · always runs · own threshold (8 decisions/trait)"
 
         # ── Phase 4B + 4C-2 + 4C-3: Parallel Sonnet synthesis ────
         db.update_onboarding_status(user_id, "style_guide")
@@ -371,6 +395,7 @@ def run_onboarding(db, user_id, profile):
         if not behavioral_profile:
             missing_components.append("behavioral_profile")
 
+        # @pipeline step="persist-stage2" num="24" desc="Writes topic profile, style guide, behavioral profile, preference profile to DB." writes="profiles table (guides + preference)" new="writes · preference_profile (JSONB)"
         # Write enrichment results to DB
         try:
             db.upsert_topic_profile(user_id, {
@@ -426,6 +451,9 @@ def run_onboarding(db, user_id, profile):
         # STAGE 3: Model Training
         # ================================================================
 
+        # @pipeline divider="Stage 3 — Completion"
+
+        # @pipeline step="train-classifier" num="25" desc="Trains per-user importance model from email features." nonfatal="failure → non-fatal"
         db.update_onboarding_status(user_id, "training")
         try:
             params = train_user_model(db, user_id)
@@ -434,6 +462,7 @@ def run_onboarding(db, user_id, profile):
         except Exception:
             logger.exception("Stage 3: model training failed (non-fatal)")
 
+        # @pipeline step="mark-existing-emails" num="26" desc="Sets all user's emails to status onboarding so they aren't re-processed." writes="emails.status = onboarding"
         # Mark all existing emails as 'onboarding' BEFORE setting onboarding
         # complete — claim RPC only selects status='unprocessed', so these
         # are naturally invisible to the pipeline.
@@ -443,6 +472,7 @@ def run_onboarding(db, user_id, profile):
         except Exception:
             logger.exception(f"Failed to mark emails as 'onboarding' for user {user_id[:8]}...")
 
+        # @pipeline step="mark-complete" num="27" desc="Sets onboarding_status = complete (or complete_partial) and writes onboarding_completed_at." writes="profiles.onboarding_completed_at"
         # Mark complete — degraded if critical components are missing
         if missing_components:
             logger.warning(f"Onboarding complete with missing components: {missing_components}. "

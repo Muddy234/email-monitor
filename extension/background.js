@@ -23,7 +23,8 @@ importScripts(
 
 const EMAIL_SYNC_ALARM = "email-sync";
 const EMAIL_SYNC_PERIOD_MIN = 0.75; // 45 seconds (self-rescheduling)
-const MAX_CATCHUP_EMAILS = 1000;   // cap for first-time or stale syncs
+const PRE_ONBOARDING_EMAIL_CAP = 500;  // per-folder cap before onboarding completes
+const POST_ONBOARDING_EMAIL_CAP = 50;  // per-folder cap after onboarding completes
 // OWA endpoint templates
 const OWA_ENDPOINTS = {
   "outlook.cloud.microsoft": "/owa/service.svc",
@@ -960,6 +961,8 @@ async function detectAndUpdateAliases(userId, authEmail, sentEmails) {
   }
 }
 
+// @pipeline phase="a" badge="PHASE A" title="Extension sync loop" system="Chrome ext. · 45s cycle"
+// @pipeline connector="connector-a" label="emails + profiles + sync flag → Supabase"
 async function syncEmailsToSupabase() {
   if (DEBUG) console.log("syncEmailsToSupabase called");
   if (isSyncing) { if (DEBUG) console.log("Skipped — isSyncing is true"); return { skipped: true }; }
@@ -969,6 +972,7 @@ async function syncEmailsToSupabase() {
     // Ensure token is restored from storage (SW may have just woken up)
     await restoreToken();
 
+    // @pipeline step="token-check" num="01" desc="Validates Outlook token + Supabase session. Bails if either missing or expired." gate="both tokens required"
     // Check both tokens exist
     if (!token || !token.token || isTokenExpired()) {
       if (DEBUG) console.log("Exiting — no valid Outlook token");
@@ -984,6 +988,7 @@ async function syncEmailsToSupabase() {
     const userId = session.user.id;
     if (DEBUG) console.log("userId:", userId);
 
+    // @pipeline step="user-change-detection" num="02" desc="If different user than last sync, wipes lastSyncTime, cachedFolders, connectedOutlookEmail." writes="resets in-memory state"
     // --- New-account detection: reset sync state on user change ---
     await restoreSyncTime();
     const stored = await chrome.storage.local.get("lastSyncUserId");
@@ -1000,6 +1005,7 @@ async function syncEmailsToSupabase() {
       await chrome.storage.local.set({ lastSyncUserId: userId });
     }
 
+    // @pipeline step="profile-fetch" num="03" desc="Gets connected_outlook_email, onboarding_completed_at, initial_sync_complete from Supabase." reads="profiles table"
     // --- Outlook account lock gate ---
     const outlookEmail = await getOutlookEmail(token.token);
     if (DEBUG) console.log("outlookEmail:", outlookEmail);
@@ -1013,6 +1019,7 @@ async function syncEmailsToSupabase() {
         if (DEBUG) console.warn("getProfile failed:", err.message);
       }
 
+      // @pipeline step="seed-folder-sync" num="04" desc="If initial_sync_complete=true in DB, sets in-memory flag. Survives MV3 service worker kills." reads="profile.initial_sync_complete"
       // Seed hasCompletedFolderSync from profile (survives MV3 service worker kills)
       if (profile?.initial_sync_complete) {
         hasCompletedFolderSync = true;
@@ -1022,6 +1029,7 @@ async function syncEmailsToSupabase() {
       const connectedEmail = profile?.connected_outlook_email?.toLowerCase();
       connectedOutlookEmail = connectedEmail || null; // keep module cache in sync
 
+      // @pipeline step="outlook-account-lock" num="05" desc="First sync locks connected_outlook_email. Subsequent syncs verify token matches the lock." writes="profiles.connected_outlook_email" gate="mismatch = abort"
       if (!connectedEmail) {
         // First sync — lock this Outlook account
         try {
@@ -1047,21 +1055,7 @@ async function syncEmailsToSupabase() {
       await chrome.storage.local.remove("outlookMismatch");
     }
 
-    // Force catchup mode only during the first burst before folder discovery succeeds
-    if (profile && !profile.onboarding_completed_at && lastSyncTime && !hasCompletedFolderSync) {
-      const syncAgeMs = Date.now() - new Date(lastSyncTime).getTime();
-      const thresholdMs = 2 * EMAIL_SYNC_PERIOD_MIN * 60 * 1000; // 90s (2 × 45s cycle)
-      if (syncAgeMs < thresholdMs) {
-        if (DEBUG) console.log("Onboarding incomplete, first catchup burst — forcing catchup mode");
-        lastSyncTime = null;
-      }
-    }
-
-    // Set limit: larger during pre-onboarding initial sync, normal otherwise
-    const isInitialSync = profile && !profile.onboarding_completed_at && !hasCompletedFolderSync;
-    const maxEmails = isInitialSync ? 200 : (lastSyncTime ? 50 : MAX_CATCHUP_EMAILS);
-    if (DEBUG) console.log(`[Clarion] Sync mode: isInitialSync=${isInitialSync}, hasCompletedFolderSync=${hasCompletedFolderSync}, maxEmails=${maxEmails}`);
-
+    // @pipeline step="folder-discovery" num="06" desc="Reads Outlook sidebar DOM for subfolder IDs. On success, sets hasCompletedFolderSync = true." reads="Outlook DOM" nonfatal="failure → inbox only"
     // Discover mail folders from Outlook's sidebar DOM via chrome.scripting
     // Always start with Inbox (discovery only returns subfolders).
     let folders = [{ id: null, displayName: "Inbox", isDistinguished: true }];
@@ -1076,8 +1070,16 @@ async function syncEmailsToSupabase() {
     } catch (err) {
       if (DEBUG) console.warn(`[Clarion] Folder discovery failed (${err.message}), using inbox-only`);
     }
+
+    // @pipeline step="set-email-cap" num="07" desc="Pre-onboarding → 500/folder. Post-onboarding → 50/folder." gate="onboarding_completed_at"
+    // Pre-onboarding: pull 500/folder to hit the 500-email gate quickly
+    // Post-onboarding: 50/folder for light incremental sync
+    const isPreOnboarding = profile && !profile.onboarding_completed_at;
+    const maxEmails = isPreOnboarding ? PRE_ONBOARDING_EMAIL_CAP : POST_ONBOARDING_EMAIL_CAP;
+    if (DEBUG) console.log(`[Clarion] Sync mode: isPreOnboarding=${isPreOnboarding}, maxEmails=${maxEmails}/folder, folders=${folders.length}`);
     if (DEBUG) console.log(`[Clarion] Syncing ${folders.length} folder(s), maxEmails=${maxEmails}/folder:`, folders.map(f => f.displayName));
 
+    // @pipeline step="per-folder-fetch-push" num="08" desc="For each folder: handleGetEmails() → enrichEmailsBatched() → pushEmails() to Supabase." writes="emails table" nonfatal="per-folder errors non-blocking"
     // Loop through each mail folder sequentially
     let totalSynced = 0;
     for (const folderInfo of folders) {
@@ -1140,10 +1142,11 @@ async function syncEmailsToSupabase() {
       }
     }
 
+    // @pipeline step="sent-items-sync" num="09" desc="Separate fetch for Sent Items. Status set to completed (not queued for drafts)." writes="emails table (status=completed)"
     // Sync sent items every cycle (incremental for subsequent syncs)
     let sentCount = 0;
     let sentEnriched = [];
-    const maxSentEmails = lastSyncTime ? 50 : MAX_CATCHUP_EMAILS;
+    const maxSentEmails = isPreOnboarding ? PRE_ONBOARDING_EMAIL_CAP : POST_ONBOARDING_EMAIL_CAP;
     try {
       const sentResult = await handleGetSentItems({
         max_scan: maxSentEmails,
@@ -1187,17 +1190,22 @@ async function syncEmailsToSupabase() {
       if (DEBUG) console.error("Sent items sync error:", err.message);
     }
 
+    // @pipeline step="persist-lastSyncTime" num="10" desc="Saves sync timestamp after all folder fetches complete. Persisted to chrome.storage.local." writes="lastSyncTime + chrome.storage.local"
     lastSyncTime = new Date().toISOString();
     persistSyncTime();
     chrome.storage.local.set({ lastSyncUserId: userId });
 
+    // @pipeline step="alias-detection" num="11" desc="Detects email aliases from sent items + auth email. Updates profiles.user_email_aliases in Supabase." writes="profiles.user_email_aliases"
     // Auto-detect user's Outlook email aliases from sent items + auth email
     const authEmail = session.user?.email || "";
     await detectAndUpdateAliases(userId, authEmail, sentEnriched);
 
+    // @pipeline step="heartbeat" num="12" desc="Updates last_heartbeat_at so the worker knows the extension is active." writes="profiles.last_heartbeat_at"
     // Update heartbeat so the worker knows we're active
     updateHeartbeat(userId).catch(() => {});
 
+    // @pipeline step="signal-initial-sync" num="13" desc="If hasCompletedFolderSync=true AND initial_sync_complete=false → PATCHes to true." writes="profiles.initial_sync_complete" nonfatal="PATCH failure → retries next cycle"
+    // @pipeline harden="Hardening note" body="Step 14 runs after ALL folder syncs complete, preventing the 'flag set but emails not landed' race. But per-folder failures in step 09 are non-blocking — a user could have initial_sync_complete=true with only partial folder coverage. The email_count >= 500 gate in Phase B mitigates this."
     // Signal sync completion to worker (gates onboarding)
     // Allow signal even after onboarding re-runs (onboarding_completed_at may be set)
     if (hasCompletedFolderSync && profile && !profile.initial_sync_complete) {
