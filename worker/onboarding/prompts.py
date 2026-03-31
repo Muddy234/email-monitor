@@ -258,7 +258,9 @@ asks_for_info, diagnoses, n/a>",
     "response_completeness": "<one of: addresses_all, key_point_only, partial>",
     "commitment_pattern": "<one of: specific_next_step, vague_forward, \
 redirected_ask, none>",
-    "scope_behavior": "<one of: stays_narrow, adds_context, expands_scope>"
+    "scope_behavior": "<one of: stays_narrow, adds_context, expands_scope>",
+    "contains_decision": <boolean>,
+    "decision_quote": "<verbatim excerpt or null>"
 }
 
 For unpaired emails (no inbound parent available), return:
@@ -268,7 +270,9 @@ For unpaired emails (no inbound parent available), return:
     "decision_type": null,
     "response_completeness": null,
     "commitment_pattern": "<observable from sent email alone>",
-    "scope_behavior": "<observable from sent email alone>"
+    "scope_behavior": "<observable from sent email alone>",
+    "contains_decision": false,
+    "decision_quote": null
 }
 
 Field definitions:
@@ -306,6 +310,16 @@ or expands the conversation.
 for but would find useful (e.g., flagging a related issue, adding a caveat)
   - "expands_scope": user broadens the conversation to adjacent topics or \
 raises new issues beyond the original thread
+- contains_decision: Does this email contain a decision moment where the user \
+chose a course of action? A decision requires the user to pick between \
+alternatives or commit to an action when alternatives existed. Informational \
+replies, scheduling, acknowledgments, and forwarding are NOT decisions. \
+For unpaired emails (no inbound parent), set to false — a decision requires \
+context to identify what alternatives existed.
+- decision_quote: If contains_decision is true, the verbatim excerpt (1-2 \
+sentences max) from the SENT email where the decision is expressed. Extract \
+the exact words — do NOT summarize or interpret. If contains_decision is \
+false, set to null.
 
 Additional context: Some emails include a [CONTEXT: ...] block with pre-computed \
 metadata about the interaction:
@@ -427,3 +441,156 @@ should use neutral behavior."
 - Never extrapolate a single email into a general rule.
 
 Output as plain text, not JSON."""
+
+
+# ---------------------------------------------------------------------------
+# Phase 4C-4: Sonnet preference synthesis from decision moments
+# ---------------------------------------------------------------------------
+
+SONNET_PREFERENCE_SYNTHESIS_PROMPT = """\
+You are analyzing a user's decision-making patterns extracted from their sent \
+emails. Your task is to classify each decision along two personality dimensions \
+and then synthesize a categorical profile.
+
+## The Two Traits
+
+### Investment Orientation
+Core question: When something is suboptimal, broken, risky, or could be \
+improved — does this user invest to address it?
+
+### Positional Stance
+Core question: When this user's interests intersect with another party's — or \
+when an expert recommends a course of action — does the user yield or advance?
+
+## Step 1: Per-Decision Classification
+
+For each decision moment, classify the signal it provides on each trait.
+
+Investment Orientation — classify as one of:
+- "active": The user invested — shopped alternatives, closed a gap, fixed \
+fully, investigated root cause, acted preemptively, explored options
+- "selective": The user invested, but only after weighing cost-benefit or \
+confirming the stakes justified it — qualified investment, conditional commitment
+- "conservative": The user chose NOT to invest — accepted the status quo, \
+took the partial fix, skipped the optional protection, waited rather than acted
+- "no_signal": This decision does not provide evidence on investment \
+orientation (e.g., a purely positional negotiation move)
+
+Positional Stance — classify as one of:
+- "advancing": The user pushed — negotiated, demanded reciprocity, exploited \
+leverage, escalated, challenged the recommended path
+- "measured": The user pushed, but selectively — held ground on the key issue \
+while accommodating on lesser points, evaluated before following guidance
+- "yielding": The user accommodated — conceded, followed expert guidance \
+without evaluation, walked away rather than escalated, accepted the proposed terms
+- "no_signal": This decision does not provide evidence on positional stance \
+(e.g., a purely investment-oriented decision with no counterparty or expert)
+
+IMPORTANT: "no_signal" means this decision provides NO evidence for that \
+trait. It is NOT a middle ground or moderate position. Exclude no_signal \
+decisions from the count for that trait.
+
+## Step 2: Category Synthesis
+
+After classifying all decisions, assign a category for each trait based on \
+the pattern across the full decision set.
+
+There is no middle option. Pick a side.
+
+### Investment Orientation Categories
+
+INVEST HEAVY: Dominant pattern is "active" signals across multiple decision \
+types, including low-stakes decisions where most people would accept \
+good-enough. Few or no "conservative" signals.
+
+INVEST LIGHT: Majority of signals are "active" or "selective." The user \
+invests on important decisions but exercises judgment on lower-stakes items. \
+Distinguished from Invest Heavy by the presence of "selective" or \
+"conservative" signals on lower-stakes decisions.
+
+CONSERVE LIGHT: Majority of signals are "conservative." The user defaults to \
+the status quo but invests when urgency or obvious cost of inaction demands \
+it. Distinguished from Conserve Heavy by the presence of "active" signals on \
+high-stakes decisions.
+
+CONSERVE HEAVY: Dominant pattern is "conservative" signals across multiple \
+decision types, including situations where investing would clearly be the \
+better play. Few or no "active" signals.
+
+### Positional Stance Categories
+
+ADVANCE HEAVY: Dominant pattern is "advancing" signals across multiple \
+interaction types, including low-stakes situations. Few or no "yielding" signals.
+
+ADVANCE LIGHT: Majority of signals are "advancing" or "measured." The user \
+pushes on significant matters but accommodates on lesser points. Distinguished \
+from Advance Heavy by the presence of "measured" or "yielding" signals on \
+lower-stakes interactions.
+
+YIELD LIGHT: Majority of signals are "yielding." The user defaults to \
+accommodation but holds ground when the cost of yielding is obvious. \
+Distinguished from Yield Heavy by the presence of "advancing" signals on \
+high-stakes matters.
+
+YIELD HEAVY: Dominant pattern is "yielding" signals across multiple \
+interaction types, including situations where pushing back would clearly be \
+beneficial. Few or no "advancing" signals.
+
+OBSERVATION BIAS NOTE:
+Sent emails are biased toward action — decisions where the user chose NOT to \
+act often don't generate a sent email. Ask: "what is this user's default when \
+they have a genuine choice?" not "what is the ratio of active to conservative \
+in the data?"
+
+## Rules
+- A single decision may provide signal for one or both traits.
+- Some decisions may be ambiguous — classify the stronger signal only, set \
+the weaker to no_signal.
+- If a trait has fewer than 8 supporting decisions (excluding no_signal), \
+return null for that trait.
+- If a trait has 8-14 supporting decisions, set confidence to "low" and \
+append to the description: "Based on limited data ({{N}} decisions). This \
+profile may shift as more email history becomes available."
+- If a trait has 15+ supporting decisions, set confidence to "high".
+- Write descriptions in the voice of an observer describing a person, not as \
+rules or instructions.
+- The description should capture HOW this user reasons about decisions — do \
+they lead with cost-benefit analysis, relationship impact, risk mitigation, \
+or speed? This reasoning lens emerges from the decision quotes and helps the \
+draft model match the justification, not just the direction.
+
+## Output Format (JSON)
+
+Start your response with {{ and end with }}.
+
+{{
+  "classifications": [
+    {{
+      "decision_index": 1,
+      "decision_quote": "...",
+      "investment_signal": {{"direction": "active|selective|conservative|no_signal", "reasoning": "..."}},
+      "positional_signal": {{"direction": "advancing|measured|yielding|no_signal", "reasoning": "..."}}
+    }}
+  ],
+  "investment_orientation": {{
+    "category": "invest_heavy|invest_light|conserve_light|conserve_heavy",
+    "description": "...",
+    "confidence": "high|low",
+    "supporting_decisions": 14
+  }},
+  "positional_stance": {{
+    "category": "advance_heavy|advance_light|yield_light|yield_heavy",
+    "description": "...",
+    "confidence": "high|low",
+    "supporting_decisions": 8
+  }}
+}}
+
+If a trait has fewer than 8 supporting decisions (excluding no_signal), set \
+that trait's object to null instead.
+
+## Contact Context
+{contact_context}
+
+## Decision Moments
+{decisions_json}"""

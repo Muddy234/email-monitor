@@ -291,6 +291,7 @@ def extract_behavioral_features(sent_emails, response_events, received_emails,
         response_events=response_events,
     )
     all_features = []
+    decision_moments = []
     failed_batches = 0
     total_usage = {}
 
@@ -306,6 +307,20 @@ def extract_behavioral_features(sent_emails, response_events, received_emails,
                 _merge_usage(total_usage, usage)
                 if result:
                     all_features.extend(result)
+                    # Extract decision moments for preference synthesis
+                    for item in result:
+                        if not item.get("contains_decision") or not item.get("decision_quote"):
+                            continue
+                        email_index = item.get("email_index")
+                        if not isinstance(email_index, int) or email_index < 1 or email_index > len(sampled):
+                            logger.warning(f"Decision moment has out-of-range email_index={email_index}, skipping")
+                            continue
+                        source_email = sampled[email_index - 1]
+                        decision_moments.append({
+                            "decision_quote": item["decision_quote"],
+                            "contact_type": item.get("contact_type", "unknown"),
+                            "received_at": source_email.get("received_time"),
+                        })
                 else:
                     failed_batches += 1
             except Exception:
@@ -316,10 +331,14 @@ def extract_behavioral_features(sent_emails, response_events, received_emails,
         logger.warning("No behavioral features extracted")
         return None
 
-    logger.info(f"Extracted behavioral features from {len(all_features)} sent emails")
+    logger.info(
+        f"Extracted behavioral features from {len(all_features)} sent emails "
+        f"({len(decision_moments)} decision moments)"
+    )
 
     return {
         "behavioral_features": all_features,
+        "decision_moments": decision_moments,
         "sample_count": len(sampled),
         "usage": total_usage,
     }

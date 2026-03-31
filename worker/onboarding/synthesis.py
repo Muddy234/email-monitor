@@ -15,6 +15,7 @@ from onboarding.prompts import (
     SONNET_TOPIC_CLUSTERING_PROMPT,
     SONNET_STYLE_GUIDE_PROMPT,
     SONNET_BEHAVIORAL_PROFILE_PROMPT,
+    SONNET_PREFERENCE_SYNTHESIS_PROMPT,
 )
 from onboarding.retry import call_with_retry
 
@@ -255,6 +256,115 @@ def synthesize_behavioral_profile(behavioral_features, contact_profiles):
     cleaned = _clean_synthesis_output(response)
     logger.info(f"Generated behavioral profile ({len(cleaned)} chars)")
     return cleaned, usage
+
+
+MAX_DECISION_MOMENTS = 50
+VALID_IO_CATEGORIES = {"invest_heavy", "invest_light", "conserve_light", "conserve_heavy"}
+VALID_PS_CATEGORIES = {"advance_heavy", "advance_light", "yield_light", "yield_heavy"}
+
+
+def synthesize_preferences(decision_moments, contact_profiles):
+    """Phase 4C-4: Classify decision moments and synthesize preference profile.
+
+    Args:
+        decision_moments: list of {decision_quote, contact_type, received_at}
+        contact_profiles: enriched contact profiles from Phase 4A
+
+    Returns:
+        (preference_profile: dict or None, usage: dict)
+    """
+    if len(decision_moments) < 8:
+        logger.info(
+            f"Only {len(decision_moments)} decision moments — need 8 minimum, "
+            f"skipping preference synthesis"
+        )
+        return None, {}
+
+    # Sort by received_at (most recent last), cap at 50
+    sorted_moments = sorted(
+        decision_moments,
+        key=lambda d: d.get("received_at") or "",
+    )
+    if len(sorted_moments) > MAX_DECISION_MOMENTS:
+        sorted_moments = sorted_moments[-MAX_DECISION_MOMENTS:]
+
+    # Format contact context (high-significance contacts only)
+    profile_lines = []
+    for cp in (contact_profiles or []):
+        sig = cp.get("significance") or cp.get("relationship_significance", "medium")
+        if sig not in ("critical", "high"):
+            continue
+        email = cp.get("email", "")
+        ctype = cp.get("contact_type", "unknown")
+        org = cp.get("inferred_organization", "")
+        role = cp.get("inferred_role", "")
+        profile_lines.append(f"- {email}: {ctype} ({org}, {role})")
+
+    contact_context = "\n".join(profile_lines) if profile_lines else "No high-significance contacts available."
+
+    # Number decisions for Sonnet
+    numbered = []
+    for i, dm in enumerate(sorted_moments, 1):
+        numbered.append({
+            "decision_index": i,
+            "decision_quote": dm["decision_quote"],
+            "contact_type": dm.get("contact_type", "unknown"),
+        })
+
+    prompt_text = SONNET_PREFERENCE_SYNTHESIS_PROMPT.format(
+        contact_context=contact_context,
+        decisions_json=json.dumps(numbered, indent=2),
+    )
+
+    response, usage = call_with_retry(
+        prompt=prompt_text,
+        system_prompt="You are a decision-pattern analyst. Output valid JSON only.",
+        model="sonnet",
+        max_tokens=8192,
+        temperature=0.3,
+    )
+
+    if not response:
+        logger.error("Preference synthesis: no response from Sonnet")
+        return None, usage
+
+    # Parse JSON response
+    cleaned = _clean_synthesis_output(response)
+    try:
+        parsed = json.loads(cleaned)
+    except json.JSONDecodeError:
+        # Try extracting JSON from response
+        parsed = _parse_json_response(cleaned)
+        if not parsed:
+            logger.error("Preference synthesis: failed to parse JSON response")
+            return None, usage
+
+    # Validate categories
+    io = parsed.get("investment_orientation")
+    ps = parsed.get("positional_stance")
+
+    if io and io.get("category") not in VALID_IO_CATEGORIES:
+        logger.warning(f"Invalid investment_orientation category: {io.get('category')}")
+        io = None
+    if ps and ps.get("category") not in VALID_PS_CATEGORIES:
+        logger.warning(f"Invalid positional_stance category: {ps.get('category')}")
+        ps = None
+
+    if not io and not ps:
+        logger.warning("Preference synthesis: both traits null after validation")
+        return None, usage
+
+    profile = {
+        "investment_orientation": io,
+        "positional_stance": ps,
+    }
+
+    logger.info(
+        f"Generated preference profile: "
+        f"IO={io['category'] if io else 'null'}, "
+        f"PS={ps['category'] if ps else 'null'}"
+    )
+    return profile, usage
 
 
 # ---------------------------------------------------------------------------

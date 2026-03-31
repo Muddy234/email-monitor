@@ -257,7 +257,8 @@ class SupabaseWorkerClient:
     # Drafts
     # ------------------------------------------------------------------
 
-    def insert_draft(self, email_id, user_id, draft_body):
+    def insert_draft(self, email_id, user_id, draft_body,
+                     quality_issues=None, quality_retry_count=0):
         """Insert or update a draft with status='pending'.
 
         Skips overwrite if the user has edited the draft via the dashboard
@@ -268,6 +269,8 @@ class SupabaseWorkerClient:
             email_id: UUID string.
             user_id: UUID string.
             draft_body: The generated reply text.
+            quality_issues: Optional list of un-fixed QC issue strings.
+            quality_retry_count: Number of QC retries attempted (0 = none).
 
         Returns:
             dict: The inserted/updated draft row, or empty dict if skipped.
@@ -287,22 +290,26 @@ class SupabaseWorkerClient:
             logger.info(f"Skipping draft for email {email_id}: user has edited it")
             return {}
 
+        payload = {
+            "draft_body": draft_body,
+            "status": "pending",
+            "user_edited": False,
+            "quality_issues": quality_issues,
+            "quality_retry_count": quality_retry_count,
+        }
+
         if existing:
             # Update existing draft (worker re-run)
             result = (
                 self.client.table("drafts")
-                .update({"draft_body": draft_body, "status": "pending", "user_edited": False})
+                .update(payload)
                 .eq("id", existing["id"])
                 .execute()
             )
         else:
-            result = self.client.table("drafts").insert({
-                "email_id": email_id,
-                "user_id": user_id,
-                "draft_body": draft_body,
-                "status": "pending",
-                "user_edited": False,
-            }).execute()
+            payload["email_id"] = email_id
+            payload["user_id"] = user_id
+            result = self.client.table("drafts").insert(payload).execute()
 
         return result.data[0] if result.data else {}
 
@@ -550,31 +557,62 @@ class SupabaseWorkerClient:
             row, on_conflict="user_id"
         ).execute()
 
-    def update_writing_style(self, user_id, style_guide, extracted_count):
+    def update_writing_style(self, user_id, style_guide, extracted_count,
+                             sampled_count=None):
         """Store the writing style guide on the user's profile.
 
         Args:
             user_id: UUID string.
             style_guide: Plain text style guide.
             extracted_count: Number of style features successfully extracted.
+            sampled_count: Number of emails sampled for style extraction.
         """
-        self.client.table("profiles").update({
+        data = {
             "writing_style_guide": style_guide,
             "style_profiled_at": datetime.utcnow().isoformat(),
             "style_extracted_feature_count": extracted_count,
-        }).eq("id", user_id).execute()
+        }
+        if sampled_count is not None:
+            data["style_sample_email_count"] = sampled_count
+        self.client.table("profiles").update(data).eq("id", user_id).execute()
 
-    def update_behavioral_profile(self, user_id, profile_text):
+    def update_behavioral_profile(self, user_id, profile_text,
+                                   extracted_count=None, sampled_count=None):
         """Store the behavioral profile on the user's profile.
 
         Args:
             user_id: UUID string.
             profile_text: Plain text behavioral profile.
+            extracted_count: Number of behavioral features extracted.
+            sampled_count: Number of emails sampled for behavioral extraction.
         """
-        self.client.table("profiles").update({
+        data = {
             "behavioral_profile": profile_text,
             "behavioral_profiled_at": datetime.utcnow().isoformat(),
-        }).eq("id", user_id).execute()
+        }
+        if extracted_count is not None:
+            data["behavioral_extracted_feature_count"] = extracted_count
+        if sampled_count is not None:
+            data["behavioral_sample_email_count"] = sampled_count
+        self.client.table("profiles").update(data).eq("id", user_id).execute()
+
+    def update_preference_profile(self, user_id, preference_profile,
+                                  decision_count=None):
+        """Store the preference profile on the user's profile.
+
+        Args:
+            user_id: UUID string.
+            preference_profile: Dict with investment_orientation + positional_stance.
+            decision_count: Number of decision moments used for synthesis.
+        """
+        import json
+        data = {
+            "preference_profile": json.dumps(preference_profile),
+            "preference_profiled_at": datetime.utcnow().isoformat(),
+        }
+        if decision_count is not None:
+            data["preference_decision_count"] = decision_count
+        self.client.table("profiles").update(data).eq("id", user_id).execute()
 
     # ------------------------------------------------------------------
     # Batch context fetchers (for enrichment pipeline)

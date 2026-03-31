@@ -13,7 +13,7 @@ export async function initOnboarding() {
     if (!user) { panel.innerHTML = `<div class="em-empty">Not authenticated.</div>`; return; }
 
     const [profileRes, contactsRes, topicRes, scoringRes] = await Promise.all([
-        supabase.from("profiles").select("writing_style_guide, style_extracted_feature_count, onboarding_status, onboarding_completed_at").eq("id", user.id).single(),
+        supabase.from("profiles").select("writing_style_guide, style_extracted_feature_count, style_sample_email_count, behavioral_profile, behavioral_extracted_feature_count, behavioral_sample_email_count, preference_profile, preference_decision_count, onboarding_status, onboarding_completed_at").eq("id", user.id).single(),
         supabase.from("contacts").select("*").eq("user_id", user.id).order("emails_per_month", { ascending: false }),
         supabase.from("user_topic_profile").select("*").eq("user_id", user.id).single(),
         supabase.from("scoring_parameters").select("*").eq("user_id", user.id).single(),
@@ -41,6 +41,17 @@ export async function initOnboarding() {
             </div>
         </div>
 
+        <div class="em-detail-grid">
+            <div>
+                <h3 class="em-section-title">Behavioral Profile</h3>
+                <div class="em-card" id="dt-behavioral"></div>
+            </div>
+            <div>
+                <h3 class="em-section-title">Preference Profile</h3>
+                <div class="em-card" id="dt-preference"></div>
+            </div>
+        </div>
+
         <h3 class="em-section-title">Topic Domains</h3>
         <div class="em-card" id="dt-topics" style="margin-bottom:24px"></div>
 
@@ -59,6 +70,12 @@ export async function initOnboarding() {
     // Scoring
     renderScoring(scoring, profile);
 
+    // Behavioral Profile
+    renderBehavioral(profile);
+
+    // Preference Profile
+    renderPreference(profile);
+
     // Topics
     renderTopics(topics);
 
@@ -74,10 +91,52 @@ function renderStyleGuide(profile) {
     }
     el.innerHTML = `
         <div style="margin-bottom:10px; display:flex; gap:12px; font-size:12px; color:var(--em-slate-500)">
+            <span>Emails Sampled: ${profile.style_sample_email_count || 0}</span>
             <span>Features Extracted: ${profile.style_extracted_feature_count || 0}</span>
             <span>Completed: ${formatDate(profile.onboarding_completed_at)}</span>
         </div>
         <div class="em-style-guide-text">${escapeHtml(profile.writing_style_guide)}</div>
+    `;
+}
+
+function renderBehavioral(profile) {
+    const el = document.getElementById("dt-behavioral");
+    if (!profile.behavioral_profile) {
+        el.innerHTML = `<div class="em-empty">No behavioral profile generated.</div>`;
+        return;
+    }
+    el.innerHTML = `
+        <div style="margin-bottom:10px; display:flex; gap:12px; font-size:12px; color:var(--em-slate-500)">
+            <span>Emails Sampled: ${profile.behavioral_sample_email_count || 0}</span>
+            <span>Features Extracted: ${profile.behavioral_extracted_feature_count || 0}</span>
+        </div>
+        <div class="em-style-guide-text">${escapeHtml(profile.behavioral_profile)}</div>
+    `;
+}
+
+function renderPreference(profile) {
+    const el = document.getElementById("dt-preference");
+    const pref = profile.preference_profile;
+    if (!pref) {
+        el.innerHTML = `<div class="em-empty">No preference profile generated.</div>`;
+        return;
+    }
+    const io = pref.investment_orientation;
+    const ps = pref.positional_stance;
+    const ioText = io ? `${io.category} (${io.supporting_decisions} decisions, ${io.confidence} confidence)` : "insufficient data";
+    const psText = ps ? `${ps.category} (${ps.supporting_decisions} decisions, ${ps.confidence} confidence)` : "insufficient data";
+    el.innerHTML = `
+        <div style="margin-bottom:10px; font-size:12px; color:var(--em-slate-500)">
+            Decisions Analyzed: ${profile.preference_decision_count || 0}
+        </div>
+        <div class="em-kv-grid">
+            <div class="em-kv-label">Investment Orientation</div>
+            <div class="em-kv-value">${escapeHtml(ioText)}</div>
+            <div class="em-kv-label">Positional Stance</div>
+            <div class="em-kv-value">${escapeHtml(psText)}</div>
+        </div>
+        ${io?.description ? `<div style="margin-top:10px; font-size:13px; color:var(--em-slate-500)"><strong>Investment:</strong> ${escapeHtml(io.description)}</div>` : ""}
+        ${ps?.description ? `<div style="margin-top:6px; font-size:13px; color:var(--em-slate-500)"><strong>Positional:</strong> ${escapeHtml(ps.description)}</div>` : ""}
     `;
 }
 

@@ -44,6 +44,7 @@ from onboarding.synthesis import (
     synthesize_topics,
     synthesize_style_guide,
     synthesize_behavioral_profile,
+    synthesize_preferences,
 )
 
 logger = logging.getLogger("worker.onboarding")
@@ -244,6 +245,12 @@ def run_onboarding(db, user_id, profile):
 
         logger.info("Phase 3 + 4C-1 + 4C-1b complete: Haiku extraction done")
 
+        # Extract decision moments for preference synthesis (Stage C)
+        decision_moments = (
+            behavioral_result.get("decision_moments", [])
+            if behavioral_result else []
+        )
+
         # ── Phase 4A: Contact profile synthesis ──────────────────
         db.update_onboarding_status(user_id, "synthesizing")
 
@@ -283,6 +290,7 @@ def run_onboarding(db, user_id, profile):
         topic_result = None
         style_guide = None
         behavioral_profile = None
+        preference_profile = None
 
         if skip_guides:
             logger.info("Skipping style guide + behavioral profile (insufficient sent emails)")
@@ -291,8 +299,16 @@ def run_onboarding(db, user_id, profile):
                 extraction_result.get("keyword_frequencies", {}),
             )
             _merge_usage(sonnet_usage, topic_usage)
+            # Preference runs even when guides are skipped
+            try:
+                preference_profile, pref_usage = synthesize_preferences(
+                    decision_moments, contact_profiles,
+                )
+                _merge_usage(sonnet_usage, pref_usage)
+            except Exception:
+                logger.exception("Phase 4C-4: preference synthesis raised (skip_guides path)")
         else:
-            with ThreadPoolExecutor(max_workers=3) as executor:
+            with ThreadPoolExecutor(max_workers=4) as executor:
                 f_topics = executor.submit(
                     synthesize_topics,
                     extraction_result.get("keyword_frequencies", {}),
@@ -307,6 +323,11 @@ def run_onboarding(db, user_id, profile):
                     behavioral_result.get("behavioral_features", []) if behavioral_result else [],
                     contact_profiles,
                 )
+                f_preferences = executor.submit(
+                    synthesize_preferences,
+                    decision_moments,
+                    contact_profiles,
+                )
                 topic_result, topic_usage = f_topics.result()
                 _merge_usage(sonnet_usage, topic_usage)
                 style_guide, style_usage = f_guide.result()
@@ -316,6 +337,11 @@ def run_onboarding(db, user_id, profile):
                     _merge_usage(sonnet_usage, behavioral_usage)
                 except Exception:
                     logger.exception("Phase 4C-3: behavioral profile synthesis raised")
+                try:
+                    preference_profile, pref_usage = f_preferences.result()
+                    _merge_usage(sonnet_usage, pref_usage)
+                except Exception:
+                    logger.exception("Phase 4C-4: preference synthesis raised")
 
             # Retry behavioral profile once if it failed — this drives every
             # future draft's decision posture, so transient failures are costly.
@@ -330,13 +356,13 @@ def run_onboarding(db, user_id, profile):
                 except Exception:
                     logger.exception("Phase 4C-3: behavioral profile retry also failed")
 
-        # Record Sonnet usage from all synthesis phases (4A + 4B + 4C-2 + 4C-3)
+        # Record Sonnet usage from all synthesis phases (4A + 4B + 4C-2 + 4C-3 + 4C-4)
         db.record_token_usage(user_id, "sonnet", "onboarding_synthesis", sonnet_usage)
 
         if topic_result is None:
             topic_result = {"domains": [], "high_signal_keywords": []}
 
-        logger.info("Phase 4B + 4C-2 + 4C-3 complete: topics + style + behavioral done")
+        logger.info("Phase 4B + 4C-2 + 4C-3 + 4C-4 complete: topics + style + behavioral + preference done")
 
         # Track missing components for degraded completion status
         missing_components = []
@@ -359,7 +385,8 @@ def run_onboarding(db, user_id, profile):
             if style_guide:
                 extracted_count = len(style_result.get("style_features", [])) if style_result else 0
                 sampled_count = style_result.get("sample_count", 0) if style_result else 0
-                db.update_writing_style(user_id, style_guide, extracted_count)
+                db.update_writing_style(user_id, style_guide, extracted_count,
+                                        sampled_count=sampled_count)
                 logger.info(
                     f"Style guide saved: {extracted_count} features extracted "
                     f"from {sampled_count} sampled emails"
@@ -369,9 +396,29 @@ def run_onboarding(db, user_id, profile):
 
         try:
             if behavioral_profile:
-                db.update_behavioral_profile(user_id, behavioral_profile)
+                beh_extracted = len(behavioral_result.get("behavioral_features", [])) if behavioral_result else 0
+                beh_sampled = behavioral_result.get("sample_count", 0) if behavioral_result else 0
+                db.update_behavioral_profile(user_id, behavioral_profile,
+                                             extracted_count=beh_extracted,
+                                             sampled_count=beh_sampled)
+                logger.info(
+                    f"Behavioral profile saved: {beh_extracted} features from "
+                    f"{beh_sampled} sampled emails"
+                )
         except Exception as e:
             logger.error(f"Stage 2: update_behavioral_profile failed: {e}")
+
+        try:
+            if preference_profile:
+                db.update_preference_profile(
+                    user_id, preference_profile,
+                    decision_count=len(decision_moments),
+                )
+                logger.info(
+                    f"Preference profile saved: {len(decision_moments)} decision moments"
+                )
+        except Exception as e:
+            logger.error(f"Stage 2: update_preference_profile failed: {e}")
 
         logger.info("Stage 2 complete: AI enrichments persisted")
 
