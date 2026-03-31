@@ -119,6 +119,8 @@ class DraftGenerator:
         if behavioral_profile:
             behavioral_block = f"\n\nBEHAVIORAL PROFILE:\n{behavioral_profile}\n"
 
+        preference_block = self._build_preference_block(action_context)
+
         # Build thread context from enrichment messages or thread emails
         thread_block = self._build_thread_block(action_context, email_data)
 
@@ -130,13 +132,14 @@ SUBJECT: {subject}
 EMAIL BODY:
 {body}
 
-{context_block}{sender_context_block}{thread_block}{style_block}{behavioral_block}
+{context_block}{sender_context_block}{thread_block}{style_block}{behavioral_block}{preference_block}
 
 Generate the reply body text only (no subject, no headers)."""
 
         logger.debug(f"Draft prompt assembled: {len(prompt)} chars "
                      f"(body={len(body)}, style={len(style_guide)}, "
                      f"behavioral={len(behavioral_profile)}, "
+                     f"preference={len(preference_block)}, "
                      f"thread={len(thread_block)})")
 
         return prompt
@@ -209,6 +212,71 @@ Generate the reply body text only (no subject, no headers)."""
             parts.append(user_last["body"])
 
         return "\n".join(parts)
+
+    @staticmethod
+    def _build_preference_block(action_context):
+        """Build a PREFERENCE PROFILE block from the preference_profile dict.
+
+        Returns empty string if no preference profile is available.
+        Handles partial profiles (one trait null) by including only scored traits.
+        """
+        pref = action_context.get("preference_profile")
+        if not pref or not isinstance(pref, dict):
+            return ""
+
+        investment = pref.get("investment_orientation")
+        positional = pref.get("positional_stance")
+
+        if not investment and not positional:
+            return ""
+
+        parts = ["\n\nPREFERENCE PROFILE:"]
+
+        if investment:
+            category = (investment.get("category") or "").upper().replace("_", " ")
+            description = investment.get("description", "")
+            confidence = investment.get("confidence", "high")
+            parts.append(f"\nInvestment Orientation: {category}")
+            parts.append(description)
+            if confidence == "low":
+                parts.append(
+                    "Based on limited data. Lean toward this direction but "
+                    "use [USER TO CONFIRM] for high-stakes decisions where "
+                    "the signal alone is insufficient to commit."
+                )
+
+        if positional:
+            category = (positional.get("category") or "").upper().replace("_", " ")
+            description = positional.get("description", "")
+            confidence = positional.get("confidence", "high")
+            parts.append(f"\nPositional Stance: {category}")
+            parts.append(description)
+            if confidence == "low":
+                parts.append(
+                    "Based on limited data. Lean toward this direction but "
+                    "use [USER TO CONFIRM] for high-stakes decisions where "
+                    "the signal alone is insufficient to commit."
+                )
+
+        # Tiebreaker instructions
+        parts.append(
+            "\nUse these traits to determine the DIRECTION of decisions in the draft:\n"
+            "- Preference = WHAT to decide\n"
+            "- Behavior = HOW to express the decision\n"
+            "- Style = HOW to write it\n"
+            "\n"
+            "When the two traits point in different directions on a given decision:\n"
+            "1. The trait with the stronger (heavier) category takes priority\n"
+            "2. If equally weighted, the trait with higher confidence wins\n"
+            "3. If confidence is also equal, take the more cautious direction "
+            "and mark as [USER TO CONFIRM]\n"
+            "\n"
+            "[USER TO CONFIRM] is for missing factual information that cannot "
+            "be inferred from context or the preference profile. It is NOT for "
+            "decisions, preferences, or strategic choices."
+        )
+
+        return "\n".join(parts) + "\n"
 
     def build_batch_params(self, email_data, action_context, custom_id):
         """Build a Batches API request dict for a single draft.

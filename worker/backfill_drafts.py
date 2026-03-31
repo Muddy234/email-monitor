@@ -31,10 +31,13 @@ from pipeline.drafts import DraftGenerator
 from pipeline.prompts import get_draft_prompt_template
 
 
-# Target email IDs — the 2 Round 3 emails that were dropped
+# Target email IDs — 5 test emails for draft quality testing
 TARGET_EMAIL_IDS = [
-    "6abcbdbd-9d7f-4b7b-b096-45d2034eb2b0",  # Orion Health Systems
-    "1e978bc9-8e66-4b9f-ab53-fd4ef2ba7716",  # Relocation Package Dispute
+    "4224f78b-533b-44f5-beff-393ec0fa49e8",  # Real Estate
+    "84a77745-f5f8-4898-9dc3-255e9a72f874",  # Insurance
+    "f304edac-d6e4-4972-a137-8b7e8d25e7db",  # Ecommerce
+    "68652f74-866a-4f6e-a307-f331df377e8b",  # Legal
+    "97233be2-3030-4eb5-858d-11c19ca63514",  # Professional Services
 ]
 
 
@@ -148,6 +151,10 @@ def backfill_drafts(db, email_ids=None):
             behavioral_profile = profile.get("behavioral_profile") or ""
             if behavioral_profile:
                 action_context["behavioral_profile"] = behavioral_profile
+
+            preference_profile = profile.get("preference_profile")
+            if preference_profile:
+                action_context["preference_profile"] = preference_profile
 
             # Generate draft
             logger.info(f"  Generating draft for: {subject[:60]}")

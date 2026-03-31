@@ -215,6 +215,7 @@ def filter_emails(db_client, emails, user_id, config):
 def process_classification_results(db_client, action_items, filtered_emails,
                                    user_id, config, draft_generator,
                                    style_guide="", behavioral_profile="",
+                                   preference_profile=None,
                                    contacts_map=None):
     """Write classification results to DB and collect draft candidates.
 
@@ -285,6 +286,8 @@ def process_classification_results(db_client, action_items, filtered_emails,
                 action_context["style_guide"] = style_guide
             if behavioral_profile:
                 action_context["behavioral_profile"] = behavioral_profile
+            if preference_profile:
+                action_context["preference_profile"] = preference_profile
 
             conv_id = email_data.get("conversation_id")
             if conv_id:
@@ -1083,6 +1086,10 @@ def process_user_batch_signals(db, user_id, profile, emails):
                     behavioral_profile = profile.get("behavioral_profile") or ""
                     if behavioral_profile:
                         action_context["behavioral_profile"] = behavioral_profile
+
+                    preference_profile = profile.get("preference_profile")
+                    if preference_profile:
+                        action_context["preference_profile"] = preference_profile
 
                     # Attach contact for draft tone/context
                     if contact:
