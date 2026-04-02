@@ -1279,9 +1279,11 @@ def process_user_batch_signals(db, user_id, profile, emails):
                 te = candidate["action_context"].get("thread_emails", [])
                 if te:
                     ed = candidate["email_data"]
+                    user_email_primary = user_aliases[0] if user_aliases else ""
                     req = thread_summary_batch_params(
                         ed.get("subject", "(no subject)"),
                         te,
+                        user_email=user_email_primary,
                         custom_id=candidate["db_id"],
                     )
                     thread_summary_requests.append(req)

@@ -381,13 +381,28 @@ def _coerce_reason(value):
 # ---------------------------------------------------------------------------
 
 THREAD_SUMMARY_SYSTEM_PROMPT = """\
-Summarize this email thread for a drafting model. Focus on:
-- What was discussed and decided
-- Any commitments the user made
-- Unresolved items or open questions
-- Key facts, figures, or deadlines mentioned
+Summarize this email thread for a model that will draft the user's reply.
+Use exactly this structure:
 
-Output 3-7 sentences of plain text. No JSON, no headers, no bullet points."""
+The user is {user_email}. Messages from this address represent the user's own words and positions.
+
+TOPIC: One sentence. What the thread is about.
+
+USER'S POSITION: What the user has said, proposed, or committed to \
+in this thread. Refer to the user as "the user," never by name. \
+Include any commitments the user made to take action.
+
+KEY FACTS: Bullet the specific numbers, dates, terms, and \
+constraints established in the thread.
+
+RESOLVED: Items that were raised and subsequently answered or \
+addressed later in the thread. If someone asked a question and \
+another message answered it, it is resolved.
+
+OPEN: Items that remain unanswered, unresolved, or uncommitted \
+as of the final message in the thread.
+
+If a section has no content, write "None.\""""
 
 THREAD_SUMMARY_USER_TEMPLATE = """\
 Subject: {subject}
@@ -396,12 +411,13 @@ Thread messages (oldest first):
 {thread_content}"""
 
 
-def build_thread_summary_prompt(subject, thread_emails):
+def build_thread_summary_prompt(subject, thread_emails, user_email):
     """Format thread emails into a user prompt for thread summary generation.
 
     Args:
         subject: Email subject line.
         thread_emails: List of thread email dicts with sender, received_time, body.
+        user_email: The user's primary email address.
 
     Returns:
         str: Formatted user message.
@@ -426,25 +442,27 @@ def build_thread_summary_prompt(subject, thread_emails):
     )
 
 
-def generate_thread_summary(subject, thread_emails, api_key=None):
+def generate_thread_summary(subject, thread_emails, user_email, api_key=None):
     """Generate a thread summary via sync Haiku call.
 
     Args:
         subject: Email subject line.
         thread_emails: List of thread email dicts.
+        user_email: The user's primary email address.
         api_key: Optional API key override.
 
     Returns:
         tuple: (summary_text, usage_dict)
     """
-    user_message = build_thread_summary_prompt(subject, thread_emails)
+    user_message = build_thread_summary_prompt(subject, thread_emails, user_email)
+    system_prompt = THREAD_SUMMARY_SYSTEM_PROMPT.format(user_email=user_email)
 
     try:
         raw, usage = call_claude(
             prompt=user_message,
-            system_prompt=THREAD_SUMMARY_SYSTEM_PROMPT,
+            system_prompt=system_prompt,
             model=resolve_model("haiku"),
-            max_tokens=300,
+            max_tokens=600,
             temperature=0,
             api_key=api_key,
         )
@@ -458,29 +476,31 @@ def generate_thread_summary(subject, thread_emails, api_key=None):
     return raw.strip(), usage
 
 
-def thread_summary_batch_params(subject, thread_emails, custom_id):
+def thread_summary_batch_params(subject, thread_emails, user_email, custom_id):
     """Build a Batches API request dict for thread summary generation.
 
     Args:
         subject: Email subject line.
         thread_emails: List of thread email dicts.
+        user_email: The user's primary email address.
         custom_id: Unique ID for this request in the batch.
 
     Returns:
         dict with 'custom_id' and 'params' keys.
     """
-    user_message = build_thread_summary_prompt(subject, thread_emails)
+    user_message = build_thread_summary_prompt(subject, thread_emails, user_email)
+    system_prompt = THREAD_SUMMARY_SYSTEM_PROMPT.format(user_email=user_email)
 
     return {
         "custom_id": custom_id,
         "params": {
             "model": resolve_model("haiku"),
-            "max_tokens": 300,
+            "max_tokens": 600,
             "temperature": 0,
             "system": [
                 {
                     "type": "text",
-                    "text": THREAD_SUMMARY_SYSTEM_PROMPT,
+                    "text": system_prompt,
                     "cache_control": {"type": "ephemeral"},
                 }
             ],
