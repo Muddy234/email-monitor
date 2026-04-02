@@ -374,3 +374,116 @@ def _coerce_reason(value):
         return ""
     s = str(value)
     return s[:200]
+
+
+# ---------------------------------------------------------------------------
+# Thread summary (Haiku) — summarizes thread history for draft generation
+# ---------------------------------------------------------------------------
+
+THREAD_SUMMARY_SYSTEM_PROMPT = """\
+Summarize this email thread for a drafting model. Focus on:
+- What was discussed and decided
+- Any commitments the user made
+- Unresolved items or open questions
+- Key facts, figures, or deadlines mentioned
+
+Output 3-7 sentences of plain text. No JSON, no headers, no bullet points."""
+
+THREAD_SUMMARY_USER_TEMPLATE = """\
+Subject: {subject}
+
+Thread messages (oldest first):
+{thread_content}"""
+
+
+def build_thread_summary_prompt(subject, thread_emails):
+    """Format thread emails into a user prompt for thread summary generation.
+
+    Args:
+        subject: Email subject line.
+        thread_emails: List of thread email dicts with sender, received_time, body.
+
+    Returns:
+        str: Formatted user message.
+    """
+    sorted_msgs = sorted(
+        thread_emails, key=lambda m: m.get("received_time") or ""
+    )
+
+    parts = []
+    for msg in sorted_msgs:
+        sender = msg.get("sender_name") or msg.get("sender") or "Unknown"
+        date = msg.get("received_time", "")
+        body = (msg.get("body") or "")[:1000]
+        if body:
+            parts.append(f"--- {sender} ({date}) ---\n{body}")
+
+    thread_content = "\n\n".join(parts) if parts else "No thread messages."
+
+    return THREAD_SUMMARY_USER_TEMPLATE.format(
+        subject=subject or "(no subject)",
+        thread_content=thread_content,
+    )
+
+
+def generate_thread_summary(subject, thread_emails, api_key=None):
+    """Generate a thread summary via sync Haiku call.
+
+    Args:
+        subject: Email subject line.
+        thread_emails: List of thread email dicts.
+        api_key: Optional API key override.
+
+    Returns:
+        tuple: (summary_text, usage_dict)
+    """
+    user_message = build_thread_summary_prompt(subject, thread_emails)
+
+    try:
+        raw, usage = call_claude(
+            prompt=user_message,
+            system_prompt=THREAD_SUMMARY_SYSTEM_PROMPT,
+            model=resolve_model("haiku"),
+            max_tokens=300,
+            temperature=0,
+            api_key=api_key,
+        )
+    except Exception as e:
+        logger.warning(f"Thread summary API error: {e}")
+        return "No prior thread history.", {}
+
+    if not raw or len(raw.strip()) < 10:
+        return "No prior thread history.", usage
+
+    return raw.strip(), usage
+
+
+def thread_summary_batch_params(subject, thread_emails, custom_id):
+    """Build a Batches API request dict for thread summary generation.
+
+    Args:
+        subject: Email subject line.
+        thread_emails: List of thread email dicts.
+        custom_id: Unique ID for this request in the batch.
+
+    Returns:
+        dict with 'custom_id' and 'params' keys.
+    """
+    user_message = build_thread_summary_prompt(subject, thread_emails)
+
+    return {
+        "custom_id": custom_id,
+        "params": {
+            "model": resolve_model("haiku"),
+            "max_tokens": 300,
+            "temperature": 0,
+            "system": [
+                {
+                    "type": "text",
+                    "text": THREAD_SUMMARY_SYSTEM_PROMPT,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+            "messages": [{"role": "user", "content": user_message}],
+        },
+    }

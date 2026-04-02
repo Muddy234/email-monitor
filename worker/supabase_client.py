@@ -258,7 +258,8 @@ class SupabaseWorkerClient:
     # ------------------------------------------------------------------
 
     def insert_draft(self, email_id, user_id, draft_body,
-                     quality_issues=None, quality_retry_count=0):
+                     quality_issues=None, quality_retry_count=0,
+                     thread_summary=None):
         """Insert or update a draft with status='pending'.
 
         Skips overwrite if the user has edited the draft via the dashboard
@@ -271,6 +272,7 @@ class SupabaseWorkerClient:
             draft_body: The generated reply text.
             quality_issues: Optional list of un-fixed QC issue strings.
             quality_retry_count: Number of QC retries attempted (0 = none).
+            thread_summary: Optional Haiku-generated thread summary text.
 
         Returns:
             dict: The inserted/updated draft row, or empty dict if skipped.
@@ -297,6 +299,8 @@ class SupabaseWorkerClient:
             "quality_issues": quality_issues,
             "quality_retry_count": quality_retry_count,
         }
+        if thread_summary:
+            payload["thread_summary"] = thread_summary
 
         if existing:
             # Update existing draft (worker re-run)
@@ -602,12 +606,11 @@ class SupabaseWorkerClient:
 
         Args:
             user_id: UUID string.
-            preference_profile: Dict with investment_orientation + positional_stance.
+            preference_profile: Plain text preference profile string.
             decision_count: Number of decision moments used for synthesis.
         """
-        import json
         data = {
-            "preference_profile": json.dumps(preference_profile),
+            "preference_profile": preference_profile,
             "preference_profiled_at": datetime.utcnow().isoformat(),
         }
         if decision_count is not None:

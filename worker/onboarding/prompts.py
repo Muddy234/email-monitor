@@ -559,35 +559,27 @@ they lead with cost-benefit analysis, relationship impact, risk mitigation, \
 or speed? This reasoning lens emerges from the decision quotes and helps the \
 draft model match the justification, not just the direction.
 
-## Output Format (JSON)
+## Output Format (Plain Text)
 
-Start your response with {{ and end with }}.
+Write a plain-text preference profile with two sections. Use this exact format:
 
-{{
-  "classifications": [
-    {{
-      "decision_index": 1,
-      "decision_quote": "...",
-      "investment_signal": {{"direction": "active|selective|conservative|no_signal", "reasoning": "..."}},
-      "positional_signal": {{"direction": "advancing|measured|yielding|no_signal", "reasoning": "..."}}
-    }}
-  ],
-  "investment_orientation": {{
-    "category": "invest_heavy|invest_light|conserve_light|conserve_heavy",
-    "description": "...",
-    "confidence": "high|low",
-    "supporting_decisions": 14
-  }},
-  "positional_stance": {{
-    "category": "advance_heavy|advance_light|yield_light|yield_heavy",
-    "description": "...",
-    "confidence": "high|low",
-    "supporting_decisions": 8
-  }}
-}}
+Investment Orientation: CATEGORY_NAME
+Description text here — 2-4 sentences capturing the pattern and reasoning style.
 
-If a trait has fewer than 8 supporting decisions (excluding no_signal), set \
-that trait's object to null instead.
+Positional Stance: CATEGORY_NAME
+Description text here — 2-4 sentences capturing the pattern and reasoning style.
+
+Rules:
+- CATEGORY_NAME must be one of the categories defined above (e.g., INVEST HEAVY, \
+ADVANCE LIGHT, YIELD HEAVY, etc.), written in UPPER CASE with a space.
+- If a trait has fewer than 8 supporting decisions (excluding no_signal), omit \
+that section entirely.
+- If a trait has 8-14 supporting decisions, append to the description: \
+"Based on limited data (N decisions). This profile may shift as more email \
+history becomes available."
+- Do not include JSON, XML, or any structured markup. Plain text only.
+- Do not include the per-decision classifications in the output — only the \
+final synthesis.
 
 ## Contact Context
 {contact_context}

@@ -163,7 +163,7 @@ def backfill_drafts(db, email_ids=None):
             if cleaned:
                 db.insert_draft(email_id, user_id, cleaned)
                 if usage:
-                    db.record_token_usage(user_id, "sonnet", "draft", usage)
+                    db.record_token_usage(user_id, config.get("draft_model", "opus"), "draft", usage)
                 logger.info(f"  Draft inserted ({len(cleaned)} chars)")
             else:
                 logger.error(f"  Draft generation FAILED for '{subject[:50]}'")

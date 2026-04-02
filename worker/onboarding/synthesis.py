@@ -271,7 +271,7 @@ def synthesize_preferences(decision_moments, contact_profiles):
         contact_profiles: enriched contact profiles from Phase 4A
 
     Returns:
-        (preference_profile: dict or None, usage: dict)
+        (preference_profile: str or None, usage: dict)
     """
     if len(decision_moments) < 8:
         logger.info(
@@ -318,9 +318,9 @@ def synthesize_preferences(decision_moments, contact_profiles):
 
     response, usage = call_with_retry(
         prompt=prompt_text,
-        system_prompt="You are a decision-pattern analyst. Output valid JSON only.",
+        system_prompt="You are a decision-pattern analyst.",
         model="sonnet",
-        max_tokens=8192,
+        max_tokens=4096,
         temperature=0.3,
     )
 
@@ -328,43 +328,21 @@ def synthesize_preferences(decision_moments, contact_profiles):
         logger.error("Preference synthesis: no response from Sonnet")
         return None, usage
 
-    # Parse JSON response
-    cleaned = _clean_synthesis_output(response)
-    try:
-        parsed = json.loads(cleaned)
-    except json.JSONDecodeError:
-        # Try extracting JSON from response
-        parsed = _parse_json_response(cleaned)
-        if not parsed:
-            logger.error("Preference synthesis: failed to parse JSON response")
-            return None, usage
+    # Validate that we got at least one trait section
+    text = response.strip()
+    has_io = "Investment Orientation:" in text
+    has_ps = "Positional Stance:" in text
 
-    # Validate categories
-    io = parsed.get("investment_orientation")
-    ps = parsed.get("positional_stance")
-
-    if io and io.get("category") not in VALID_IO_CATEGORIES:
-        logger.warning(f"Invalid investment_orientation category: {io.get('category')}")
-        io = None
-    if ps and ps.get("category") not in VALID_PS_CATEGORIES:
-        logger.warning(f"Invalid positional_stance category: {ps.get('category')}")
-        ps = None
-
-    if not io and not ps:
-        logger.warning("Preference synthesis: both traits null after validation")
+    if not has_io and not has_ps:
+        logger.warning("Preference synthesis: no trait sections found in response")
         return None, usage
-
-    profile = {
-        "investment_orientation": io,
-        "positional_stance": ps,
-    }
 
     logger.info(
         f"Generated preference profile: "
-        f"IO={io['category'] if io else 'null'}, "
-        f"PS={ps['category'] if ps else 'null'}"
+        f"IO={'present' if has_io else 'null'}, "
+        f"PS={'present' if has_ps else 'null'}"
     )
-    return profile, usage
+    return text, usage
 
 
 # ---------------------------------------------------------------------------

@@ -4,7 +4,6 @@ import logging
 import re
 
 from .pre_process import isolate_new_content, truncate_smart
-from .prompts import DEFAULT_DRAFT_PROMPT_TEMPLATE
 
 logger = logging.getLogger("worker")
 
@@ -13,32 +12,111 @@ class DraftGenerator:
     """Generates draft email replies via the Anthropic Messages API."""
 
     def __init__(self, config, system_prompt_template=None):
-        self.model = config.get("draft_model", "sonnet")
+        self.model = config.get("draft_model", "opus")
         self.timeout = config.get("draft_cli_timeout_seconds", 90)
         self.user_name = config.get("draft_user_name", "")
-        self.user_title = config.get("draft_user_title", "")
-
-        template = system_prompt_template or DEFAULT_DRAFT_PROMPT_TEMPLATE
-        self.system_prompt = template.format(
-            user_name=self.user_name,
-            user_title=self.user_title
-        )
-
         self.api_key = config.get("anthropic_api_key")  # None → env var
 
     def _build_draft_prompt(self, email_data, action_context, revision_notes=None):
         """Build the user prompt for draft generation.
 
-        Uses enrichment data (reason, archetype, sender/thread briefings)
-        when available, falling back to basic action/context.
+        Structured as: PERSONALITY PROFILE → NEVER → EMAIL → THREAD SUMMARY
+        → CONTACT SUMMARY → "Draft a reply."
         """
+        sections = []
+
+        # 1. Personality profile
+        sections.append(self._build_personality_profile(action_context))
+
+        # 2. NEVER guardrails
+        sections.append(self._get_never_list())
+
+        # 3. Email section
+        sections.append(self._build_email_section(email_data, action_context))
+
+        # 4. Thread summary
+        thread_summary = action_context.get("thread_summary", "No prior thread history.")
+        sections.append(f"THREAD SUMMARY:\n{thread_summary}")
+
+        # 5. Contact summary
+        sections.append(self._build_contact_summary(email_data))
+
+        # 6. Instruction
+        sections.append(
+            "Draft a reply. If no response is needed, output only: "
+            "NO_DRAFT_NEEDED: <reason>"
+        )
+
+        prompt = "\n\n".join(sections)
+
+        if revision_notes:
+            prompt += f"\n\n{revision_notes}"
+
+        logger.debug(f"Draft prompt assembled: {len(prompt)} chars")
+
+        return prompt
+
+    @staticmethod
+    def _build_personality_profile(action_context):
+        """Concatenate style guide + behavioral profile + preference profile.
+
+        Returns "No personality profile available." if all are empty.
+        """
+        parts = []
+
+        style_guide = action_context.get("style_guide", "")
+        if style_guide:
+            parts.append(style_guide)
+
+        behavioral_profile = action_context.get("behavioral_profile", "")
+        if behavioral_profile:
+            parts.append(behavioral_profile)
+
+        preference_profile = action_context.get("preference_profile", "")
+        if preference_profile:
+            # preference_profile is now plain text (string)
+            if isinstance(preference_profile, str):
+                parts.append(preference_profile)
+
+        if not parts:
+            return "PERSONALITY PROFILE:\nNo personality profile available."
+
+        return "PERSONALITY PROFILE:\n" + "\n\n".join(parts)
+
+    @staticmethod
+    def _get_never_list():
+        """Return static NEVER guardrails."""
+        return (
+            "NEVER:\n"
+            "- Never fabricate information.\n"
+            "- Never restate the sender's question back to them.\n"
+            "- Never sign-off or act on behalf of anyone other than the USER.\n"
+            "- Never answer on behalf of another person or an item that is "
+            "outside of the USER authority; either produce no draft or "
+            "acknowledge that the question is for the other person.\n"
+            "- Never commit to a dollar amount, interest rate, loan term, or "
+            "financial structure not in the email or thread.\n"
+            "- Never make a legal commitment outside the confines of the email "
+            "or thread.\n"
+            "- Never fabricate a deadline, date, or timeline not in the email "
+            "or thread.\n"
+            "- Never address the recipient by the wrong name; use no greeting "
+            "rather than guessing.\n"
+            "- Never produce a draft longer than the situation requires."
+        )
+
+    @staticmethod
+    def _build_email_section(email_data, action_context):
+        """Build the EMAIL section with headers and isolated body."""
         subject = email_data.get("subject", "(no subject)")
         sender_name = email_data.get("sender_name", "Unknown")
         sender = email_data.get("sender", "")
+        received_time = email_data.get("received_time", "")
+        to_field = email_data.get("to", "")
+        cc_field = email_data.get("cc", "")
         raw_body = email_data.get("body", "") or ""
+
         thread_emails = action_context.get("thread_emails", [])
-        # Exclude the current email from prior bodies (safety net — the
-        # query should already exclude it, but guard against self-match)
         current_id = email_data.get("_db_id")
         prior_bodies = [
             te["body"] for te in thread_emails
@@ -46,240 +124,70 @@ class DraftGenerator:
         ]
         is_forward = subject.lower().startswith(("fw:", "fwd:"))
         body = isolate_new_content(raw_body, prior_bodies, subject=subject)
-        # Forwards carry the full thread inline — give more room
         body = truncate_smart(body, max_tokens=2500 if is_forward else 1000)
 
-        # Check for enrichment data
-        enrichment = action_context.get("enrichment")
-        reason = action_context.get("reason", "")
-        archetype = action_context.get("archetype", "")
+        lines = [
+            "EMAIL:",
+            f"From: {sender_name} <{sender}>",
+            f"Sent: {received_time}",
+        ]
+        if to_field:
+            lines.append(f"To: {to_field}")
+        if cc_field:
+            lines.append(f"Cc: {cc_field}")
+        lines.append(f"Subject: {subject}")
+        lines.append(f"\n{body}")
 
-        # Build context block — prefer enriched data when available
-        context_lines = []
-
-        if reason:
-            context_lines.append(f"Why a response is needed: {reason}")
-        else:
-            action = action_context.get("action", "")
-            context_text = action_context.get("context", "")
-            if action:
-                context_lines.append(f"ACTION NEEDED: {action}")
-            if context_text:
-                context_lines.append(f"CONTEXT: {context_text}")
-
-        # Include archetype only when no behavioral profile exists —
-        # the profile's decision disposition rules handle routing when present.
-        if archetype and archetype != "none" and not action_context.get("behavioral_profile"):
-            context_lines.append(f"Expected response type: {archetype}")
-
-        if enrichment:
-            sb = enrichment.get("sender_briefing", {})
-            tb = enrichment.get("thread_briefing", {})
-            if sb.get("summary"):
-                context_lines.append(f"Sender context: {sb['summary']}")
-            if tb.get("summary"):
-                context_lines.append(f"Thread context: {tb['summary']}")
-
-        # Sender context from contact record
-        sender_context_lines = []
-        sender_contact = email_data.get("sender_contact", {})
-        if sender_contact:
-            ctype = sender_contact.get("contact_type", "")
-            org = sender_contact.get("organization", "")
-            role = sender_contact.get("role", "")
-            significance = sender_contact.get("relationship_significance", "")
-            summary = sender_contact.get("relationship_summary", "")
-
-            if ctype and ctype != "unknown":
-                sender_context_lines.append(f"Contact type: {ctype}")
-            elif not ctype or ctype == "unknown":
-                sender_context_lines.append("Contact type: unknown (not yet classified)")
-            if org:
-                sender_context_lines.append(f"Organization: {org}")
-            if role:
-                sender_context_lines.append(f"Role: {role}")
-            if significance and significance != "medium":
-                sender_context_lines.append(f"Relationship significance: {significance}")
-            if summary:
-                sender_context_lines.append(f"Relationship: {summary}")
-
-        sender_context_block = ""
-        if sender_context_lines:
-            sender_context_block = "\n\nSENDER CONTEXT:\n" + "\n".join(sender_context_lines)
-
-        context_block = "\n".join(context_lines)
-
-        style_guide = action_context.get("style_guide", "")
-        style_block = ""
-        if style_guide:
-            style_block = f"\n\nWRITING STYLE GUIDE:\n{style_guide}\n"
-
-        behavioral_profile = action_context.get("behavioral_profile", "")
-        behavioral_block = ""
-        if behavioral_profile:
-            behavioral_block = f"\n\nBEHAVIORAL PROFILE:\n{behavioral_profile}\n"
-
-        preference_block = self._build_preference_block(action_context)
-
-        # Build thread context from enrichment messages or thread emails
-        thread_block = self._build_thread_block(action_context, email_data)
-
-        prompt = f"""Draft a reply to the following email:
-
-FROM: {sender_name} <{sender}>
-SUBJECT: {subject}
-
-EMAIL BODY:
-{body}
-
-{context_block}{sender_context_block}{thread_block}{style_block}{behavioral_block}{preference_block}
-
-Generate the reply body text only (no subject, no headers)."""
-
-        if revision_notes:
-            prompt += f"\n\n{revision_notes}"
-
-        logger.debug(f"Draft prompt assembled: {len(prompt)} chars "
-                     f"(body={len(body)}, style={len(style_guide)}, "
-                     f"behavioral={len(behavioral_profile)}, "
-                     f"preference={len(preference_block)}, "
-                     f"thread={len(thread_block)})")
-
-        return prompt
-
-    def _build_thread_block(self, action_context, email_data):
-        """Build a THREAD CONTEXT block from enrichment messages or thread emails.
-
-        Prefers curated enrichment messages (user_last, thread_opener) when
-        available. Falls back to thread_emails from the emails table.
-        """
-        enrichment = action_context.get("enrichment")
-        messages = enrichment.get("messages", {}) if enrichment else {}
-
-        user_last = messages.get("user_last")
-        thread_opener = messages.get("thread_opener")
-
-        # Fallback: build from real thread emails (signal pipeline)
-        if not user_last and not thread_opener:
-            thread_emails = action_context.get("thread_emails", [])
-            if thread_emails:
-                # thread_emails are ordered by received_time desc
-                sorted_msgs = sorted(
-                    thread_emails, key=lambda m: m.get("received_time") or ""
-                )
-                # User's most recent message
-                user_aliases = action_context.get("user_aliases", [])
-                user_msgs = [
-                    m for m in sorted_msgs
-                    if (m.get("sender") or "").lower() in user_aliases
-                ]
-                if user_msgs:
-                    last = user_msgs[-1]
-                    # Isolate new content from user's prior message
-                    raw = (last.get("body") or "")
-                    earlier = [m["body"] for m in sorted_msgs
-                               if m.get("received_time", "") < last.get("received_time", "")
-                               and m.get("body")]
-                    body = isolate_new_content(raw, earlier)[:1000]
-                    if body:
-                        user_last = {
-                            "sender": "User",
-                            "received_time": last.get("received_time"),
-                            "body": body,
-                        }
-                # Thread opener (earliest message)
-                if sorted_msgs:
-                    opener = sorted_msgs[0]
-                    if opener.get("received_time") != email_data.get("received_time"):
-                        raw = (opener.get("body") or "")
-                        body = isolate_new_content(raw, [])[:500]
-                        if body:
-                            thread_opener = {
-                                "sender": opener.get("sender_name") or opener.get("sender") or "",
-                                "received_time": opener.get("received_time"),
-                                "body": body,
-                            }
-
-        if not user_last and not thread_opener:
-            return ""
-
-        parts = ["\n\nTHREAD CONTEXT (prior messages in this conversation):"]
-        if thread_opener:
-            sender = thread_opener.get("sender", "Unknown")
-            date = thread_opener.get("received_time", "")
-            parts.append(f"--- Thread opener ({sender}, {date}) ---")
-            parts.append(thread_opener["body"])
-        if user_last:
-            date = user_last.get("received_time", "")
-            parts.append(f"\n--- Your last reply ({date}) ---")
-            parts.append(user_last["body"])
-
-        return "\n".join(parts)
+        return "\n".join(lines)
 
     @staticmethod
-    def _build_preference_block(action_context):
-        """Build a PREFERENCE PROFILE block from the preference_profile dict.
+    def _build_contact_summary(email_data):
+        """Build a CONTACT SUMMARY for all participants on the email.
 
-        Returns empty string if no preference profile is available.
-        Handles partial profiles (one trait null) by including only scored traits.
+        Formats each contact as a compact one-liner. Uses all_contacts dict
+        (keyed by email address) populated by the pipeline.
         """
-        pref = action_context.get("preference_profile")
-        if not pref or not isinstance(pref, dict):
-            return ""
+        all_contacts = email_data.get("all_contacts", {})
 
-        investment = pref.get("investment_orientation")
-        positional = pref.get("positional_stance")
+        if not all_contacts:
+            # Fallback to sender_contact for backward compatibility
+            sender_contact = email_data.get("sender_contact", {})
+            if sender_contact:
+                all_contacts = {email_data.get("sender", ""): sender_contact}
 
-        if not investment and not positional:
-            return ""
+        if not all_contacts:
+            return "CONTACT SUMMARY:\nUnknown sender — no contact record."
 
-        parts = ["\n\nPREFERENCE PROFILE:"]
+        lines = []
+        for email_addr, contact in all_contacts.items():
+            name = contact.get("name", "")
+            ctype = contact.get("contact_type", "unknown")
+            org = contact.get("organization", "")
+            role = contact.get("role", "")
+            significance = contact.get("relationship_significance", "")
 
-        if investment:
-            category = (investment.get("category") or "").upper().replace("_", " ")
-            description = investment.get("description", "")
-            confidence = investment.get("confidence", "high")
-            parts.append(f"\nInvestment Orientation: {category}")
-            parts.append(description)
-            if confidence == "low":
-                parts.append(
-                    "Based on limited data. Lean toward this direction but "
-                    "use [USER TO CONFIRM] for high-stakes decisions where "
-                    "the signal alone is insufficient to commit."
-                )
+            parts = []
+            if name:
+                parts.append(f"{name} <{email_addr}>")
+            else:
+                parts.append(email_addr)
 
-        if positional:
-            category = (positional.get("category") or "").upper().replace("_", " ")
-            description = positional.get("description", "")
-            confidence = positional.get("confidence", "high")
-            parts.append(f"\nPositional Stance: {category}")
-            parts.append(description)
-            if confidence == "low":
-                parts.append(
-                    "Based on limited data. Lean toward this direction but "
-                    "use [USER TO CONFIRM] for high-stakes decisions where "
-                    "the signal alone is insufficient to commit."
-                )
+            desc = []
+            if ctype and ctype != "unknown":
+                desc.append(ctype.replace("_", " ").title())
+            if org:
+                desc.append(f"at {org}")
+            if role:
+                desc.append(f"| {role}")
+            if significance and significance != "medium":
+                desc.append(f"| Relationship: {significance}")
 
-        # Tiebreaker instructions
-        parts.append(
-            "\nUse these traits to determine the DIRECTION of decisions in the draft:\n"
-            "- Preference = WHAT to decide\n"
-            "- Behavior = HOW to express the decision\n"
-            "- Style = HOW to write it\n"
-            "\n"
-            "When the two traits point in different directions on a given decision:\n"
-            "1. The trait with the stronger (heavier) category takes priority\n"
-            "2. If equally weighted, the trait with higher confidence wins\n"
-            "3. If confidence is also equal, take the more cautious direction "
-            "and mark as [USER TO CONFIRM]\n"
-            "\n"
-            "[USER TO CONFIRM] is for missing factual information that cannot "
-            "be inferred from context or the preference profile. It is NOT for "
-            "decisions, preferences, or strategic choices."
-        )
+            if desc:
+                parts.append(" — " + " ".join(desc))
 
-        return "\n".join(parts) + "\n"
+            lines.append("".join(parts))
+
+        return "CONTACT SUMMARY:\n" + "\n".join(lines)
 
     def build_batch_params(self, email_data, action_context, custom_id):
         """Build a Batches API request dict for a single draft.
@@ -301,9 +209,6 @@ Generate the reply body text only (no subject, no headers)."""
                 "model": resolve_model(self.model),
                 "max_tokens": 2048,
                 "temperature": 0.3,
-                "system": [
-                    {"type": "text", "text": self.system_prompt, "cache_control": {"type": "ephemeral"}}
-                ],
                 "messages": [{"role": "user", "content": prompt_text}],
             },
         }
@@ -329,13 +234,11 @@ Generate the reply body text only (no subject, no headers)."""
         try:
             raw_output, usage = call_claude(
                 prompt=prompt_text,
-                system_prompt=self.system_prompt,
                 model=resolve_model(self.model),
                 max_tokens=2048,
                 timeout=self.timeout,
                 api_key=self.api_key,
                 temperature=0.3,
-                cache_system_prompt=True,
             )
         except Exception as e:
             subject = email_data.get("subject", "unknown")
