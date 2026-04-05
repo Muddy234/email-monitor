@@ -25,6 +25,7 @@ still saved.
 """
 
 import logging
+import os
 import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -488,6 +489,16 @@ def run_onboarding(db, user_id, profile):
             )
 
         logger.info(f"Onboarding {'partial' if missing_components else 'complete'} for user {user_id}")
+
+        # Trigger calibration after onboarding completes
+        try:
+            from calibration.runner import run_calibration
+            api_key = os.environ.get("ANTHROPIC_API_KEY")
+            logger.info(f"Starting post-onboarding calibration for {user_id[:8]}...")
+            run_calibration(db, user_id, api_key=api_key)
+        except Exception:
+            logger.exception(f"Calibration failed for user {user_id[:8]}... (non-fatal)")
+
         return True
 
     except Exception:
