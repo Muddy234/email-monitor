@@ -5,9 +5,9 @@ You are scoring an email reply against behavioral dimensions.
 The user's actual sent reply is provided below.
 
 Classify the reply on each dimension. Output exactly three lines:
-DECISIVENESS: {decides | proposes_solution | defers | delegates | no_signal}
-THOROUGHNESS: {addresses_all | key_point_only | no_signal}
-SPECIFICITY: {specific_next_step | conditional_decision | vague_forward | no_signal}
+DECISIVENESS: {{decides | proposes_solution | defers | delegates | no_signal}}
+THOROUGHNESS: {{addresses_all | key_point_only | no_signal}}
+SPECIFICITY: {{specific_next_step | conditional_decision | vague_forward | no_signal}}
 
 No explanation. No other text.
 
@@ -21,8 +21,8 @@ PREFERENCE_SCORING_PROMPT = """\
 You are scoring an email reply against preference dimensions.
 
 Classify the reply on each dimension. Output exactly two lines:
-INVESTMENT: {active | selective | conservative | no_signal}
-POSITIONAL: {advancing | measured | yielding | no_signal}
+INVESTMENT: {{active | selective | conservative | no_signal}}
+POSITIONAL: {{advancing | measured | yielding | no_signal}}
 
 No explanation. No other text.
 
