@@ -54,6 +54,7 @@ def extract_all(emails, user_aliases):
         dict with keys: response_events, contacts, threads, domains, user_profile
     """
     aliases = {a.lower() for a in user_aliases} if user_aliases else set()
+    logger.debug(f"[STATS] extract_all called: {len(emails)} emails, {len(aliases)} aliases")
 
     received, sent = _split_emails(emails, aliases)
     logger.info(f"Extraction: {len(received)} received, {len(sent)} sent")
@@ -68,9 +69,11 @@ def extract_all(emails, user_aliases):
 
     # Step 2: Build contacts
     contacts = _build_contacts(response_events, global_rate, aliases)
+    logger.debug(f"[STATS] contacts built: {len(contacts)} unique senders")
 
     # Step 3: Build threads
     threads = _build_threads(emails, aliases)
+    logger.debug(f"[STATS] threads built: {len(threads)} conversations")
 
     # Step 3b: Enrich contacts with user_initiates_pct from threads
     _enrich_user_initiates_pct(contacts, threads, response_events)
@@ -80,13 +83,24 @@ def extract_all(emails, user_aliases):
 
     # Step 4: Build domains
     domains = _build_domains(contacts)
+    logger.debug(f"[STATS] domains built: {len(domains)} domains")
 
     # Step 5: Build user profile
     user_profile = _build_user_profile(received, sent, global_rate)
+    logger.debug(
+        f"[STATS] user_profile: active_hours={user_profile.get('active_hours')}, "
+        f"active_days={user_profile.get('active_days')}, "
+        f"msg_type_pct={user_profile.get('message_type_pct')}"
+    )
 
     # Step 5b: Enrich response events with active-time features
     _enrich_active_time_features(response_events, user_profile)
 
+    logger.debug(
+        f"[STATS] extract_all complete: events={len(response_events)}, "
+        f"contacts={len(contacts)}, threads={len(threads)}, "
+        f"domains={len(domains)}"
+    )
     return {
         "response_events": response_events,
         "contacts": contacts,
@@ -149,6 +163,12 @@ def _build_response_events(received, sent, user_aliases):
             raw = s.get(field) or ""
             for addr in _EMAIL_RE.findall(raw):
                 sent_by_recipient[addr.lower()].append(s)
+
+    logger.debug(
+        f"[STATS] response event matching: {len(received)} received, "
+        f"{len(sent_by_conv)} conversations indexed, "
+        f"{len(sent_by_recipient)} recipient addresses indexed"
+    )
 
     # Match each received email to a response
     events = []
@@ -220,11 +240,21 @@ def _build_response_events(received, sent, user_aliases):
         }
         events.append(event)
 
+    responded_count = sum(1 for e in events if e.get("responded"))
+    logger.debug(f"[STATS] pre-fanout: {len(events)} events, {responded_count} responded")
+
     # Fan-out fix: only most recent inbound before each reply keeps responded=true
     _fix_fanout(events)
 
     # Detect recurring patterns and mark events
     _detect_recurring(events)
+
+    post_responded = sum(1 for e in events if e.get("responded"))
+    recurring_count = sum(1 for e in events if e.get("is_recurring"))
+    logger.debug(
+        f"[STATS] post-fanout/recurring: {post_responded} responded, "
+        f"{recurring_count} recurring"
+    )
 
     return events
 

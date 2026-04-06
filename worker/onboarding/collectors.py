@@ -70,9 +70,19 @@ def collect_onboarding_emails(db, user_id, user_aliases, days=120, max_emails=No
     Returns:
         dict with keys: received, sent, filtered_count, total_count.
     """
+    logger.debug(f"[COLLECT] fetching emails: user={user_id[:8]}, days={days}, max_emails={max_emails}")
     all_emails = db.fetch_emails_for_onboarding(user_id, days=days, max_emails=max_emails)
     total = len(all_emails)
     logger.info(f"Fetched {total} emails for user {user_id} ({days}-day window)")
+    if all_emails:
+        dates = [e.get("received_time", "") for e in all_emails if e.get("received_time")]
+        if dates:
+            logger.debug(f"[COLLECT] date range: {min(dates)[:19]} → {max(dates)[:19]}")
+        folders = {}
+        for e in all_emails:
+            f = e.get("folder", "unknown")
+            folders[f] = folders.get(f, 0) + 1
+        logger.debug(f"[COLLECT] folder distribution: {folders}")
 
     aliases_lower = {a.lower() for a in user_aliases} if user_aliases else set()
 
@@ -125,12 +135,19 @@ def collect_onboarding_emails(db, user_id, user_aliases, days=120, max_emails=No
         f"{filtered_count} filtered out"
     )
 
-    return {
+    result = {
         "received": received,
         "sent": sent,
         "filtered_count": filtered_count,
         "total_count": total,
+        "total_fetched": total,
+        "pre_filter_removed": filtered_count,
     }
+    logger.debug(
+        f"[COLLECT] final counts — received={len(received)}, sent={len(sent)}, "
+        f"filtered={filtered_count}, total_fetched={total}"
+    )
+    return result
 
 
 def pre_filter_emails(emails):

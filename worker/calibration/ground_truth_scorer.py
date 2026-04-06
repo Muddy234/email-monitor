@@ -64,6 +64,10 @@ def score_ground_truth(cal_email, api_key=None):
     reply = cal_email.user_reply
     incoming = cal_email.incoming_email
     incoming_body = incoming.get("body", "") or ""
+    logger.debug(
+        f"[GT] scoring {cal_email.db_id[:8]}: has_reply={reply is not None}, "
+        f"incoming_len={len(incoming_body)}, reply_len={len(reply) if reply else 0}"
+    )
 
     # Style scoring (mechanical)
     style = _score_style(reply) if reply else StyleScore(
@@ -98,6 +102,12 @@ def score_ground_truth(cal_email, api_key=None):
         thread_depth=cal_email.thread_depth,
     )
 
+    logger.debug(
+        f"[GT] {cal_email.db_id[:8]} results: "
+        f"style=({style.greeting_type}/{style.signoff_type}/{style.word_count}w), "
+        f"behavioral=({behavioral.decisiveness}/{behavioral.thoroughness}/{behavioral.specificity}), "
+        f"preference=({preference.investment_signal}/{preference.positional_signal})"
+    )
     return GroundTruthScore(
         email_id=cal_email.db_id,
         style=style,

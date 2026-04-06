@@ -43,8 +43,11 @@ def synthesize_contacts(contact_freq, response_rates, extractions):
         logger.warning("No contacts to synthesize")
         return [], {}
 
+    logger.debug(f"[CONTACT_SYNTH] {len(contact_inputs)} contacts, {len(extractions)} extractions")
+
     # Format for Sonnet
     prompt_text = _format_contact_prompt(contact_inputs)
+    logger.debug(f"[CONTACT_SYNTH] prompt length: {len(prompt_text)} chars")
 
     response, usage = call_with_retry(
         prompt=prompt_text,
@@ -59,12 +62,14 @@ def synthesize_contacts(contact_freq, response_rates, extractions):
         logger.error("Contact synthesis: no response from Sonnet")
         return None, usage
 
+    logger.debug(f"[CONTACT_SYNTH] response length: {len(response)} chars")
     data = _parse_json_response(response)
     if data is None:
         logger.error(f"Contact synthesis: invalid JSON from Sonnet — {response[:200]}")
         return None, usage
     profiles = data.get("contact_profiles", [])
     logger.info(f"Synthesized {len(profiles)} contact profiles")
+    logger.debug(f"[CONTACT_SYNTH] profile types: {[p.get('contact_type', '?') for p in profiles[:10]]}...")
     return profiles, usage
 
 
@@ -84,6 +89,7 @@ def synthesize_topics(keyword_frequencies):
     # Format ranked keyword list
     sorted_kw = sorted(keyword_frequencies.items(), key=lambda x: x[1], reverse=True)
     total_count = len(sorted_kw)
+    logger.debug(f"[TOPIC_SYNTH] {total_count} unique keywords, top 5: {sorted_kw[:5]}")
     lines = [f"- \"{kw}\" (frequency: {count})" for kw, count in sorted_kw[:150]]
     header = f"Ranked keywords by frequency (top 150 of {total_count}):\n" if total_count > 150 else "Ranked keywords by frequency:\n"
     prompt_text = header + "\n".join(lines)
@@ -164,6 +170,11 @@ def synthesize_style_guide(style_features, contact_profiles):
         + json.dumps(enriched)
     )
 
+    logger.debug(
+        f"[STYLE_SYNTH] {len(enriched)} enriched features, "
+        f"prompt_len={len(prompt_text)} chars, sample_note={sample_note}"
+    )
+
     response, usage = call_with_retry(
         prompt=prompt_text,
         system_prompt=SONNET_STYLE_GUIDE_PROMPT,
@@ -177,8 +188,10 @@ def synthesize_style_guide(style_features, contact_profiles):
         logger.error("Style guide synthesis: no response from Sonnet")
         return None, usage
 
+    logger.debug(f"[STYLE_SYNTH] raw response length: {len(response)} chars")
     cleaned = _clean_synthesis_output(response)
     logger.info(f"Generated style guide ({len(cleaned)} chars)")
+    logger.debug(f"[STYLE_SYNTH] cleaned length: {len(cleaned)} chars (trimmed {len(response) - len(cleaned)})")
     return cleaned, usage
 
 
@@ -240,6 +253,11 @@ def synthesize_behavioral_profile(behavioral_features, contact_profiles):
         + profiles_block
     )
 
+    logger.debug(
+        f"[BEH_SYNTH] {len(behavioral_features)} features, "
+        f"prompt_len={len(prompt_text)} chars, sample_note={sample_note}"
+    )
+
     response, usage = call_with_retry(
         prompt=prompt_text,
         system_prompt=SONNET_BEHAVIORAL_PROFILE_PROMPT,
@@ -253,6 +271,7 @@ def synthesize_behavioral_profile(behavioral_features, contact_profiles):
         logger.error("Behavioral profile synthesis: no response from Sonnet")
         return None, usage
 
+    logger.debug(f"[BEH_SYNTH] raw response length: {len(response)} chars")
     cleaned = _clean_synthesis_output(response)
     logger.info(f"Generated behavioral profile ({len(cleaned)} chars)")
     return cleaned, usage
@@ -273,6 +292,7 @@ def synthesize_preferences(decision_moments, contact_profiles):
     Returns:
         (preference_profile: str or None, usage: dict)
     """
+    logger.debug(f"[PREF_SYNTH] input: {len(decision_moments)} decision moments")
     if len(decision_moments) < 8:
         logger.info(
             f"Only {len(decision_moments)} decision moments — need 8 minimum, "
@@ -327,6 +347,8 @@ def synthesize_preferences(decision_moments, contact_profiles):
     if not response:
         logger.error("Preference synthesis: no response from Sonnet")
         return None, usage
+
+    logger.debug(f"[PREF_SYNTH] response length: {len(response)} chars")
 
     # Validate that we got at least one trait section
     text = response.strip()

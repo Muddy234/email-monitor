@@ -44,10 +44,14 @@ def call_with_retry(
     """
     resolved = resolve_model(model)
     errors = []
+    logger.debug(
+        f"[RETRY] call_with_retry: model={resolved}, max_tokens={max_tokens}, "
+        f"timeout={timeout}s, max_retries={max_retries}"
+    )
 
     for attempt in range(max_retries + 1):
         try:
-            return call_claude(
+            result = call_claude(
                 prompt=prompt,
                 system_prompt=system_prompt,
                 model=resolved,
@@ -57,6 +61,11 @@ def call_with_retry(
                 cache_system_prompt=cache_system_prompt,
                 api_key=api_key,
             )
+            if attempt > 0:
+                logger.debug(f"[RETRY] succeeded on attempt {attempt + 1} (prior errors: {errors})")
+            resp_text = result[0] if result else None
+            logger.debug(f"[RETRY] response length: {len(resp_text) if resp_text else 0} chars")
+            return result
         except anthropic.RateLimitError as e:
             errors.append("rate_limit")
             if attempt == max_retries:

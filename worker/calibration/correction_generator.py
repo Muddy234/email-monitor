@@ -44,7 +44,10 @@ def generate_corrections(results, api_key=None):
     """
     hard_misses = [r for r in results if r.overall == "hard_miss"]
     if not hard_misses:
+        logger.debug("[CORRECTION] no hard misses — skipping correction generation")
         return []
+
+    logger.debug(f"[CORRECTION] analyzing {len(hard_misses)} hard misses for correction rules")
 
     # Classify failure dimensions for each hard miss
     failures = []
@@ -66,8 +69,11 @@ def generate_corrections(results, api_key=None):
             "actual_snippet": (result.actual_reply or "")[:500],
         })
 
+    logger.debug(f"[CORRECTION] failure dimensions: {dict(failure_counts)}")
+
     # Build failure block for prompt
     failures_block = _build_failures_block(failures)
+    logger.debug(f"[CORRECTION] failure block length: {len(failures_block)} chars")
 
     # Generate rules via Opus
     prompt = CORRECTION_GENERATION_PROMPT.format(failures_block=failures_block)
@@ -80,12 +86,18 @@ def generate_corrections(results, api_key=None):
             api_key=api_key,
         )
         raw_rules = _parse_rules(text)
+        logger.debug(f"[CORRECTION] Opus generated {len(raw_rules)} raw rules")
     except Exception as e:
         logger.warning(f"Correction generation failed: {e}")
         raw_rules = _generate_mechanical_rules(failure_counts)
+        logger.debug(f"[CORRECTION] fallback mechanical rules: {len(raw_rules)}")
 
     # Rank and trim
-    return rank_and_trim_rules(raw_rules, failure_counts, max_rules=10)
+    final_rules = rank_and_trim_rules(raw_rules, failure_counts, max_rules=10)
+    logger.debug(f"[CORRECTION] final rules after rank/trim: {len(final_rules)}")
+    for i, rule in enumerate(final_rules):
+        logger.debug(f"[CORRECTION] rule {i+1}: {rule[:100]}")
+    return final_rules
 
 
 def _extract_failure_dimensions(result):

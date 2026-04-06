@@ -95,6 +95,11 @@ def score_draft(cal_email, generated_draft, ground_truth, iteration,
     """
     incoming_body = (cal_email.incoming_email.get("body") or "")[:3000]
     actual_reply = cal_email.user_reply
+    logger.debug(
+        f"[DRAFT-SCORE] {cal_email.db_id[:8]} iter={iteration}: "
+        f"draft_len={len(generated_draft) if generated_draft else 0}, "
+        f"reply_len={len(actual_reply) if actual_reply else 0}"
+    )
 
     # Style delta (mechanical)
     if generated_draft:
@@ -143,6 +148,15 @@ def score_draft(cal_email, generated_draft, ground_truth, iteration,
     # Overall classification
     overall = _classify_overall(style_delta, behavioral_delta,
                                  preference_delta, contextual)
+
+    logger.debug(
+        f"[DRAFT-SCORE] {cal_email.db_id[:8]} result: overall={overall}, "
+        f"style_delta=(wc_ratio={style_delta.word_count_ratio}, "
+        f"greeting={style_delta.greeting_match}, signoff={style_delta.signoff_match}, "
+        f"formality={style_delta.formality_register}), "
+        f"contextual=(draft_acc={contextual.should_draft_accuracy}, "
+        f"content={contextual.content_alignment}, fab={contextual.fabrication_detected})"
+    )
 
     return CalibrationResult(
         email_id=cal_email.db_id,

@@ -57,14 +57,17 @@ def select_calibration_emails(db, user_id, aliases):
         list[CalibrationEmail]: Selected test emails.
     """
     alias_set = {a.lower() for a in aliases} if aliases else set()
+    logger.debug(f"[CAL-SEL] selecting calibration emails for {user_id[:8]}, aliases={len(alias_set)}")
 
     # Fetch recent received emails (last 30 days preferred, expand if needed)
     cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
     received = _fetch_received_emails(db, user_id, cutoff)
+    logger.debug(f"[CAL-SEL] 30-day received: {len(received)}")
 
     if len(received) < TARGET_COUNT:
         cutoff_60 = (datetime.now(timezone.utc) - timedelta(days=60)).isoformat()
         received = _fetch_received_emails(db, user_id, cutoff_60)
+        logger.debug(f"[CAL-SEL] expanded to 60-day: {len(received)}")
 
     if not received:
         logger.warning("No received emails found for calibration")
@@ -72,10 +75,12 @@ def select_calibration_emails(db, user_id, aliases):
 
     # Fetch sent emails to find user replies
     sent_by_conv = _fetch_sent_emails_by_conversation(db, user_id, alias_set)
+    logger.debug(f"[CAL-SEL] sent conversations indexed: {len(sent_by_conv)}")
 
     # Fetch contacts for contact type info
     sender_emails = list({r["sender_email"] for r in received if r.get("sender_email")})
     contacts = db.fetch_contacts_by_emails(user_id, sender_emails)
+    logger.debug(f"[CAL-SEL] contacts fetched: {len(contacts)} of {len(sender_emails)} senders")
 
     # Fetch signal scores from response_events
     email_ids = [r["id"] for r in received]
@@ -118,6 +123,15 @@ def select_calibration_emails(db, user_id, aliases):
         # Tag with all qualifying buckets
         cal_email.selection_buckets = _compute_buckets(cal_email)
         candidates.append(cal_email)
+
+    logger.debug(f"[CAL-SEL] candidate pool: {len(candidates)} emails")
+    # Log bucket distribution
+    from collections import Counter as _Counter
+    bucket_dist = _Counter()
+    for c in candidates:
+        for b in c.selection_buckets:
+            bucket_dist[b] += 1
+    logger.debug(f"[CAL-SEL] bucket distribution in pool: {dict(bucket_dist)}")
 
     # Greedy allocation
     selected = _greedy_select(candidates)

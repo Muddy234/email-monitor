@@ -80,10 +80,12 @@ def extract_email_features(received, contact_freq):
     # Select emails to extract — prioritize high-frequency senders + replied-to
     selected = _select_emails_for_extraction(received, contact_freq)
     logger.info(f"Selected {len(selected)} emails for Haiku extraction")
+    logger.debug(f"[EXTRACT] input: {len(received)} received, {len(contact_freq)} contacts in freq table")
 
     # Prepare batches (no To/CC — topic keywords come from subject + body)
     batches = _prepare_batches(selected, BATCH_SIZE, include_recipients=False)
     total_batches = len(batches)
+    logger.debug(f"[EXTRACT] prepared {total_batches} batches of size {BATCH_SIZE}")
     completed_batches = 0
     all_extractions = []
     failed_batches = 0
@@ -102,13 +104,16 @@ def extract_email_features(received, contact_freq):
                 _merge_usage(total_usage, usage)
                 if result:
                     all_extractions.extend(result)
+                    logger.debug(f"[EXTRACT] batch {batch_idx}: {len(result)} extractions")
                 else:
                     failed_batches += 1
+                    logger.debug(f"[EXTRACT] batch {batch_idx}: returned None")
             except Exception:
                 logger.exception(f"Extraction batch {batch_idx} failed")
                 failed_batches += 1
 
             completed_batches += 1
+            logger.debug(f"[EXTRACT] progress: {completed_batches}/{total_batches} batches, {failed_batches} failed")
 
     # Halt if too many failures
     if total_batches > 0 and failed_batches / total_batches > 0.5:
@@ -194,6 +199,7 @@ def extract_writing_styles(sent_emails, pre_sampled=None):
         return {"style_features": [], "sample_count": 0}
 
     batches = _prepare_batches(sampled, BATCH_SIZE)
+    logger.debug(f"[STYLE] prepared {len(batches)} batches from {len(sampled)} sampled emails")
     all_features = []
     failed_batches = 0
     total_usage = {}
@@ -205,13 +211,16 @@ def extract_writing_styles(sent_emails, pre_sampled=None):
         }
 
         for future in as_completed(futures):
+            batch_idx = futures[future]
             try:
                 result, usage = future.result()
                 _merge_usage(total_usage, usage)
                 if result:
                     all_features.extend(result)
+                    logger.debug(f"[STYLE] batch {batch_idx}: {len(result)} features")
                 else:
                     failed_batches += 1
+                    logger.debug(f"[STYLE] batch {batch_idx}: returned None")
             except Exception:
                 logger.exception("Style extraction batch failed")
                 failed_batches += 1
@@ -286,10 +295,15 @@ def extract_behavioral_features(sent_emails, response_events, received_emails,
         return {"behavioral_features": [], "sample_count": 0}
 
     # Format pairs into batches (with response event metadata)
+    logger.debug(
+        f"[BEHAVIORAL] pairing: {len(sent_to_parent)} sent→parent links, "
+        f"{len(sent_by_id)} sent_by_id entries"
+    )
     batches = _prepare_behavioral_batches(
         sampled, sent_to_parent, sent_by_id, user_domain,
         response_events=response_events,
     )
+    logger.debug(f"[BEHAVIORAL] prepared {len(batches)} batches from {len(sampled)} sampled emails")
     all_features = []
     decision_moments = []
     failed_batches = 0
@@ -307,6 +321,7 @@ def extract_behavioral_features(sent_emails, response_events, received_emails,
                 _merge_usage(total_usage, usage)
                 if result:
                     all_features.extend(result)
+                    logger.debug(f"[BEHAVIORAL] batch: {len(result)} features extracted")
                     # Extract decision moments for preference synthesis
                     for item in result:
                         if not item.get("contains_decision") or not item.get("decision_quote"):

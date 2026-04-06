@@ -91,24 +91,44 @@ def train_user_model(db, user_id):
     # Compute global rate
     total_responded = sum(1 for e in events if e.get("responded"))
     global_rate = total_responded / len(events)
+    logger.debug(f"[TRAIN] global_rate={global_rate:.4f} ({total_responded}/{len(events)})")
 
     # Step 1: Feature importance
     feature_results = _analyze_features(events, global_rate)
+    logger.debug(
+        f"[TRAIN] feature analysis: {len(feature_results)} feature groups, "
+        f"bool features={[k for k, v in feature_results.items() if isinstance(v, dict) and v.get('type') == 'boolean']}"
+    )
 
     # Step 2: Derive lift factors
     lift_factors = _derive_lift_factors(feature_results, global_rate)
+    logger.debug(
+        f"[TRAIN] lift factors: {len(lift_factors.get('boolean', {}))} boolean, "
+        f"{len(lift_factors.get('msg_type', {}))} msg_type, "
+        f"{len(lift_factors.get('recipient_bins', {}))} recip_bins, "
+        f"{len(lift_factors.get('depth_bins', {}))} depth_bins"
+    )
 
     # Step 3: Detect recurring patterns
     recurring = _detect_recurring_patterns(events)
+    logger.debug(f"[TRAIN] recurring patterns: {len(recurring)} detected")
 
     # Step 4: Score all events
     predictions = _score_all_events(events, lift_factors, global_rate, recurring)
+    scores = [p["score"] for p in predictions]
+    logger.debug(
+        f"[TRAIN] scored {len(predictions)} events: "
+        f"min={min(scores):.4f}, max={max(scores):.4f}, "
+        f"mean={sum(scores)/len(scores):.4f}"
+    )
 
     # Step 5: Fit isotonic regression
     iso_breakpoints = _fit_isotonic(predictions)
+    logger.debug(f"[TRAIN] isotonic breakpoints: {len(iso_breakpoints)}")
 
     # Step 6: Compute triage thresholds
     triage = _compute_triage(predictions, iso_breakpoints)
+    logger.debug(f"[TRAIN] triage thresholds: {triage}")
 
     params = {
         "meta": {
@@ -141,11 +161,13 @@ def check_retrain_needed(db, user_id):
     """Check if a user's model needs re-training."""
     params = db.fetch_scoring_parameters(user_id)
     if not params:
+        logger.debug(f"[TRAIN] retrain check {user_id[:8]}: no params found → retrain")
         return True
 
     meta = params.get("meta", {})
     generated_at = meta.get("generated_at")
     if not generated_at:
+        logger.debug(f"[TRAIN] retrain check {user_id[:8]}: no generated_at → retrain")
         return True
 
     # Check days elapsed
@@ -153,15 +175,19 @@ def check_retrain_needed(db, user_id):
         gen_dt = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
         days_elapsed = (datetime.now(timezone.utc) - gen_dt).days
         if days_elapsed >= RETRAIN_DAYS_THRESHOLD:
+            logger.debug(f"[TRAIN] retrain check {user_id[:8]}: {days_elapsed} days elapsed → retrain")
             return True
     except (ValueError, TypeError):
+        logger.debug(f"[TRAIN] retrain check {user_id[:8]}: bad generated_at → retrain")
         return True
 
     # Check new events count
     new_count = db.count_response_events_since(user_id, generated_at)
     if new_count >= RETRAIN_EVENT_THRESHOLD:
+        logger.debug(f"[TRAIN] retrain check {user_id[:8]}: {new_count} new events → retrain")
         return True
 
+    logger.debug(f"[TRAIN] retrain check {user_id[:8]}: {days_elapsed}d elapsed, {new_count} new events → skip")
     return False
 
 

@@ -44,6 +44,7 @@ def run_calibration(db, user_id, api_key=None):
 
     profile = db.fetch_user_config(user_id)
     aliases = profile.get("user_email_aliases", [])
+    logger.debug(f"[CAL] user aliases: {aliases}")
 
     # Select 15 stratified test emails
     cal_emails = select_calibration_emails(db, user_id, aliases)
@@ -53,6 +54,12 @@ def run_calibration(db, user_id, api_key=None):
         return False
 
     logger.info(f"Selected {len(cal_emails)} calibration emails")
+    for ce in cal_emails:
+        logger.debug(
+            f"[CAL] cal_email: {ce.db_id[:8]}... contact_type={ce.contact_type}, "
+            f"depth={ce.thread_depth}, has_reply={ce.user_reply is not None}, "
+            f"buckets={ce.selection_buckets}"
+        )
 
     # Score ground truth (Layer 1) — runs once
     ground_truths = {}
@@ -60,6 +67,13 @@ def run_calibration(db, user_id, api_key=None):
         gt = score_ground_truth(cal_email, api_key=api_key)
         if gt:
             ground_truths[cal_email.db_id] = gt
+            logger.debug(
+                f"[CAL] GT {cal_email.db_id[:8]}: style=({gt.style.greeting_type}/{gt.style.signoff_type}/{gt.style.word_count}w), "
+                f"behavioral=({gt.behavioral.decisiveness}/{gt.behavioral.thoroughness}/{gt.behavioral.specificity}), "
+                f"preference=({gt.preference.investment_signal}/{gt.preference.positional_signal})"
+            )
+        else:
+            logger.debug(f"[CAL] GT {cal_email.db_id[:8]}: no ground truth returned")
 
     logger.info(f"Ground truth scored for {len(ground_truths)}/{len(cal_emails)} emails")
 
@@ -81,10 +95,13 @@ def run_calibration(db, user_id, api_key=None):
         db.update_calibration_iteration(user_id, iteration)
 
         # Generate drafts for all test emails
+        logger.debug(f"[CAL] iter {iteration}: generating drafts with {len(all_rules)} correction rules")
         drafts = _generate_calibration_drafts(
             cal_emails, draft_gen, profile, cached_thread_summaries,
             all_rules, api_key,
         )
+        draft_count = sum(1 for d in drafts.values() if d is not None)
+        logger.debug(f"[CAL] iter {iteration}: {draft_count}/{len(drafts)} drafts generated")
 
         # Score drafts against ground truth (Layer 2)
         results = []
@@ -101,6 +118,12 @@ def run_calibration(db, user_id, api_key=None):
                 thread_summary, api_key=api_key,
             )
             results.append(result)
+            logger.debug(
+                f"[CAL] iter {iteration} score {eid[:8]}: overall={result.overall}, "
+                f"style=({result.style_delta.greeting_match}/{result.style_delta.signoff_match}/{result.style_delta.formality_register}), "
+                f"behavioral=({result.behavioral_delta.decisiveness_match}/{result.behavioral_delta.thoroughness_match}), "
+                f"contextual=(draft_acc={result.contextual.should_draft_accuracy}, fab={result.contextual.fabrication_detected})"
+            )
 
         # Store results in DB
         _store_results(db, user_id, results, all_rules)
@@ -120,8 +143,17 @@ def run_calibration(db, user_id, api_key=None):
             _finalize_calibration(db, user_id, all_rules, "passed")
             return True
 
+        logger.debug(
+            f"[CAL] iter {iteration}: thresholds NOT met — "
+            f"needed style≥{THRESHOLDS['style']:.0%}, behavioral≥{THRESHOLDS['behavioral']:.0%}, "
+            f"preference≥{THRESHOLDS['preference']:.0%}, contextual≥{THRESHOLDS['contextual']:.0%}"
+        )
+
         # Generate correction rules from hard misses
         if iteration < MAX_ITERATIONS:
+            hard_miss_count = sum(1 for r in results if r.overall == "hard_miss")
+            soft_miss_count = sum(1 for r in results if r.overall == "soft_miss")
+            logger.debug(f"[CAL] iter {iteration}: {hard_miss_count} hard_miss, {soft_miss_count} soft_miss")
             new_rules = generate_corrections(results, api_key=api_key)
             if new_rules:
                 all_rules.extend(new_rules)
@@ -157,6 +189,7 @@ def _generate_thread_summaries(cal_emails, profile, api_key):
     requests = []
     user_aliases = profile.get("user_email_aliases", [])
     user_email = user_aliases[0] if user_aliases else ""
+    logger.debug(f"[CAL] generating thread summaries for {len(cal_emails)} emails")
 
     for cal_email in cal_emails:
         eid = cal_email.db_id
@@ -176,6 +209,7 @@ def _generate_thread_summaries(cal_emails, profile, api_key):
             summaries[eid] = "No prior thread history."
 
     if requests:
+        logger.debug(f"[CAL] submitting {len(requests)} thread summary requests as batch")
         try:
             results, _ = submit_and_wait(requests, api_key=api_key)
             for custom_id, text in results.items():
@@ -183,11 +217,13 @@ def _generate_thread_summaries(cal_emails, profile, api_key):
                     summaries[custom_id] = text
                 else:
                     summaries[custom_id] = "No prior thread history."
+            logger.debug(f"[CAL] thread summaries received: {len(results)}")
         except Exception as e:
             logger.warning(f"Thread summary batch failed: {e}")
             for req in requests:
                 summaries[req["custom_id"]] = "No prior thread history."
 
+    logger.debug(f"[CAL] total thread summaries: {len(summaries)}")
     return summaries
 
 

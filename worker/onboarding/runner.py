@@ -27,6 +27,7 @@ still saved.
 import logging
 import os
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
@@ -66,6 +67,7 @@ def run_onboarding(db, user_id, profile):
     """
     aliases = profile.get("user_email_aliases") or []
     logger.info(f"Starting onboarding for user {user_id} (aliases: {aliases})")
+    _t_onboarding_start = time.time()
 
     try:
         db.update_onboarding_status(
@@ -82,9 +84,16 @@ def run_onboarding(db, user_id, profile):
         # @pipeline step="collect-emails" num="17" desc="Fetches 1500 emails over 180 days, filters spam/noise, caps at 500. Requires >= 10 received." reads="emails table" fatal="< 10 received → fail immediately"
         # ── Phase 1: Collect ─────────────────────────────────────
         db.update_onboarding_status(user_id, "collecting")
+        _t_collect = time.time()
         email_data = collect_onboarding_emails(db, user_id, aliases, days=180, max_emails=1500)
         received = email_data["received"]
         sent = email_data["sent"]
+        logger.debug(
+            f"[COLLECT] finished in {time.time() - _t_collect:.1f}s — "
+            f"received={len(received)}, sent={len(sent)}, "
+            f"total_fetched={email_data.get('total_fetched', '?')}, "
+            f"pre_filter_removed={email_data.get('pre_filter_removed', '?')}"
+        )
 
         if len(received) < 10:
             logger.warning(f"Only {len(received)} received emails — too few for onboarding")
@@ -106,7 +115,9 @@ def run_onboarding(db, user_id, profile):
         # @pipeline step="stats-extraction" num="19" desc="Extracts contacts, response events, threads, domains, user profile baseline." reads="collected emails"
         # ── Phase 2: Full statistical extraction ──────────────────
         db.update_onboarding_status(user_id, "statistics")
+        _t_stats = time.time()
         all_emails = received + sent
+        logger.debug(f"[STATS] starting extract_all with {len(all_emails)} emails")
         extraction = extract_all(all_emails, aliases)
         stats = {
             "contact_frequencies": {
@@ -124,6 +135,12 @@ def run_onboarding(db, user_id, profile):
         }
         logger.info(f"Phase 2 complete: {len(extraction['response_events'])} events, "
                     f"{len(extraction['contacts'])} contacts")
+        logger.debug(
+            f"[STATS] finished in {time.time() - _t_stats:.1f}s — "
+            f"threads={len(extraction.get('threads', {}))}, "
+            f"domains={len(extraction.get('domains', {}))}, "
+            f"user_profile_keys={list(extraction.get('user_profile', {}).keys())}"
+        )
 
         # @pipeline step="persist-stage1" num="20" desc="Writes response_events, threads, domains, contacts, topic profile to DB." writes="multiple tables" fatal="any write failure → status failed"
         # ── Persist Stage 1 data to DB ────────────────────────────
@@ -183,6 +200,7 @@ def run_onboarding(db, user_id, profile):
             return False
 
         logger.info("Stage 1 complete: core data persisted")
+        logger.debug(f"[STAGE1] total elapsed: {time.time() - _t_onboarding_start:.1f}s")
 
         # ================================================================
         # STAGE 2: AI Enrichment  (Haiku + Sonnet)
@@ -199,6 +217,7 @@ def run_onboarding(db, user_id, profile):
 
         # ── Phase 3 + 4C-1 + 4C-1b: Parallel Haiku extraction ────
         db.update_onboarding_status(user_id, "extracting")
+        _t_haiku = time.time()
 
         extraction_result = None
         style_result = None
@@ -262,16 +281,28 @@ def run_onboarding(db, user_id, profile):
         db.record_token_usage(user_id, "haiku", "onboarding_extraction", haiku_usage)
 
         logger.info("Phase 3 + 4C-1 + 4C-1b complete: Haiku extraction done")
+        logger.debug(
+            f"[HAIKU] finished in {time.time() - _t_haiku:.1f}s — "
+            f"extraction_result={'OK' if extraction_result else 'FAILED'} "
+            f"({len(extraction_result.get('extractions', [])) if extraction_result else 0} extractions, "
+            f"{len(extraction_result.get('keyword_frequencies', {})) if extraction_result else 0} keywords), "
+            f"style_result={'OK' if style_result else 'FAILED'} "
+            f"({len(style_result.get('style_features', [])) if style_result else 0} features), "
+            f"behavioral_result={'OK' if behavioral_result else 'FAILED'} "
+            f"({len(behavioral_result.get('behavioral_features', [])) if behavioral_result else 0} features)"
+        )
 
         # Extract decision moments for preference synthesis (Stage C)
         decision_moments = (
             behavioral_result.get("decision_moments", [])
             if behavioral_result else []
         )
+        logger.debug(f"[HAIKU] decision_moments extracted: {len(decision_moments)}")
 
         # @pipeline step="contact-synthesis" num="22" desc="Sonnet synthesizes up to 50 contact profiles. Falls back to stats-only if Sonnet fails." reads="Stage 1 contacts" writes="contact_profiles" nonfatal="failure → stats-only fallback"
         # ── Phase 4A: Contact profile synthesis ──────────────────
         db.update_onboarding_status(user_id, "synthesizing")
+        _t_synth = time.time()
 
         contact_profiles, contacts_usage = synthesize_contacts(
             stats["contact_frequencies"],
@@ -290,6 +321,7 @@ def run_onboarding(db, user_id, profile):
             )
 
         logger.info(f"Phase 4A complete: {len(contact_profiles)} contact profiles")
+        logger.debug(f"[SYNTH] contact synthesis took {time.time() - _t_synth:.1f}s")
 
         # Write enriched contacts to DB immediately
         try:
@@ -311,6 +343,7 @@ def run_onboarding(db, user_id, profile):
 
         # ── Phase 4B + 4C-2 + 4C-3: Parallel Sonnet synthesis ────
         db.update_onboarding_status(user_id, "style_guide")
+        _t_guides = time.time()
 
         topic_result = None
         style_guide = None
@@ -388,6 +421,13 @@ def run_onboarding(db, user_id, profile):
             topic_result = {"domains": [], "high_signal_keywords": []}
 
         logger.info("Phase 4B + 4C-2 + 4C-3 + 4C-4 complete: topics + style + behavioral + preference done")
+        logger.debug(
+            f"[GUIDES] finished in {time.time() - _t_guides:.1f}s — "
+            f"topic_result={'OK' if topic_result else 'NONE'}, "
+            f"style_guide={'OK (' + str(len(style_guide)) + ' chars)' if style_guide else 'NONE'}, "
+            f"behavioral_profile={'OK (' + str(len(behavioral_profile)) + ' chars)' if behavioral_profile else 'NONE'}, "
+            f"preference_profile={'OK' if preference_profile else 'NONE'}"
+        )
 
         # Track missing components for degraded completion status
         missing_components = []
@@ -456,10 +496,12 @@ def run_onboarding(db, user_id, profile):
 
         # @pipeline step="train-classifier" num="25" desc="Trains per-user importance model from email features." nonfatal="failure → non-fatal"
         db.update_onboarding_status(user_id, "training")
+        _t_train = time.time()
         try:
             params = train_user_model(db, user_id)
             logger.info(f"Stage 3 complete: model trained "
                         f"(global_rate={params.get('meta', {}).get('global_rate', '?')})")
+            logger.debug(f"[TRAIN] finished in {time.time() - _t_train:.1f}s")
         except Exception:
             logger.exception("Stage 3: model training failed (non-fatal)")
 
@@ -489,6 +531,7 @@ def run_onboarding(db, user_id, profile):
             )
 
         logger.info(f"Onboarding {'partial' if missing_components else 'complete'} for user {user_id}")
+        logger.debug(f"[ONBOARDING] total elapsed: {time.time() - _t_onboarding_start:.1f}s")
 
         # Trigger calibration after onboarding completes
         try:
