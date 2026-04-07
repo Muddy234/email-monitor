@@ -212,11 +212,11 @@ _BEHAVIORAL_VALUES = {
 
 def _score_behavioral(incoming_body, sent_body, api_key=None):
     """Use Opus to classify behavioral dimensions."""
-    prompt = BEHAVIORAL_SCORING_PROMPT.format(
-        incoming_email_body=incoming_body[:3000],
-        sent_email_body=sent_body[:3000],
-    )
     try:
+        prompt = BEHAVIORAL_SCORING_PROMPT.format(
+            incoming_email_body=incoming_body[:3000],
+            sent_email_body=sent_body[:3000],
+        )
         text, _ = call_claude(
             prompt=prompt,
             model=resolve_model(MODEL),
@@ -256,12 +256,12 @@ _PREFERENCE_VALUES = {
 
 def _score_preference(incoming_body, sent_body, thread_summary, api_key=None):
     """Use Opus to classify preference dimensions."""
-    prompt = PREFERENCE_SCORING_PROMPT.format(
-        incoming_email_body=incoming_body[:3000],
-        sent_email_body=sent_body[:3000],
-        thread_summary_or_none=thread_summary or "None.",
-    )
     try:
+        prompt = PREFERENCE_SCORING_PROMPT.format(
+            incoming_email_body=incoming_body[:3000],
+            sent_email_body=sent_body[:3000],
+            thread_summary_or_none=thread_summary or "None.",
+        )
         text, _ = call_claude(
             prompt=prompt,
             model=resolve_model(MODEL),

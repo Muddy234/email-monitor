@@ -249,11 +249,11 @@ def _formality_score(style):
 
 def _score_draft_behavioral(incoming_body, draft_text, api_key=None):
     """Score a draft's behavioral dimensions."""
-    prompt = BEHAVIORAL_SCORING_PROMPT.format(
-        incoming_email_body=incoming_body,
-        sent_email_body=draft_text[:3000],
-    )
     try:
+        prompt = BEHAVIORAL_SCORING_PROMPT.format(
+            incoming_email_body=incoming_body,
+            sent_email_body=draft_text[:3000],
+        )
         text, _ = call_claude(
             prompt=prompt,
             model=resolve_model(MODEL),
@@ -310,12 +310,12 @@ _POSITIONAL_ORDER = ["advancing", "measured", "yielding"]
 
 def _score_draft_preference(incoming_body, draft_text, thread_summary, api_key=None):
     """Score a draft's preference dimensions."""
-    prompt = PREFERENCE_SCORING_PROMPT.format(
-        incoming_email_body=incoming_body,
-        sent_email_body=draft_text[:3000],
-        thread_summary_or_none=thread_summary or "None.",
-    )
     try:
+        prompt = PREFERENCE_SCORING_PROMPT.format(
+            incoming_email_body=incoming_body,
+            sent_email_body=draft_text[:3000],
+            thread_summary_or_none=thread_summary or "None.",
+        )
         text, _ = call_claude(
             prompt=prompt,
             model=resolve_model(MODEL),
@@ -376,13 +376,13 @@ def _score_contextual(cal_email, generated_draft, actual_reply,
         )
 
     # Opus-as-judge for content dimensions
-    prompt = CONTEXTUAL_SCORING_PROMPT.format(
-        incoming_email=incoming_body,
-        thread_summary=thread_summary or "None.",
-        actual_reply=actual_reply[:3000],
-        generated_draft=generated_draft[:3000],
-    )
     try:
+        prompt = CONTEXTUAL_SCORING_PROMPT.format(
+            incoming_email=incoming_body,
+            thread_summary=thread_summary or "None.",
+            actual_reply=actual_reply[:3000],
+            generated_draft=generated_draft[:3000],
+        )
         text, _ = call_claude(
             prompt=prompt,
             model=resolve_model(MODEL),
