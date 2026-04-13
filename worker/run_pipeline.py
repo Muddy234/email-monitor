@@ -1324,14 +1324,13 @@ def process_user_batch_signals(db, user_id, profile, emails):
         # @pipeline step="draft-generation-batch" num="36" desc="Sonnet batch with 3-layer profile injection (style + behavioral + preference). Deduplicates candidates. Builds batch via DraftGenerator.build_batch_params()." reads="draft_candidates, style_guide, behavioral_profile, preference_profile" writes="token_usage (sonnet/draft)" nonfatal="batch failure → per-draft sync fallback"
         # @pipeline harden="Three-layer draft composition" body="Each draft uses three profile layers: <strong>style guide</strong> (how to write), <strong>behavioral profile</strong> (how to express decisions), and <strong>preference profile</strong> (what to decide). The preference layer resolves decision direction via Investment Orientation and Positional Stance. Null layers are omitted — graceful degradation, not failure."
 
-        # ── Calibration gate: skip drafts if calibration hasn't passed ──
+        # ── Log calibration status (non-blocking) ──
         calibration_status = profile.get("calibration_status", "pending")
         if calibration_status != "passed" and draft_candidates:
-            logger.info(
-                f"  Calibration gate: skipping {len(draft_candidates)} drafts "
-                f"(status={calibration_status})"
+            logger.warning(
+                f"  Calibration status is '{calibration_status}' — "
+                f"generating {len(draft_candidates)} drafts without calibration"
             )
-            draft_candidates = []
 
         # ── Inject calibration rules into draft candidates ──
         calibration_rules_text = profile.get("calibration_rules")
