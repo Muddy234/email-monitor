@@ -921,12 +921,21 @@ async function detectAndUpdateAliases(userId, authEmail, sentEmails) {
     const profile = profiles?.[0];
     const existing = (profile?.user_email_aliases || []).map(a => a.toLowerCase());
 
-    // Collect unique sender addresses from sent items — these are definitively the user's
+    // Collect unique sender addresses from sent items, filtered to the user's
+    // own domain.  Shared-mailbox or forwarded emails can carry a different
+    // From address (e.g. a delegate's), which must not become an alias.
     const detected = new Set();
     if (authEmail) detected.add(authEmail.toLowerCase());
+    const authDomain = authEmail ? authEmail.toLowerCase().split("@")[1] : null;
     for (const e of sentEmails) {
       const addr = (e.sender_email || "").toLowerCase();
-      if (addr) detected.add(addr);
+      if (!addr) continue;
+      const domain = addr.split("@")[1];
+      if (authDomain && domain !== authDomain) {
+        if (DEBUG) console.log(`Alias detection: skipping foreign sender ${addr} (domain ${domain} != ${authDomain})`);
+        continue;
+      }
+      detected.add(addr);
     }
 
     if (DEBUG) console.log(`Alias detection: ${sentEmails.length} sent emails, ${detected.size} aliases found:`, [...detected]);
