@@ -352,19 +352,50 @@ def synthesize_preferences(decision_moments, contact_profiles):
 
     # Validate that we got at least one trait section
     text = response.strip()
-    has_io = "Investment Orientation:" in text
-    has_ps = "Positional Stance:" in text
+    io_idx = text.find("Investment Orientation:")
+    ps_idx = text.find("Positional Stance:")
 
-    if not has_io and not has_ps:
+    if io_idx < 0 and ps_idx < 0:
         logger.warning("Preference synthesis: no trait sections found in response")
         return None, usage
 
+    # Strip any CoT preamble before the first trait header
+    valid_indices = [i for i in (io_idx, ps_idx) if i >= 0]
+    start = min(valid_indices)
+    if start > 0:
+        logger.debug(f"[PREF_SYNTH] stripping {start} chars of CoT preamble")
+    text = text[start:].strip()
+
+    # Check if categories contain real values (not just the header)
+    io_cat = _extract_category(text, "Investment Orientation:")
+    ps_cat = _extract_category(text, "Positional Stance:")
+
     logger.info(
         f"Generated preference profile: "
-        f"IO={'present' if has_io else 'null'}, "
-        f"PS={'present' if has_ps else 'null'}"
+        f"IO={io_cat or 'null'}, PS={ps_cat or 'null'}"
     )
     return text, usage
+
+
+def _extract_category(text, header):
+    """Extract the category value from a trait header line.
+
+    E.g. 'Investment Orientation: INVEST HEAVY' -> 'invest heavy'
+    Returns None if the header isn't found or has no valid category.
+    """
+    _VALID_CATEGORIES = {
+        "invest heavy", "invest light", "conserve light", "conserve heavy",
+        "advance heavy", "advance light", "yield light", "yield heavy",
+    }
+    idx = text.find(header)
+    if idx < 0:
+        return None
+    rest = text[idx + len(header):].strip()
+    # Take the first line after the header
+    first_line = rest.split("\n")[0].strip()
+    if first_line.lower() in _VALID_CATEGORIES:
+        return first_line.lower()
+    return None
 
 
 # ---------------------------------------------------------------------------

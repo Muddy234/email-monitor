@@ -54,7 +54,10 @@ def _render_header(model: PipelineModel) -> str:
     if model.extraction_timestamp:
         ts = f'\n  <p style="margin-top:4px;font-family:var(--mono);font-size:11px;color:var(--text-dim)">Generated: {escape(model.extraction_timestamp)}</p>'
     return f"""<header>
-  <h1>{escape(model.title)}</h1>
+  <div class="header-row">
+    <h1>{escape(model.title)}</h1>
+    <button id="expand-btn" class="expand-btn" data-state="collapsed" onclick="toggleAll()">Expand all</button>
+  </div>
   <p>{escape(subtitle)}</p>{ts}
 </header>"""
 

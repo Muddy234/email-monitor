@@ -184,7 +184,7 @@ def _compute_style_delta(actual, draft):
     if actual.word_count > 0:
         ratio = draft.word_count / actual.word_count
     else:
-        ratio = 1.0 if draft.word_count == 0 else 999.0
+        ratio = 0.0  # No ground-truth reply — neutral, don't penalize
 
     greeting_match = _ordinal_match(
         actual.greeting_type, draft.greeting_type, _GREETING_ORDER,

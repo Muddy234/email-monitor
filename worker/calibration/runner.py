@@ -1,8 +1,8 @@
 """Calibration runner — orchestrates the full calibration loop.
 
-Selects 15 stratified test emails, scores ground truth, generates drafts
-via the production pipeline, compares results, generates correction rules,
-and iterates until exit thresholds are met (max 3 iterations).
+Selects 10 stratified test emails (reply-only), scores ground truth, generates
+drafts via the production pipeline, compares results, generates correction
+rules, and iterates until exit thresholds are met (max 3 iterations).
 """
 
 import logging
@@ -19,7 +19,7 @@ logger = logging.getLogger("worker.calibration")
 
 MAX_ITERATIONS = 3
 
-# Exit thresholds (percentage of 15 emails that must pass per dimension)
+# Exit thresholds (percentage of test emails that must pass per dimension)
 THRESHOLDS = {
     "style": 0.90,       # ≥90% match or adjacent
     "behavioral": 0.80,  # ≥80%
@@ -46,7 +46,7 @@ def run_calibration(db, user_id, api_key=None):
     aliases = profile.get("user_email_aliases", [])
     logger.debug(f"[CAL] user aliases: {aliases}")
 
-    # Select 15 stratified test emails
+    # Select 10 stratified reply-only test emails
     cal_emails = select_calibration_emails(db, user_id, aliases)
     if not cal_emails:
         logger.warning(f"No calibration emails found for {user_id[:8]}...")
@@ -60,6 +60,14 @@ def run_calibration(db, user_id, api_key=None):
             f"depth={ce.thread_depth}, has_reply={ce.user_reply is not None}, "
             f"buckets={ce.selection_buckets}"
         )
+
+    # Fetch contacts for draft prompt enrichment
+    sender_emails = list({
+        (ce.incoming_email.get("sender_email") or ce.incoming_email.get("sender") or "").lower()
+        for ce in cal_emails
+    })
+    contacts_map = db.fetch_contacts_by_emails(user_id, sender_emails) if sender_emails else {}
+    logger.debug(f"[CAL] contacts fetched for draft enrichment: {len(contacts_map)}")
 
     # Score ground truth (Layer 1) — runs once
     ground_truths = {}
@@ -86,6 +94,9 @@ def run_calibration(db, user_id, api_key=None):
     config = _build_calibration_config(profile)
     draft_gen = DraftGenerator(config)
 
+    # Build personality profile string for correction generation
+    personality_profile = _build_profile_string(profile)
+
     # Accumulate correction rules across iterations
     all_rules = []
     iteration_results = []
@@ -98,7 +109,7 @@ def run_calibration(db, user_id, api_key=None):
         logger.debug(f"[CAL] iter {iteration}: generating drafts with {len(all_rules)} correction rules")
         drafts = _generate_calibration_drafts(
             cal_emails, draft_gen, profile, cached_thread_summaries,
-            all_rules, api_key,
+            all_rules, api_key, contacts_map=contacts_map,
         )
         draft_count = sum(1 for d in drafts.values() if d is not None)
         logger.debug(f"[CAL] iter {iteration}: {draft_count}/{len(drafts)} drafts generated")
@@ -154,7 +165,19 @@ def run_calibration(db, user_id, api_key=None):
             hard_miss_count = sum(1 for r in results if r.overall == "hard_miss")
             soft_miss_count = sum(1 for r in results if r.overall == "soft_miss")
             logger.debug(f"[CAL] iter {iteration}: {hard_miss_count} hard_miss, {soft_miss_count} soft_miss")
-            new_rules = generate_corrections(results, api_key=api_key)
+
+            # Guard: skip correction generation if cal set lacks ground-truth replies
+            reply_count = sum(1 for ce in cal_emails if ce.user_reply is not None)
+            if reply_count < len(cal_emails) // 2:
+                logger.warning(
+                    f"[CAL] iter {iteration}: only {reply_count}/{len(cal_emails)} emails "
+                    f"have ground-truth replies — skipping correction generation"
+                )
+                continue
+
+            new_rules = generate_corrections(
+                results, personality_profile, api_key=api_key,
+            )
             if new_rules:
                 all_rules.extend(new_rules)
                 # Deduplicate while preserving order
@@ -232,12 +255,14 @@ def _generate_thread_summaries(cal_emails, profile, api_key):
 # ---------------------------------------------------------------------------
 
 def _generate_calibration_drafts(cal_emails, draft_gen, profile,
-                                  thread_summaries, rules, api_key):
+                                  thread_summaries, rules, api_key,
+                                  contacts_map=None):
     """Generate drafts for all calibration emails using the production pipeline.
 
     Returns:
         dict: {email_id: draft_text_or_None}
     """
+    contacts_map = contacts_map or {}
     style_guide = profile.get("writing_style_guide") or ""
     behavioral_profile = profile.get("behavioral_profile") or ""
     preference_profile = profile.get("preference_profile") or ""
@@ -245,7 +270,14 @@ def _generate_calibration_drafts(cal_emails, draft_gen, profile,
     requests = []
     for cal_email in cal_emails:
         eid = cal_email.db_id
-        email_data = cal_email.incoming_email
+        email_data = dict(cal_email.incoming_email)  # shallow copy to avoid mutating original
+
+        # Enrich with contact data (mirrors production pipeline enrichment)
+        sender = (email_data.get("sender_email") or email_data.get("sender") or "").lower()
+        contact = contacts_map.get(sender)
+        if contact:
+            email_data["sender_contact"] = contact
+            email_data["all_contacts"] = {sender: contact}
         thread_summary = thread_summaries.get(eid, "No prior thread history.")
 
         action_context = {
@@ -282,7 +314,12 @@ def _generate_calibration_drafts(cal_emails, draft_gen, profile,
             # Fallback: generate one-by-one
             for cal_email in cal_emails:
                 eid = cal_email.db_id
-                email_data = cal_email.incoming_email
+                email_data = dict(cal_email.incoming_email)  # shallow copy
+                sender = (email_data.get("sender_email") or email_data.get("sender") or "").lower()
+                contact = contacts_map.get(sender)
+                if contact:
+                    email_data["sender_contact"] = contact
+                    email_data["all_contacts"] = {sender: contact}
                 thread_summary = thread_summaries.get(eid, "No prior thread history.")
                 action_context = {
                     "action": "reply",
@@ -429,3 +466,22 @@ def _build_calibration_config(profile):
         "draft_user_name": profile.get("display_name", ""),
         "anthropic_api_key": os.environ.get("ANTHROPIC_API_KEY"),
     }
+
+
+def _build_profile_string(profile):
+    """Concatenate the user's profile sections into a single prompt string.
+
+    Mirrors the layout used by DraftGenerator so the correction generator
+    sees the same profile content the draft prompt does.
+    """
+    parts = []
+    style = (profile.get("writing_style_guide") or "").strip()
+    behavioral = (profile.get("behavioral_profile") or "").strip()
+    preference = (profile.get("preference_profile") or "").strip()
+    if style:
+        parts.append(f"WRITING STYLE GUIDE:\n{style}")
+    if behavioral:
+        parts.append(f"BEHAVIORAL PROFILE:\n{behavioral}")
+    if preference:
+        parts.append(f"PREFERENCE PROFILE:\n{preference}")
+    return "\n\n".join(parts)

@@ -42,6 +42,9 @@ body { background:var(--bg); color:var(--text); font-family:var(--sans); line-he
 header { margin-bottom:48px; }
 header h1 { font-size:28px; font-weight:700; letter-spacing:-0.5px; margin-bottom:6px; }
 header p { color:var(--text-muted); font-size:14px; }
+.header-row { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.expand-btn { font-family:var(--mono); font-size:12px; color:var(--text-muted); background:var(--bg-card); border:1px solid var(--border); border-radius:6px; padding:6px 14px; cursor:pointer; white-space:nowrap; transition:all 0.15s; }
+.expand-btn:hover { background:var(--bg-card-hover); border-color:var(--border-hover); color:var(--text); }
 
 .legend { display:flex; gap:20px; flex-wrap:wrap; margin-bottom:32px; padding:14px 18px; background:var(--bg-card); border:1px solid var(--border); border-radius:10px; }
 .legend-item { display:flex; align-items:center; gap:7px; font-size:12px; color:var(--text-muted); font-family:var(--mono); }
@@ -139,6 +142,16 @@ function togglePhase(id) {
 function toggleStep(el) {
   el.classList.toggle('open');
   event.stopPropagation();
+}
+function toggleAll() {
+  var btn = document.getElementById('expand-btn');
+  var phases = document.querySelectorAll('.phase');
+  var steps = document.querySelectorAll('.step');
+  var expanding = btn.dataset.state !== 'expanded';
+  phases.forEach(function(p) { expanding ? p.classList.add('open') : p.classList.remove('open'); });
+  steps.forEach(function(s) { expanding ? s.classList.add('open') : s.classList.remove('open'); });
+  btn.textContent = expanding ? 'Collapse all' : 'Expand all';
+  btn.dataset.state = expanding ? 'expanded' : 'collapsed';
 }"""
 
 LEGEND_ITEMS = [

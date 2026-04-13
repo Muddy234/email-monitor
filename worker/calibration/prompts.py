@@ -60,17 +60,19 @@ ATTRIBUTION: {{pass | fail}} — Did the draft respond to the right person about
 No explanation. No other text."""
 
 CORRECTION_GENERATION_PROMPT = """\
-You are analyzing draft failures to generate a specific correction rule.
+Here is the user's personality profile that was used to generate the draft.
 
-Below are email drafts that failed quality checks. For each, you are shown
-the failure type and what went wrong.
+{personality_profile}
 
-{failures_block}
+Here is what the user actually wrote:
+{actual_reply}
 
-Generate the minimum number of correction rules that would prevent ALL
-of these failures. Each rule should be:
-- Specific and behavioral (not vague like "be more careful")
-- Testable (you could verify compliance mechanically or with a simple check)
-- Scoped (applies to the specific situation, not a blanket override)
+Here is what the draft produced:
+{generated_draft}
 
-Output one rule per line, prefixed with "- ". No other text."""
+The draft missed on these dimensions: {failing_dimensions}
+
+What specific instruction is missing from the personality profile
+that would have caused the draft to match the user's actual reply?
+Write the instruction exactly as it should appear in the prompt.
+One instruction per failure. No preamble."""

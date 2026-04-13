@@ -1,23 +1,23 @@
-"""Select 15 stratified test emails for calibration."""
+"""Select 10 stratified reply-only test emails for calibration."""
 
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger("worker.calibration")
 
-TARGET_COUNT = 15
+TARGET_COUNT = 10
 
 # Stratification bucket targets — keys match bucket names used below
 BUCKET_TARGETS = {
-    "internal_colleague": 5,
-    "external_professional": 4,
-    "external_casual": 3,
+    "internal_colleague": 4,
+    "external_professional": 3,
+    "external_casual": 2,
     "personal": 1,
-    "standalone": 4,
-    "mid_thread": 4,
-    "complex_thread": 3,
-    "no_reply": 2,
+    "standalone": 3,
+    "mid_thread": 3,
+    "complex_thread": 2,
     "material_consequence": 2,
     "action_request": 2,
     "user_bottleneck": 2,
@@ -46,7 +46,7 @@ class CalibrationEmail:
 
 
 def select_calibration_emails(db, user_id, aliases):
-    """Select up to 15 test emails with stratified sampling.
+    """Select up to 10 reply-only test emails with stratified sampling.
 
     Args:
         db: SupabaseWorkerClient instance.
@@ -74,8 +74,8 @@ def select_calibration_emails(db, user_id, aliases):
         return []
 
     # Fetch sent emails to find user replies
-    sent_by_conv = _fetch_sent_emails_by_conversation(db, user_id, alias_set)
-    logger.debug(f"[CAL-SEL] sent conversations indexed: {len(sent_by_conv)}")
+    sent_by_conv, sent_by_subject = _fetch_sent_emails_by_conversation(db, user_id, alias_set)
+    logger.debug(f"[CAL-SEL] sent indexed: {len(sent_by_conv)} by conv_id, {len(sent_by_subject)} by subject")
 
     # Fetch contacts for contact type info
     sender_emails = list({r["sender_email"] for r in received if r.get("sender_email")})
@@ -95,8 +95,10 @@ def select_calibration_emails(db, user_id, aliases):
         contact_type = contact.get("contact_type", "unknown")
 
         # Find user's reply in this conversation (sent after this email)
-        user_reply = _find_user_reply(sent_by_conv, conv_id,
-                                       email.get("received_time"), alias_set)
+        user_reply = _find_user_reply(
+            sent_by_conv, conv_id, email.get("received_time"), alias_set,
+            sent_by_subject=sent_by_subject, subject=email.get("subject"),
+        )
 
         # Fetch thread emails for context
         thread_emails = []
@@ -120,11 +122,16 @@ def select_calibration_emails(db, user_id, aliases):
             signal_scores=email_signals,
         )
 
+        # Skip emails the user never replied to — calibration only tests drafts
+        if cal_email.user_reply is None:
+            continue
+
         # Tag with all qualifying buckets
         cal_email.selection_buckets = _compute_buckets(cal_email)
         candidates.append(cal_email)
 
-    logger.debug(f"[CAL-SEL] candidate pool: {len(candidates)} emails")
+    reply_count = sum(1 for c in candidates if c.user_reply is not None)
+    logger.info(f"[CAL-SEL] candidate pool: {len(candidates)} emails, {reply_count} with reply, {len(candidates) - reply_count} without")
     # Log bucket distribution
     from collections import Counter as _Counter
     bucket_dist = _Counter()
@@ -135,10 +142,7 @@ def select_calibration_emails(db, user_id, aliases):
 
     # Greedy allocation
     selected = _greedy_select(candidates)
-    logger.info(
-        f"Selected {len(selected)} calibration emails "
-        f"({sum(1 for e in selected if e.user_reply is None)} no-reply)"
-    )
+    logger.info(f"Selected {len(selected)} calibration emails")
     return selected
 
 
@@ -159,11 +163,28 @@ def _fetch_received_emails(db, user_id, cutoff):
     return result.data or []
 
 
+_SUBJECT_PREFIX_RE = re.compile(r"^(re|fw|fwd)\s*:\s*", re.IGNORECASE)
+
+
+def _normalize_subject(subject):
+    """Strip reply/forward prefixes and normalize for matching."""
+    if not subject:
+        return ""
+    s = _SUBJECT_PREFIX_RE.sub("", subject)
+    while _SUBJECT_PREFIX_RE.match(s):
+        s = _SUBJECT_PREFIX_RE.sub("", s)
+    return s.strip().lower()
+
+
 def _fetch_sent_emails_by_conversation(db, user_id, alias_set):
-    """Fetch sent emails grouped by conversation_id."""
+    """Fetch sent emails grouped by conversation_id and normalized subject.
+
+    Returns:
+        tuple: (by_conv dict, by_subject dict)
+    """
     result = (
         db.client.table("emails")
-        .select("id, conversation_id, sender_email, body, received_time")
+        .select("id, conversation_id, sender_email, body, received_time, subject")
         .eq("user_id", user_id)
         .eq("folder", "Sent Items")
         .order("received_time", desc=False)
@@ -171,25 +192,58 @@ def _fetch_sent_emails_by_conversation(db, user_id, alias_set):
         .execute()
     )
     by_conv = {}
+    by_subject = {}
     for row in (result.data or []):
         conv_id = row.get("conversation_id")
         if conv_id:
             by_conv.setdefault(conv_id, []).append(row)
-    return by_conv
+        norm_subj = _normalize_subject(row.get("subject"))
+        if norm_subj:
+            by_subject.setdefault(norm_subj, []).append(row)
+    return by_conv, by_subject
 
 
-def _find_user_reply(sent_by_conv, conversation_id, received_time, alias_set):
-    """Find the user's reply to a specific email in a conversation."""
-    if not conversation_id or not received_time:
+def _find_user_reply(sent_by_conv, conversation_id, received_time, alias_set,
+                     sent_by_subject=None, subject=None):
+    """Find the user's reply to a specific email in a conversation.
+
+    Primary lookup: conversation_id match.
+    Fallback: normalized subject match within 48-hour window.
+    """
+    if not received_time:
         return None
 
-    sent_in_conv = sent_by_conv.get(conversation_id, [])
-    for sent in sent_in_conv:
-        sent_time = sent.get("received_time", "")
-        if sent_time > received_time:
-            body = sent.get("body", "")
-            if body and len(body.strip()) > 5:
-                return body
+    # Primary: conversation_id lookup
+    if conversation_id:
+        sent_in_conv = sent_by_conv.get(conversation_id, [])
+        for sent in sent_in_conv:
+            sent_time = sent.get("received_time", "")
+            if sent_time > received_time:
+                body = sent.get("body", "")
+                if body and len(body.strip()) > 5:
+                    return body
+
+    # Fallback: subject-based lookup within 48-hour window
+    if sent_by_subject and subject:
+        norm_subj = _normalize_subject(subject)
+        if norm_subj:
+            candidates = sent_by_subject.get(norm_subj, [])
+            for sent in candidates:
+                sent_time = sent.get("received_time", "")
+                if not sent_time or sent_time <= received_time:
+                    continue
+                # Check within 48-hour window
+                try:
+                    recv_dt = datetime.fromisoformat(received_time.replace("Z", "+00:00"))
+                    sent_dt = datetime.fromisoformat(sent_time.replace("Z", "+00:00"))
+                    if (sent_dt - recv_dt).total_seconds() > 48 * 3600:
+                        continue
+                except (ValueError, TypeError):
+                    continue
+                body = sent.get("body", "")
+                if body and len(body.strip()) > 5:
+                    return body
+
     return None
 
 
@@ -234,10 +288,6 @@ def _compute_buckets(cal_email):
         buckets.append("mid_thread")
     else:
         buckets.append("complex_thread")
-
-    # No-reply bucket
-    if cal_email.user_reply is None:
-        buckets.append("no_reply")
 
     # Signal buckets
     signals = cal_email.signal_scores
