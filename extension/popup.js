@@ -799,7 +799,7 @@ document.getElementById("loginBtn").addEventListener("click", async () => {
         btn.textContent = "Sign Up";
         return;
       }
-      const result = await authRequest("/signup", { email, password });
+      const result = await authRequest("/signup?redirect_to=" + encodeURIComponent("https://clarion-ai.app/app/verified.html"), { email, password });
       const signupUserId = result.user?.id || result.id || null;
       // Write display_name to the profile row created by the DB trigger
       if (signupUserId && displayName) {
@@ -1089,6 +1089,13 @@ document.getElementById("authPassword").addEventListener("keydown", (e) => {
 // ---------------------------------------------------------------------------
 
 checkSessionAndRender();
+
+// React instantly when session arrives (e.g. after email verification via web-auth-sync)
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.supabaseSession?.newValue) {
+    checkSessionAndRender();
+  }
+});
 
 // Dashboard refresh (15s)
 setInterval(async () => {

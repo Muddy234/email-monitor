@@ -56,7 +56,13 @@ export async function signIn(email, password) {
  * @returns {Promise<object>} The signup response.
  */
 export async function signUp(email, password, displayName) {
-    const { data, error } = await supabase.auth.signUp({ email, password });
+    const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+            emailRedirectTo: "https://clarion-ai.app/app/verified.html",
+        },
+    });
     if (error) throw error;
 
     // Write display_name to the profile row created by the DB trigger

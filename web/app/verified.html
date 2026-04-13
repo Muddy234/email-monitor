@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://esm.sh; connect-src https://*.supabase.co wss://*.supabase.co; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:;">
+    <title>Email Verified — Clarion AI</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+    <div class="em-login-wrap">
+        <div class="em-login-card">
+            <h1 class="em-login-title">Clarion AI</h1>
+
+            <div id="verifiedMessage" style="display: none; text-align: center;">
+                <p style="font-size: 18px; font-weight: 600; color: #1C1917; margin-bottom: 8px;">You're verified!</p>
+                <p style="color: #78716C; font-size: 14px; line-height: 1.5;">Onboarding has started. Click the Clarion extension icon for status.</p>
+            </div>
+
+            <div id="verifiedError" style="display: none; text-align: center;">
+                <p style="font-size: 18px; font-weight: 600; color: #1C1917; margin-bottom: 8px;">Verification link expired</p>
+                <p style="color: #78716C; font-size: 14px; line-height: 1.5; margin-bottom: 16px;">Please log in with your email and password.</p>
+                <a href="/app/login.html" class="em-btn em-btn-primary" style="display: inline-flex; justify-content: center; text-decoration: none;">Go to Login</a>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="/js/pages/verified.js"></script>
+</body>
+</html>
