@@ -105,7 +105,8 @@ class DraftGenerator:
             rules_text = rules
 
         return (
-            "CALIBRATION RULES (corrections from testing against your actual emails):\n"
+            "PERSPECTIVE NOTES (observations from testing against your actual emails "
+            "— use these to understand the user's reasoning patterns, not as rigid rules):\n"
             + rules_text
         )
 

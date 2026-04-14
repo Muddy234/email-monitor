@@ -546,12 +546,12 @@ in the data?"
 - A single decision may provide signal for one or both traits.
 - Some decisions may be ambiguous — classify the stronger signal only, set \
 the weaker to no_signal.
-- If a trait has fewer than 8 supporting decisions (excluding no_signal), \
-return null for that trait.
-- If a trait has 8-14 supporting decisions, set confidence to "low" and \
+- If a trait has fewer than 4 supporting decisions (excluding no_signal), \
+omit that section entirely.
+- If a trait has 4-9 supporting decisions, set confidence to "low" and \
 append to the description: "Based on limited data ({{N}} decisions). This \
 profile may shift as more email history becomes available."
-- If a trait has 15+ supporting decisions, set confidence to "high".
+- If a trait has 10+ supporting decisions, set confidence to "high".
 - Write descriptions in the voice of an observer describing a person, not as \
 rules or instructions.
 - The description should capture HOW this user reasons about decisions — do \
@@ -572,9 +572,9 @@ Description text here — 2-4 sentences capturing the pattern and reasoning styl
 Rules:
 - CATEGORY_NAME must be one of the categories defined above (e.g., INVEST HEAVY, \
 ADVANCE LIGHT, YIELD HEAVY, etc.), written in UPPER CASE with a space.
-- If a trait has fewer than 8 supporting decisions (excluding no_signal), omit \
+- If a trait has fewer than 4 supporting decisions (excluding no_signal), omit \
 that section entirely.
-- If a trait has 8-14 supporting decisions, append to the description: \
+- If a trait has 4-9 supporting decisions, append to the description: \
 "Based on limited data (N decisions). This profile may shift as more email \
 history becomes available."
 - Do not include JSON, XML, or any structured markup. Plain text only.

@@ -13,7 +13,7 @@ from pipeline.signal_extractor import thread_summary_batch_params
 from calibration.email_selector import select_calibration_emails
 from calibration.ground_truth_scorer import score_ground_truth
 from calibration.draft_scorer import score_draft, result_to_dict
-from calibration.correction_generator import generate_corrections
+from calibration.correction_generator import generate_corrections, MAX_TOTAL_RULES
 
 logger = logging.getLogger("worker.calibration")
 
@@ -187,7 +187,7 @@ def run_calibration(db, user_id, api_key=None):
                     if rule not in seen:
                         seen.add(rule)
                         deduped.append(rule)
-                all_rules = deduped
+                all_rules = deduped[:MAX_TOTAL_RULES]
                 logger.info(f"Generated {len(new_rules)} new rules, total: {len(all_rules)}")
             else:
                 logger.warning("No new correction rules generated")
@@ -386,7 +386,7 @@ def _style_passes(sd):
     fields = [sd.greeting_match, sd.signoff_match, sd.formality_register]
     if any(f == "hard_miss" for f in fields):
         return False
-    if sd.word_count_ratio > 0 and (sd.word_count_ratio < 0.4 or sd.word_count_ratio > 2.5):
+    if sd.word_count_ratio > 0 and (sd.word_count_ratio < 0.3 or sd.word_count_ratio > 3.0):
         return False
     return True
 

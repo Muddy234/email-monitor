@@ -1,6 +1,7 @@
 """Generate correction rules from calibration hard misses."""
 
 import logging
+import re
 
 from pipeline.api_client import call_claude, resolve_model
 from calibration.prompts import CORRECTION_GENERATION_PROMPT
@@ -8,6 +9,7 @@ from calibration.prompts import CORRECTION_GENERATION_PROMPT
 logger = logging.getLogger("worker.calibration")
 
 MODEL = "opus"
+MAX_TOTAL_RULES = 10
 
 # Failure dimensions that the draft prompt cannot influence and should be
 # excluded from correction generation (they reflect upstream pipeline decisions
@@ -23,6 +25,8 @@ _REJECT_PHRASES = (
     "cannot determine",
     "no missing instruction",
     "no specific instruction",
+    "no_gap",
+    "no gap",
     "n/a",
     "none",
     "no change",
@@ -183,13 +187,29 @@ def _is_actionable(instruction):
 
 
 def _dedupe(instructions):
-    """Remove exact and near-duplicate instructions, preserving order."""
-    seen = set()
+    """Remove exact and near-duplicate instructions, preserving order.
+
+    Uses normalized full text + 8-word fingerprint for near-dedup,
+    then caps at MAX_TOTAL_RULES.
+    """
+    seen_keys = set()
+    seen_fingerprints = set()
     out = []
     for inst in instructions:
-        key = " ".join(inst.lower().split())
-        if key in seen:
+        # Normalize: lowercase, strip punctuation, collapse whitespace
+        normalized = " ".join(inst.lower().split())
+        key = re.sub(r'[^\w\s]', '', normalized)
+        if key in seen_keys:
             continue
-        seen.add(key)
+
+        # 8-word fingerprint catches semantically similar rules
+        words = key.split()
+        fingerprint = " ".join(words[:8])
+        if fingerprint in seen_fingerprints:
+            continue
+
+        seen_keys.add(key)
+        seen_fingerprints.add(fingerprint)
         out.append(inst)
-    return out
+
+    return out[:MAX_TOTAL_RULES]

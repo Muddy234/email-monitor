@@ -5,6 +5,8 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
+from pipeline.pre_process import strip_reply_markers, strip_signatures
+
 logger = logging.getLogger("worker.calibration")
 
 TARGET_COUNT = 10
@@ -221,7 +223,9 @@ def _find_user_reply(sent_by_conv, conversation_id, received_time, alias_set,
             if sent_time > received_time:
                 body = sent.get("body", "")
                 if body and len(body.strip()) > 5:
-                    return body
+                    body = strip_reply_markers(body)
+                    body = strip_signatures(body)
+                    return body.strip()
 
     # Fallback: subject-based lookup within 48-hour window
     if sent_by_subject and subject:
@@ -242,7 +246,9 @@ def _find_user_reply(sent_by_conv, conversation_id, received_time, alias_set,
                     continue
                 body = sent.get("body", "")
                 if body and len(body.strip()) > 5:
-                    return body
+                    body = strip_reply_markers(body)
+                    body = strip_signatures(body)
+                    return body.strip()
 
     return None
 

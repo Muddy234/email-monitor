@@ -59,6 +59,60 @@ ATTRIBUTION: {{pass | fail}} — Did the draft respond to the right person about
 
 No explanation. No other text."""
 
+BEHAVIORAL_COMPARISON_PROMPT = """\
+You are comparing a generated draft against the user's actual reply \
+on behavioral dimensions.
+
+ORIGINAL EMAIL (what the user was replying to):
+{incoming_email_body}
+
+USER'S ACTUAL REPLY:
+{actual_reply}
+
+GENERATED DRAFT:
+{generated_draft}
+
+For each dimension, does the draft match the user's behavioral approach?
+Output exactly three lines:
+DECISIVENESS: {{match | adjacent | hard_miss}}
+THOROUGHNESS: {{match | adjacent | hard_miss}}
+SPECIFICITY: {{match | adjacent | hard_miss}}
+
+"match" = same approach. "adjacent" = similar but not identical. \
+"hard_miss" = fundamentally different approach (e.g., user decided \
+but draft deferred, or user addressed all points but draft only \
+addressed one).
+
+No explanation. No other text."""
+
+PREFERENCE_COMPARISON_PROMPT = """\
+You are comparing a generated draft against the user's actual reply \
+on preference dimensions.
+
+ORIGINAL EMAIL (what the user was replying to):
+{incoming_email_body}
+
+THREAD CONTEXT (if any):
+{thread_summary_or_none}
+
+USER'S ACTUAL REPLY:
+{actual_reply}
+
+GENERATED DRAFT:
+{generated_draft}
+
+For each dimension, does the draft match the user's preference approach?
+Output exactly two lines:
+INVESTMENT: {{match | adjacent | hard_miss | not_applicable}}
+POSITIONAL: {{match | adjacent | hard_miss | not_applicable}}
+
+"match" = same level of investment/stance. "adjacent" = similar but \
+not identical. "hard_miss" = fundamentally different (e.g., user invested \
+heavily but draft was conservative, or user pushed back but draft yielded). \
+"not_applicable" = this email does not involve that dimension.
+
+No explanation. No other text."""
+
 CORRECTION_GENERATION_PROMPT = """\
 Here is the user's personality profile that was used to generate the draft.
 
@@ -72,7 +126,13 @@ Here is what the draft produced:
 
 The draft missed on these dimensions: {failing_dimensions}
 
-What specific instruction is missing from the personality profile
-that would have caused the draft to match the user's actual reply?
-Write the instruction exactly as it should appear in the prompt.
-One instruction per failure. No preamble."""
+Identify the GAP between the profile and the user's actual behavior.
+Write ONE concise observation (2-3 sentences max) that captures what \
+the profile fails to convey about how this user thinks or communicates.
+Focus on perspective and reasoning patterns, not surface-level rules \
+like "use a greeting" or "be more concise."
+
+Do not repeat anything already in the profile. If the gap is purely \
+stylistic (greeting/signoff/formatting), respond with: NO_GAP
+
+Your observation:"""

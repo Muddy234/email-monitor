@@ -293,9 +293,9 @@ def synthesize_preferences(decision_moments, contact_profiles):
         (preference_profile: str or None, usage: dict)
     """
     logger.debug(f"[PREF_SYNTH] input: {len(decision_moments)} decision moments")
-    if len(decision_moments) < 8:
+    if len(decision_moments) < 4:
         logger.info(
-            f"Only {len(decision_moments)} decision moments — need 8 minimum, "
+            f"Only {len(decision_moments)} decision moments — need 4 minimum, "
             f"skipping preference synthesis"
         )
         return None, {}

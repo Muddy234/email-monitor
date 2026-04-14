@@ -9,6 +9,8 @@ from calibration.prompts import (
     BEHAVIORAL_SCORING_PROMPT,
     PREFERENCE_SCORING_PROMPT,
     CONTEXTUAL_SCORING_PROMPT,
+    BEHAVIORAL_COMPARISON_PROMPT,
+    PREFERENCE_COMPARISON_PROMPT,
 )
 from calibration.ground_truth_scorer import (
     _score_style,
@@ -112,11 +114,10 @@ def score_draft(cal_email, generated_draft, ground_truth, iteration,
             bullet_match="match", formality_register="not_applicable",
         )
 
-    # Behavioral delta
-    if generated_draft:
-        draft_behavioral = _score_draft_behavioral(incoming_body, generated_draft, api_key)
-        behavioral_delta = _compute_behavioral_delta(
-            ground_truth.behavioral, draft_behavioral,
+    # Behavioral delta — comparative scoring (both texts side-by-side)
+    if generated_draft and actual_reply:
+        behavioral_delta = _compare_behavioral(
+            incoming_body, actual_reply, generated_draft, api_key,
         )
     else:
         behavioral_delta = BehavioralDelta(
@@ -125,13 +126,11 @@ def score_draft(cal_email, generated_draft, ground_truth, iteration,
             specificity_match="not_applicable",
         )
 
-    # Preference delta
-    if generated_draft:
-        draft_preference = _score_draft_preference(
-            incoming_body, generated_draft, thread_summary, api_key,
-        )
-        preference_delta = _compute_preference_delta(
-            ground_truth.preference, draft_preference,
+    # Preference delta — comparative scoring (both texts side-by-side)
+    if generated_draft and actual_reply:
+        preference_delta = _compare_preference(
+            incoming_body, actual_reply, generated_draft,
+            thread_summary, api_key,
         )
     else:
         preference_delta = PreferenceDelta(
@@ -209,13 +208,19 @@ def _compute_style_delta(actual, draft):
 
 
 def _ordinal_match(actual_val, draft_val, order):
-    """Match two values on an ordinal scale."""
+    """Match two values on an ordinal scale.
+
+    On 4-point scales, only max-distance (3) is a hard_miss.
+    Distance 1-2 is adjacent — contextual variation, not failure.
+    """
     if actual_val == draft_val:
         return "match"
     if actual_val not in order or draft_val not in order:
-        return "hard_miss"
+        return "adjacent"  # unknown values: don't hard-fail
     distance = abs(order.index(actual_val) - order.index(draft_val))
-    return "adjacent" if distance == 1 else "hard_miss"
+    if distance <= 2:
+        return "adjacent"
+    return "hard_miss"
 
 
 def _compute_formality_register(actual, draft):
@@ -301,7 +306,113 @@ def _behavioral_simple(actual_val, draft_val):
 
 
 # ---------------------------------------------------------------------------
-# Preference delta
+# Comparative behavioral scoring (single LLM call with both texts)
+# ---------------------------------------------------------------------------
+
+_VALID_COMPARISON = {"match", "adjacent", "hard_miss", "not_applicable"}
+
+
+def _compare_behavioral(incoming_body, actual_reply, draft_text, api_key=None):
+    """Compare draft vs actual reply on behavioral dimensions in one LLM call."""
+    try:
+        prompt = BEHAVIORAL_COMPARISON_PROMPT.format(
+            incoming_email_body=incoming_body[:3000],
+            actual_reply=actual_reply[:3000],
+            generated_draft=draft_text[:3000],
+        )
+        text, _ = call_claude(
+            prompt=prompt,
+            model=resolve_model(MODEL),
+            max_tokens=50,
+            temperature=0,
+            api_key=api_key,
+        )
+        return _parse_behavioral_comparison(text)
+    except Exception as e:
+        logger.warning(f"Behavioral comparison scoring failed: {e}")
+        return BehavioralDelta(
+            decisiveness_match="adjacent",
+            thoroughness_match="adjacent",
+            specificity_match="adjacent",
+        )
+
+
+def _parse_behavioral_comparison(text):
+    """Parse the comparative behavioral scoring response."""
+    result = {
+        "decisiveness_match": "adjacent",
+        "thoroughness_match": "adjacent",
+        "specificity_match": "adjacent",
+    }
+    for line in text.strip().splitlines():
+        line = line.strip().upper()
+        if line.startswith("DECISIVENESS:"):
+            val = line.split(":", 1)[1].strip().split()[0].lower()
+            if val in _VALID_COMPARISON:
+                result["decisiveness_match"] = val
+        elif line.startswith("THOROUGHNESS:"):
+            val = line.split(":", 1)[1].strip().split()[0].lower()
+            if val in _VALID_COMPARISON:
+                result["thoroughness_match"] = val
+        elif line.startswith("SPECIFICITY:"):
+            val = line.split(":", 1)[1].strip().split()[0].lower()
+            if val in _VALID_COMPARISON:
+                result["specificity_match"] = val
+    return BehavioralDelta(**result)
+
+
+# ---------------------------------------------------------------------------
+# Comparative preference scoring (single LLM call with both texts)
+# ---------------------------------------------------------------------------
+
+
+def _compare_preference(incoming_body, actual_reply, draft_text,
+                        thread_summary, api_key=None):
+    """Compare draft vs actual reply on preference dimensions in one LLM call."""
+    try:
+        prompt = PREFERENCE_COMPARISON_PROMPT.format(
+            incoming_email_body=incoming_body[:3000],
+            actual_reply=actual_reply[:3000],
+            generated_draft=draft_text[:3000],
+            thread_summary_or_none=thread_summary or "None.",
+        )
+        text, _ = call_claude(
+            prompt=prompt,
+            model=resolve_model(MODEL),
+            max_tokens=30,
+            temperature=0,
+            api_key=api_key,
+        )
+        return _parse_preference_comparison(text)
+    except Exception as e:
+        logger.warning(f"Preference comparison scoring failed: {e}")
+        return PreferenceDelta(
+            investment_match="adjacent",
+            positional_match="adjacent",
+        )
+
+
+def _parse_preference_comparison(text):
+    """Parse the comparative preference scoring response."""
+    result = {
+        "investment_match": "adjacent",
+        "positional_match": "adjacent",
+    }
+    for line in text.strip().splitlines():
+        line = line.strip().upper()
+        if line.startswith("INVESTMENT:"):
+            val = line.split(":", 1)[1].strip().split()[0].lower()
+            if val in _VALID_COMPARISON:
+                result["investment_match"] = val
+        elif line.startswith("POSITIONAL:"):
+            val = line.split(":", 1)[1].strip().split()[0].lower()
+            if val in _VALID_COMPARISON:
+                result["positional_match"] = val
+    return PreferenceDelta(**result)
+
+
+# ---------------------------------------------------------------------------
+# Preference delta (legacy — kept for ground truth scoring)
 # ---------------------------------------------------------------------------
 
 _INVESTMENT_ORDER = ["active", "selective", "conservative"]
@@ -439,8 +550,13 @@ def _parse_contextual(text, should_draft):
 # ---------------------------------------------------------------------------
 
 def _classify_overall(style, behavioral, preference, contextual):
-    """Determine overall result: pass | soft_miss | hard_miss."""
-    # Any contextual failure = hard_miss
+    """Determine overall result: pass | soft_miss | hard_miss.
+
+    Contextual failures (fabrication, comprehension, attribution) remain
+    hard vetoes — these are safety-critical. Style/behavioral/preference
+    dimensions use weighted scoring: 2+ hard_misses = hard_miss.
+    """
+    # Contextual failures remain hard vetoes (safety-critical)
     if contextual.should_draft_accuracy == "incorrect":
         return "hard_miss"
     if contextual.fabrication_detected:
@@ -452,33 +568,34 @@ def _classify_overall(style, behavioral, preference, contextual):
     if contextual.content_alignment == "hard_miss":
         return "hard_miss"
 
-    # Check for hard misses in style/behavioral/preference
-    hard_miss_fields = [
+    # Count hard misses across style/behavioral/preference dimensions
+    scoreable_fields = [
         style.greeting_match, style.signoff_match, style.formality_register,
         behavioral.decisiveness_match, behavioral.thoroughness_match,
         behavioral.specificity_match,
         preference.investment_match, preference.positional_match,
     ]
-    if any(f == "hard_miss" for f in hard_miss_fields):
-        return "hard_miss"
+    active = [f for f in scoreable_fields if f != "not_applicable"]
+    hard_misses = sum(1 for f in active if f == "hard_miss")
+    adjacent = sum(1 for f in active if f in ("adjacent", "mismatch"))
 
-    # Word count ratio check
+    # Word count ratio (softer thresholds)
     if style.word_count_ratio > 0:
-        if style.word_count_ratio < 0.4 or style.word_count_ratio > 2.5:
-            return "hard_miss"
+        if style.word_count_ratio < 0.3 or style.word_count_ratio > 3.0:
+            hard_misses += 1
+        elif style.word_count_ratio < 0.5 or style.word_count_ratio > 2.0:
+            adjacent += 1
 
-    # Check for adjacent misses
-    adjacent_fields = hard_miss_fields + [
-        style.contraction_match, style.bullet_match,
-    ]
-    has_adjacent = any(
-        f in ("adjacent", "mismatch")
-        for f in adjacent_fields
-        if f not in ("not_applicable",)
-    )
-    if has_adjacent:
+    # Contraction/bullet mismatches count as adjacent
+    for f in (style.contraction_match, style.bullet_match):
+        if f == "mismatch":
+            adjacent += 1
+
+    # 2+ hard misses = hard_miss, 1 or any adjacent = soft_miss
+    if hard_misses >= 2:
+        return "hard_miss"
+    if hard_misses == 1 or adjacent > 0:
         return "soft_miss"
-
     return "pass"
 
 
