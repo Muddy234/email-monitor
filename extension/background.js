@@ -941,8 +941,12 @@ async function detectAndUpdateAliases(userId, authEmail, sentEmails) {
     if (DEBUG) console.log(`Alias detection: ${sentEmails.length} sent emails, ${detected.size} aliases found:`, [...detected]);
     if (detected.size === 0) return;
 
-    // Merge with existing aliases (no duplicates)
-    const merged = [...new Set([...existing, ...detected])];
+    // Merge with existing aliases (no duplicates), filtering out any
+    // stale foreign-domain aliases persisted before the domain check.
+    const filtered = authDomain
+      ? existing.filter(a => a.split("@")[1] === authDomain)
+      : existing;
+    const merged = [...new Set([...filtered, ...detected])];
     if (merged.length === existing.length && profile?.connected_outlook_email) return; // nothing new
 
     if (merged.length !== existing.length) {
