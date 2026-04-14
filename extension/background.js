@@ -1402,6 +1402,29 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         updateBadge();
       }
     });
+    // Ensure worker_active is set for this user (covers email-verification flow)
+    (async () => {
+      try {
+        const session = await getSupabaseSession();
+        if (session?.access_token && session?.user?.id) {
+          const resp = await fetch(
+            `${SUPABASE_URL}/rest/v1/profiles?id=eq.${session.user.id}`,
+            {
+              method: "PATCH",
+              headers: {
+                "Content-Type": "application/json",
+                apikey: SUPABASE_ANON_KEY,
+                Authorization: `Bearer ${session.access_token}`,
+              },
+              body: JSON.stringify({ worker_active: true }),
+            }
+          );
+          if (!resp.ok && DEBUG) console.warn("Failed to set worker_active:", resp.status);
+        }
+      } catch (e) {
+        if (DEBUG) console.warn("Failed to set worker_active:", e);
+      }
+    })();
     initSupabase();
     // Notify any open clarion-ai.app tabs to re-sync auth
     chrome.tabs.query({ url: ["https://clarion-ai.app/*", "https://www.clarion-ai.app/*"] }, (tabs) => {
