@@ -1254,8 +1254,13 @@ async function initSupabase() {
     return;
   }
 
-  // Start email sync alarm
+  // Start email sync alarm (recurring)
   chrome.alarms.create(EMAIL_SYNC_ALARM, { delayInMinutes: EMAIL_SYNC_PERIOD_MIN });
+
+  // Fire an immediate first sync so onboarding kicks off without waiting
+  syncEmailsToSupabase().catch((err) => {
+    if (DEBUG) console.error("Initial sync error:", err.message);
+  });
 
   // Connect Realtime for draft listening
   if (!isRealtimeConnected()) {
