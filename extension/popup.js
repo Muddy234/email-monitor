@@ -255,12 +255,48 @@ async function checkSessionAndRender() {
   const state = await getState();
 
   if (!session || !session.access_token) {
-    // Check for pending signup (phone verify in progress)
+    // Check for pending signup (email confirmation may have completed)
     const hasPending = await restorePendingSignup();
-    if (hasPending) {
+    if (hasPending && pendingEmail && pendingPassword) {
+      // Try auto-login — email may already be confirmed (e.g. link scanner)
+      try {
+        const result = await authRequest("/token?grant_type=password", {
+          email: pendingEmail,
+          password: pendingPassword,
+        });
+        session = sessionFromResponse(result);
+        await clearPendingSignup();
+        await chrome.storage.local.set({ supabaseSession: session });
+        await setWorkerActive(session.access_token, session.user.id, true);
+        try {
+          const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Chicago";
+          await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${session.user.id}`, {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              apikey: SUPABASE_ANON_KEY,
+              Authorization: `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({ timezone: tz }),
+          });
+        } catch (_) {}
+        chrome.runtime.sendMessage({ type: "supabaseSessionChanged" });
+        // Fall through to setup/status view below
+      } catch (_) {
+        // Login failed — email not yet confirmed, show phone verify flow
+        showView("loginView");
+        showPhoneVerifyFlow();
+        if (pendingPhone) {
+          document.getElementById("phoneVerifyToggle").style.display = "none";
+          document.getElementById("phoneInputGroup").style.display = "none";
+          document.getElementById("codeInputGroup").style.display = "";
+          document.getElementById("verifyHint").textContent = "Enter the code sent to your phone";
+        }
+        return;
+      }
+    } else if (hasPending) {
       showView("loginView");
       showPhoneVerifyFlow();
-      // If code was already sent, jump to OTP input
       if (pendingPhone) {
         document.getElementById("phoneVerifyToggle").style.display = "none";
         document.getElementById("phoneInputGroup").style.display = "none";
@@ -268,13 +304,14 @@ async function checkSessionAndRender() {
         document.getElementById("verifyHint").textContent = "Enter the code sent to your phone";
       }
       return;
-    }
-    if (state === "welcome") {
-      showView("welcomeView");
     } else {
-      showView("loginView");
+      if (state === "welcome") {
+        showView("welcomeView");
+      } else {
+        showView("loginView");
+      }
+      return;
     }
-    return;
   }
 
   // Ensure worker_active is set (covers email-verification flow that bypasses login)
@@ -802,7 +839,7 @@ document.getElementById("loginBtn").addEventListener("click", async () => {
         btn.textContent = "Sign Up";
         return;
       }
-      const result = await authRequest("/signup?redirect_to=" + encodeURIComponent("https://clarion-ai.app/app/verified.html"), { email, password });
+      const result = await authRequest("/signup?redirect_to=" + encodeURIComponent("https://www.clarion-ai.app/app/verified.html"), { email, password });
       const signupUserId = result.user?.id || result.id || null;
       // Write display_name to the profile row created by the DB trigger
       if (signupUserId && displayName) {

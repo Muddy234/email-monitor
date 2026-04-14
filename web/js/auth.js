@@ -60,7 +60,7 @@ export async function signUp(email, password, displayName) {
         email,
         password,
         options: {
-            emailRedirectTo: "https://clarion-ai.app/app/verified.html",
+            emailRedirectTo: "https://www.clarion-ai.app/app/verified.html",
         },
     });
     if (error) throw error;
