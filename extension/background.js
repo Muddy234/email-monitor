@@ -697,32 +697,46 @@ async function enrichEmailsBatched(emails) {
 // --- CreateItem — save draft -----------------------------------------------
 
 async function handleSaveDraft(params) {
-  const subject = params.subject || "";
   const htmlBody = params.body || "";
-  const toRecipients = params.to_recipients || [];
-  const ccRecipients = params.cc_recipients || [];
   const bodyType = params.body_type || "HTML";
+  const parentItemId = params.parent_item_id || null;
 
-  const mapRecipient = (r) => ({
-    Name: r.name || r.address || "",
-    EmailAddress: r.address || r.email || "",
-    RoutingType: "SMTP",
-  });
+  let item;
 
-  const message = {
-    __type: "Message:#Exchange",
-    Subject: subject,
-    Body: { BodyType: bodyType, Value: htmlBody },
-    ToRecipients: toRecipients.map(mapRecipient),
-  };
+  if (parentItemId) {
+    // Threaded reply-all: single call that threads correctly in Outlook
+    item = {
+      __type: "ReplyAllToItem:#Exchange",
+      ReferenceItemId: { __type: "ItemId:#Exchange", Id: parentItemId },
+      NewBodyContent: { BodyType: bodyType, Value: htmlBody },
+    };
+  } else {
+    // Fallback: standalone draft (no threading)
+    const subject = params.subject || "";
+    const toRecipients = params.to_recipients || [];
+    const ccRecipients = params.cc_recipients || [];
 
-  if (ccRecipients.length > 0) {
-    message.CcRecipients = ccRecipients.map(mapRecipient);
+    const mapRecipient = (r) => ({
+      Name: r.name || r.address || "",
+      EmailAddress: r.address || r.email || "",
+      RoutingType: "SMTP",
+    });
+
+    item = {
+      __type: "Message:#Exchange",
+      Subject: subject,
+      Body: { BodyType: bodyType, Value: htmlBody },
+      ToRecipients: toRecipients.map(mapRecipient),
+    };
+
+    if (ccRecipients.length > 0) {
+      item.CcRecipients = ccRecipients.map(mapRecipient);
+    }
   }
 
   const body = {
     __type: "CreateItemRequest:#Exchange",
-    Items: [message],
+    Items: [item],
     MessageDisposition: "SaveOnly",
   };
 

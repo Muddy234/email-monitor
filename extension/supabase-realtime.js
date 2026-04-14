@@ -158,27 +158,38 @@ async function handleNewDraft(record) {
       return;
     }
 
-    // Build reply-all recipients and threaded HTML body
-    let { toRecipients, ccRecipients } = buildReplyAllRecipients(parentEmail, userAliases);
+    const replyHtml = `<div>${escapeHtml(draftBody).replace(/\n/g, "<br>")}</div>`;
 
-    // Fallback: if To is empty, reply directly to the original sender
-    if (toRecipients.length === 0 && parentEmail.sender_email) {
-      toRecipients = [{ name: parentEmail.sender_name || "", address: parentEmail.sender_email }];
+    let result;
+
+    if (parentEmail.email_ref) {
+      // Threaded reply-all via ReplyAllToItem (single OWA call)
+      result = await handleSaveDraft({
+        parent_item_id: parentEmail.email_ref,
+        body: replyHtml,
+        body_type: "HTML",
+      });
+    } else {
+      // Fallback: standalone draft with manual recipients + quoted body
+      if (DEBUG) console.warn("Realtime: no email_ref, falling back to standalone draft");
+
+      let { toRecipients, ccRecipients } = buildReplyAllRecipients(parentEmail, userAliases);
+      if (toRecipients.length === 0 && parentEmail.sender_email) {
+        toRecipients = [{ name: parentEmail.sender_name || "", address: parentEmail.sender_email }];
+      }
+
+      const subject = parentEmail.subject?.startsWith("Re: ")
+        ? parentEmail.subject
+        : `Re: ${parentEmail.subject || ""}`;
+
+      result = await handleSaveDraft({
+        subject,
+        body: buildThreadedBody(draftBody, parentEmail),
+        to_recipients: toRecipients,
+        cc_recipients: ccRecipients,
+        body_type: "HTML",
+      });
     }
-
-    const htmlBody = buildThreadedBody(draftBody, parentEmail);
-
-    const subject = parentEmail.subject?.startsWith("Re: ")
-      ? parentEmail.subject
-      : `Re: ${parentEmail.subject || ""}`;
-
-    const result = await handleSaveDraft({
-      subject,
-      body: htmlBody,
-      to_recipients: toRecipients,
-      cc_recipients: ccRecipients,
-      body_type: "HTML",
-    });
 
     if (result.success) {
       await updateDraftStatus(draftId, "written", result.draft_ref);
