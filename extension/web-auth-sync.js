@@ -210,4 +210,23 @@ chrome.runtime.onMessage.addListener((msg) => {
 
 initialSync().then(() => {
   pollWebSession();
+
+  // On verification pages the Supabase SDK writes the session to localStorage
+  // AFTER this content script's initial sync (module scripts are deferred).
+  // Retry quickly so the session is picked up without waiting for the 5s poll.
+  if (location.hash || location.pathname.includes("verified")) {
+    let retries = 0;
+    const quick = setInterval(async () => {
+      retries++;
+      const webSession = readWebSession();
+      const currentWebUserId = webSession?.user?.id || null;
+      if (currentWebUserId && currentWebUserId !== lastWebUserId) {
+        lastWebUserId = currentWebUserId;
+        await writeExtSession(webSession);
+        clearInterval(quick);
+      } else if (retries >= 10) {
+        clearInterval(quick);
+      }
+    }, 500);
+  }
 });

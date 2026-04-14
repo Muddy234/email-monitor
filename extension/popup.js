@@ -277,6 +277,9 @@ async function checkSessionAndRender() {
     return;
   }
 
+  // Ensure worker_active is set (covers email-verification flow that bypasses login)
+  setWorkerActive(session.access_token, session.user.id, true);
+
   if (state === "complete") {
     showStatusView(session);
   } else {
