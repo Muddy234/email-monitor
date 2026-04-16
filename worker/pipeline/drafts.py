@@ -165,6 +165,8 @@ class DraftGenerator:
             org = contact.get("organization", "")
             role = contact.get("role", "")
             significance = contact.get("relationship_significance", "")
+            expertise = contact.get("expertise_areas") or []
+            rel_summary = contact.get("relationship_summary") or ""
 
             parts = []
             if name:
@@ -187,7 +189,15 @@ class DraftGenerator:
 
             lines.append("".join(parts))
 
-        return "CONTACT SUMMARY:\n" + "\n".join(lines)
+            if expertise:
+                lines.append(f"  Expertise: {', '.join(expertise)}")
+            if rel_summary:
+                lines.append(f"  Relationship summary: {rel_summary}")
+
+        return (
+            "CONTACT SUMMARY (synthesized from prior interactions — "
+            "may be outdated):\n" + "\n".join(lines)
+        )
 
     def build_batch_params(self, email_data, action_context, custom_id):
         """Build a Batches API request dict for a single draft.
