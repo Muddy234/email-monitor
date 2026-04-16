@@ -28,11 +28,6 @@ class DraftGenerator:
         # 1. Personality profile
         sections.append(self._build_personality_profile(action_context))
 
-        # 1b. Calibration rules (injected between profile and NEVER)
-        cal_section = self._build_calibration_section(action_context)
-        if cal_section:
-            sections.append(cal_section)
-
         # 2. NEVER guardrails
         sections.append(self._get_never_list())
 
@@ -87,28 +82,6 @@ class DraftGenerator:
             return "PERSONALITY PROFILE:\nNo personality profile available."
 
         return "PERSONALITY PROFILE:\n" + "\n\n".join(parts)
-
-    @staticmethod
-    def _build_calibration_section(action_context):
-        """Build CALIBRATION RULES section from stored correction rules.
-
-        Returns None if no calibration rules are present.
-        """
-        rules = action_context.get("calibration_rules")
-        if not rules:
-            return None
-
-        # Rules can be a list of strings or a pre-formatted text block
-        if isinstance(rules, list):
-            rules_text = "\n".join(f"- {r}" for r in rules)
-        else:
-            rules_text = rules
-
-        return (
-            "PERSPECTIVE NOTES (observations from testing against your actual emails "
-            "— use these to understand the user's reasoning patterns, not as rigid rules):\n"
-            + rules_text
-        )
 
     @staticmethod
     def _get_never_list():
