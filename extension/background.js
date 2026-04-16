@@ -1371,6 +1371,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       sendResponse({ ok: false, reason: "account_mismatch" });
     } else {
       // Token is acceptable — cache it
+      const firstValidToken = !token || !token.token || isTokenExpired();
       token = msg.data;
       if (sender.tab?.id) outlookTabId = sender.tab.id;
       persistToken();
@@ -1380,6 +1381,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
       updateBadge();
       sendResponse({ ok: true });
+
+      // If this is the first valid token after a session was established
+      // (e.g. pre-onboarding signup flow), fire an immediate sync so
+      // onboarding kicks off without waiting for the next alarm tick.
+      if (firstValidToken && !lastSyncTime) {
+        getSupabaseSession().then((session) => {
+          if (session?.access_token) {
+            syncEmailsToSupabase().catch((err) => {
+              if (DEBUG) console.error("Post-token sync error:", err.message);
+            });
+          }
+        });
+      }
     }
   } else if (msg.type === "token_update" && (!msg.data || !msg.data.token)) {
     // Content script found no token
