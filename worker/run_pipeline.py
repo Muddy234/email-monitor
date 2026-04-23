@@ -53,6 +53,7 @@ def build_config_from_profile(profile):
 
         # User identity
         "user_email_aliases": profile.get("user_email_aliases", []),
+        "onboarding_completed_at": profile.get("onboarding_completed_at"),
 
         # Claude settings — from env vars (not stored in user profile)
         "anthropic_api_key": os.environ.get("ANTHROPIC_API_KEY", ""),
@@ -131,6 +132,19 @@ def filter_emails(db_client, emails, user_id, config):
     """
     email_filter = EmailFilter(config)
     user_aliases = [a.lower() for a in config.get("user_email_aliases", []) if a]
+
+    # Catch late-arriving pre-onboarding emails. Extension catchup may still
+    # be syncing old emails after onboarding completed. Mark them as
+    # 'onboarding' so they never reach drafting.
+    onboarding_at = config.get("onboarding_completed_at")
+    if onboarding_at:
+        late_ids = [em["id"] for em in emails
+                    if (em.get("received_time") or "") < onboarding_at]
+        if late_ids:
+            logger.info(f"  Marking {len(late_ids)} late-arriving pre-onboarding emails")
+            db_client.bulk_update_email_status(late_ids, "onboarding")
+            emails = [em for em in emails
+                      if (em.get("received_time") or "") >= onboarding_at]
 
     filtered = []
     skip_ids = []
@@ -838,35 +852,10 @@ def process_user_batch_signals(db, user_id, profile, emails):
     draft_max_age_hours = int(os.environ.get("DRAFT_MAX_AGE_HOURS", "24"))
 
     try:
-        # @pipeline divider="Stage 0 — Init + late-arrival filter"
-        # @pipeline step="late-arrival-filter" num="28" desc="Marks pre-onboarding emails as 'onboarding' to exclude from drafting. Compares received_time against onboarding_completed_at." reads="emails, profiles.onboarding_completed_at" writes="emails.status = onboarding" gate="onboarding_completed_at exists"
-
-        # ── Stage 0: Catch late-arriving pre-onboarding emails ──
-        # Extension catchup may still be syncing old emails after onboarding
-        # completed. Mark them as 'onboarding' so they never reach drafting.
-        onboarding_at = profile.get("onboarding_completed_at")
-        if onboarding_at:
-            late_ids = [em["id"] for em in emails
-                        if (em.get("received_time") or "") < onboarding_at]
-            if late_ids:
-                logger.info(f"  Marking {len(late_ids)} late-arriving pre-onboarding emails")
-                db.bulk_update_email_status(late_ids, "onboarding")
-                emails = [em for em in emails
-                          if (em.get("received_time") or "") >= onboarding_at]
-                if not emails:
-                    db.update_pipeline_run(
-                        run_id, status="completed",
-                        emails_scanned=len(late_ids), emails_processed=0,
-                        emails_classified=0, emails_drafted=0, drafts_generated=0,
-                    )
-                    return 0, 0
-
-        # @pipeline gate="Early exit — all pre-onboarding" standalone="true" condition-1="All emails have received_time < onboarding_completed_at — nothing to process"
-
         # @pipeline divider="Stage 1 — Rule-based filtering"
-        # @pipeline step="filter-emails" num="29" desc="Rule-based filter (blacklist senders, subject patterns) + signal-based auto-skip (terminal ack, FYI). Skipped emails written to DB immediately." reads="emails" writes="classifications (skip), emails.status = processed" nonfatal="empty result → early exit"
+        # @pipeline step="filter-emails" num="29" desc="Late-arrival filter (pre-onboarding emails marked 'onboarding') + rule-based filter (blacklist senders, subject patterns) + signal-based auto-skip (terminal ack, FYI). Skipped emails written to DB immediately." reads="emails, profiles.onboarding_completed_at" writes="classifications (skip), emails.status in (onboarding, processed)" nonfatal="empty result → early exit"
 
-        # ── Stage 1: Filter ──────────────────────────────────────
+        # ── Stage 1: Filter (includes late-arrival sweep) ────────
         filtered = filter_emails(db, emails, user_id, config)
         if not filtered:
             logger.info(f"  User {user_id[:8]}...: all emails filtered out")
@@ -1054,8 +1043,7 @@ def process_user_batch_signals(db, user_id, profile, emails):
 
         # ── Stage 4: Post-process results ────────────────────────
         response_events = []
-        draft_candidates = []
-        notable_candidates = []
+        candidates = []  # unified list with "route": "draft" | "notable"
         emails_processed = 0
 
         for db_id, ctx in email_context.items():
@@ -1133,11 +1121,16 @@ def process_user_batch_signals(db, user_id, profile, emails):
                     if preference_profile:
                         action_context["preference_profile"] = preference_profile
 
+                    personality_blurb = profile.get("personality_blurb") or ""
+                    if personality_blurb:
+                        action_context["personality_blurb"] = personality_blurb
+
                     # Attach contact for draft tone/context
                     if contact:
                         ed["sender_contact"] = contact
 
-                    draft_candidates.append({
+                    candidates.append({
+                        "route": "draft",
                         "db_id": db_id,
                         "email_data": ed,
                         "action_context": action_context,
@@ -1155,7 +1148,8 @@ def process_user_batch_signals(db, user_id, profile, emails):
                     or signals["rt"] != "none"
                 )
                 if is_notable:
-                    notable_candidates.append({
+                    candidates.append({
+                        "route": "notable",
                         "db_id": db_id,
                         "email_data": ed,
                         "conv_id": ed.get("conversation_id"),
@@ -1168,9 +1162,11 @@ def process_user_batch_signals(db, user_id, profile, emails):
             except Exception as e:
                 logger.warning(f"  Failed to persist response_events: {e}")
 
-        # @pipeline step="notable-summaries" num="35" desc="Haiku batch generates concise summaries for non-draft notable emails. Stored on response_events.summary." reads="notable_candidates, thread history" writes="response_events.summary, token_usage (haiku/summary)" nonfatal="batch failure → no summaries"
+        # @pipeline step="notable-summaries" num="35" desc="Haiku batch generates concise summaries for non-draft notable emails. Stored on response_events.summary." reads="candidates (route=notable), thread history" writes="response_events.summary, token_usage (haiku/summary)" nonfatal="batch failure → no summaries"
 
         # ── Stage 4b: Notable summaries (Haiku batch) ────────────
+        notable_candidates = [c for c in candidates if c["route"] == "notable"]
+        draft_candidates = [c for c in candidates if c["route"] == "draft"]
         if notable_candidates:
             from pipeline.api_client import resolve_model as _resolve_model
 

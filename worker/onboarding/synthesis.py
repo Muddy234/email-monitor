@@ -1,8 +1,11 @@
-"""Phase 4A/4B/4C-2: Sonnet-powered synthesis for onboarding.
+"""Phase 4A/4B/4C: Synthesis for onboarding.
 
-Phase 4A: Contact profile synthesis — infer org, role, expertise.
-Phase 4B: Topic domain clustering — group keywords into domains.
-Phase 4C-2: Writing style guide generation — audience-aware style guide.
+Phase 4A: Contact profile synthesis (Sonnet) — infer org, role, expertise.
+Phase 4B: Topic domain clustering (Sonnet) — group keywords into domains.
+Phase 4C-2: Writing style guide generation (Opus) — audience-aware style guide.
+Phase 4C-3: Behavioral profile generation (Opus).
+Phase 4C-4: Preference profile synthesis (Opus).
+Phase 4C-5: Personality blurb aggregation (Opus) — merges the 3 guides.
 """
 
 import json
@@ -16,6 +19,7 @@ from onboarding.prompts import (
     SONNET_STYLE_GUIDE_PROMPT,
     SONNET_BEHAVIORAL_PROFILE_PROMPT,
     SONNET_PREFERENCE_SYNTHESIS_PROMPT,
+    OPUS_PERSONALITY_BLURB_PROMPT,
 )
 from onboarding.retry import call_with_retry
 
@@ -178,14 +182,14 @@ def synthesize_style_guide(style_features, contact_profiles):
     response, usage = call_with_retry(
         prompt=prompt_text,
         system_prompt=SONNET_STYLE_GUIDE_PROMPT,
-        model="sonnet",
+        model="opus",
         max_tokens=4096,
         temperature=0.3,
         cache_system_prompt=True,
     )
 
     if not response:
-        logger.error("Style guide synthesis: no response from Sonnet")
+        logger.error("Style guide synthesis: no response from Opus")
         return None, usage
 
     logger.debug(f"[STYLE_SYNTH] raw response length: {len(response)} chars")
@@ -261,14 +265,14 @@ def synthesize_behavioral_profile(behavioral_features, contact_profiles):
     response, usage = call_with_retry(
         prompt=prompt_text,
         system_prompt=SONNET_BEHAVIORAL_PROFILE_PROMPT,
-        model="sonnet",
+        model="opus",
         max_tokens=4096,
         temperature=0.3,
         cache_system_prompt=True,
     )
 
     if not response:
-        logger.error("Behavioral profile synthesis: no response from Sonnet")
+        logger.error("Behavioral profile synthesis: no response from Opus")
         return None, usage
 
     logger.debug(f"[BEH_SYNTH] raw response length: {len(response)} chars")
@@ -339,13 +343,13 @@ def synthesize_preferences(decision_moments, contact_profiles):
     response, usage = call_with_retry(
         prompt=prompt_text,
         system_prompt="You are a decision-pattern analyst.",
-        model="sonnet",
+        model="opus",
         max_tokens=4096,
         temperature=0.3,
     )
 
     if not response:
-        logger.error("Preference synthesis: no response from Sonnet")
+        logger.error("Preference synthesis: no response from Opus")
         return None, usage
 
     logger.debug(f"[PREF_SYNTH] response length: {len(response)} chars")
@@ -516,3 +520,56 @@ def _clean_synthesis_output(text):
         result = pattern.sub('', result).strip()
 
     return result
+
+
+def synthesize_personality_blurb(style_guide, behavioral_profile, preference_profile):
+    """Phase 4C-5: Aggregate the 3 guides into one cohesive personality blurb via Opus.
+
+    Merges the style guide, behavioral profile, and preference profile into
+    a single plain-prose blurb written in the second person. Injected into
+    draft prompts in place of the 3 concatenated guides.
+
+    Args:
+        style_guide: Writing style guide text (may be None or empty).
+        behavioral_profile: Behavioral profile text (may be None or empty).
+        preference_profile: Preference profile text (may be None or empty).
+
+    Returns:
+        tuple: (blurb: str or None, usage: dict)
+    """
+    parts = []
+    if style_guide:
+        parts.append(f"STYLE GUIDE:\n{style_guide}")
+    if behavioral_profile:
+        parts.append(f"BEHAVIORAL PROFILE:\n{behavioral_profile}")
+    if preference_profile:
+        parts.append(f"PREFERENCE PROFILE:\n{preference_profile}")
+
+    if not parts:
+        logger.warning("Personality blurb: no source guides available, skipping")
+        return None, {}
+
+    prompt_text = "\n\n".join(parts)
+    logger.debug(f"[PERSONALITY_BLURB] prompt length: {len(prompt_text)} chars")
+
+    response, usage = call_with_retry(
+        prompt=prompt_text,
+        system_prompt=OPUS_PERSONALITY_BLURB_PROMPT,
+        model="opus",
+        max_tokens=2048,
+        temperature=0.2,
+        cache_system_prompt=True,
+    )
+
+    if not response:
+        logger.error("Personality blurb: no response from Opus")
+        return None, usage
+
+    blurb = _clean_synthesis_output(response)
+
+    if not blurb:
+        logger.warning("Personality blurb: empty after cleaning")
+        return None, usage
+
+    logger.info(f"Generated personality blurb ({len(blurb)} chars)")
+    return blurb, usage

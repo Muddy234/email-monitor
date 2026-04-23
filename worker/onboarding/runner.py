@@ -47,6 +47,7 @@ from onboarding.synthesis import (
     synthesize_style_guide,
     synthesize_behavioral_profile,
     synthesize_preferences,
+    synthesize_personality_blurb,
 )
 
 logger = logging.getLogger("worker.onboarding")
@@ -310,6 +311,7 @@ def run_onboarding(db, user_id, profile):
             extraction_result.get("extractions", []),
         )
         sonnet_usage = {}
+        opus_usage = {}
         _merge_usage(sonnet_usage, contacts_usage)
 
         if contact_profiles is None:
@@ -335,11 +337,11 @@ def run_onboarding(db, user_id, profile):
             logger.error(f"Stage 2: upsert enriched contacts failed: {e}")
             # Non-fatal — stats-only contacts from Stage 1 are already in DB
 
-        # @pipeline parallel="sonnet-synthesis" label="Sonnet synthesis — 4 parallel passes"
-        # @pipeline parallel-box="sonnet-topics" group="sonnet-synthesis" title="Topics" desc="Keyword frequency analysis → topic taxonomy. Always runs." color="purple"
-        # @pipeline parallel-box="sonnet-style" group="sonnet-synthesis" title="Style guide" desc="Style features → writing style guide (tone, formality, habits)." color="amber" dashed="true" skip-note="Skipped if skip_guides"
-        # @pipeline parallel-box="sonnet-behavioral" group="sonnet-synthesis" title="Behavioral" desc="Behavioral features → behavioral profile (decision, commitment, scope)." color="amber" dashed="true" skip-note="Skipped if skip_guides"
-        # @pipeline parallel-box="sonnet-preference" group="sonnet-synthesis" title="Preference" desc="Decision quotes → investment orientation + positional stance categories." color="purple" new-note="NEW · always runs · own threshold (8 decisions/trait)"
+        # @pipeline parallel="sonnet-synthesis" label="Sonnet + Opus synthesis — 4 parallel passes"
+        # @pipeline parallel-box="sonnet-topics" group="sonnet-synthesis" title="Topics (Sonnet)" desc="Keyword frequency analysis → topic taxonomy. Always runs." color="purple"
+        # @pipeline parallel-box="sonnet-style" group="sonnet-synthesis" title="Style guide (Opus)" desc="Style features → writing style guide (tone, formality, habits)." color="amber" dashed="true" skip-note="Skipped if skip_guides"
+        # @pipeline parallel-box="sonnet-behavioral" group="sonnet-synthesis" title="Behavioral (Opus)" desc="Behavioral features → behavioral profile (decision, commitment, scope)." color="amber" dashed="true" skip-note="Skipped if skip_guides"
+        # @pipeline parallel-box="sonnet-preference" group="sonnet-synthesis" title="Preference (Opus)" desc="Decision quotes → investment orientation + positional stance categories." color="purple" new-note="NEW · always runs · own threshold (8 decisions/trait)"
 
         # ── Phase 4B + 4C-2 + 4C-3: Parallel Sonnet synthesis ────
         db.update_onboarding_status(user_id, "style_guide")
@@ -362,7 +364,7 @@ def run_onboarding(db, user_id, profile):
                 preference_profile, pref_usage = synthesize_preferences(
                     decision_moments, contact_profiles,
                 )
-                _merge_usage(sonnet_usage, pref_usage)
+                _merge_usage(opus_usage, pref_usage)
             except Exception:
                 logger.exception("Phase 4C-4: preference synthesis raised (skip_guides path)")
         else:
@@ -389,15 +391,15 @@ def run_onboarding(db, user_id, profile):
                 topic_result, topic_usage = f_topics.result()
                 _merge_usage(sonnet_usage, topic_usage)
                 style_guide, style_usage = f_guide.result()
-                _merge_usage(sonnet_usage, style_usage)
+                _merge_usage(opus_usage, style_usage)
                 try:
                     behavioral_profile, behavioral_usage = f_behavioral.result()
-                    _merge_usage(sonnet_usage, behavioral_usage)
+                    _merge_usage(opus_usage, behavioral_usage)
                 except Exception:
                     logger.exception("Phase 4C-3: behavioral profile synthesis raised")
                 try:
                     preference_profile, pref_usage = f_preferences.result()
-                    _merge_usage(sonnet_usage, pref_usage)
+                    _merge_usage(opus_usage, pref_usage)
                 except Exception:
                     logger.exception("Phase 4C-4: preference synthesis raised")
 
@@ -410,12 +412,24 @@ def run_onboarding(db, user_id, profile):
                         behavioral_result.get("behavioral_features", []),
                         contact_profiles,
                     )
-                    _merge_usage(sonnet_usage, retry_usage)
+                    _merge_usage(opus_usage, retry_usage)
                 except Exception:
                     logger.exception("Phase 4C-3: behavioral profile retry also failed")
 
-        # Record Sonnet usage from all synthesis phases (4A + 4B + 4C-2 + 4C-3 + 4C-4)
+        # @pipeline step="personality-blurb" num="24a" desc="Opus aggregates the 3 guides into one cohesive personality blurb." reads="style_guide + behavioral_profile + preference_profile" writes="personality_blurb" nonfatal="failure → fall back to 3-guide concat in drafts"
+        # ── Phase 4C-5: Personality blurb aggregation (Opus) ─────
+        personality_blurb = None
+        try:
+            personality_blurb, blurb_usage = synthesize_personality_blurb(
+                style_guide, behavioral_profile, preference_profile,
+            )
+            _merge_usage(opus_usage, blurb_usage)
+        except Exception:
+            logger.exception("Phase 4C-5: personality blurb synthesis raised")
+
+        # Record token usage: Sonnet (contacts + topics) and Opus (style + behavioral + preference + blurb)
         db.record_token_usage(user_id, "sonnet", "onboarding_synthesis", sonnet_usage)
+        db.record_token_usage(user_id, "opus", "onboarding_synthesis", opus_usage)
 
         if topic_result is None:
             topic_result = {"domains": [], "high_signal_keywords": []}
@@ -436,7 +450,7 @@ def run_onboarding(db, user_id, profile):
         if not behavioral_profile:
             missing_components.append("behavioral_profile")
 
-        # @pipeline step="persist-stage2" num="24" desc="Writes topic profile, style guide, behavioral profile, preference profile to DB." writes="profiles table (guides + preference)" new="writes · preference_profile (JSONB)"
+        # @pipeline step="persist-stage2" num="24" desc="Writes topic profile, style guide, behavioral profile, preference profile, and personality blurb to DB." writes="profiles table (guides + preference + personality_blurb)" new="writes · personality_blurb"
         # Write enrichment results to DB
         try:
             db.upsert_topic_profile(user_id, {
@@ -485,6 +499,13 @@ def run_onboarding(db, user_id, profile):
                 )
         except Exception as e:
             logger.error(f"Stage 2: update_preference_profile failed: {e}")
+
+        try:
+            if personality_blurb:
+                db.update_personality_blurb(user_id, personality_blurb)
+                logger.info(f"Personality blurb saved ({len(personality_blurb)} chars)")
+        except Exception as e:
+            logger.error(f"Stage 2: update_personality_blurb failed: {e}")
 
         logger.info("Stage 2 complete: AI enrichments persisted")
 

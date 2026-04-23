@@ -147,7 +147,7 @@ header p { color:var(--text-muted); font-size:14px; }
     <button id="expand-btn" class="expand-btn" data-state="collapsed" onclick="toggleAll()">Expand all</button>
   </div>
   <p>End-to-end data flow from extension sync through onboarding to normal processing. Click any phase or step to expand.</p>
-  <p style="margin-top:4px;font-family:var(--mono);font-size:11px;color:var(--text-dim)">Generated: 2026-04-02 13:58 UTC</p>
+  <p style="margin-top:4px;font-family:var(--mono);font-size:11px;color:var(--text-dim)">Generated: 2026-04-23 · verified against current codebase</p>
 </header>
 <div class="legend">
   <div class="legend-item"><div class="legend-dot" style="background:var(--blue)"></div>writes</div>
@@ -204,9 +204,9 @@ header p { color:var(--text-muted); font-size:14px; }
       </div>
       <div class="step" onclick="toggleStep(this)">
         <div class="step-head"><span class="step-num">07</span><span class="step-name">set-email-cap</span></div>
-        <div class="step-desc">Pre-onboarding → 500/folder. Post-onboarding → 50/folder.</div>
-        <div class="step-meta"><span class="step-tag tag-gate">gate · onboarding_completed_at</span></div>
-        <div class="step-detail"><p>Determines the <code>maxEmails</code> per-folder cap: <strong>200</strong> if <code>isInitialSync</code> (onboarding incomplete AND folders not yet discovered), <strong>50</strong> if <code>lastSyncTime</code> exists (incremental mode), or <code>MAX_CATCHUP_EMAILS</code> for a full catchup. Logs the sync mode state for debugging.</p></div>
+        <div class="step-desc">Pre-onboarding → 500/folder (PRE_ONBOARDING_EMAIL_CAP). Post-onboarding → 50/folder (POST_ONBOARDING_EMAIL_CAP).</div>
+        <div class="step-meta"><span class="step-tag tag-gate">gate · profile.onboarding_completed_at</span></div>
+        <div class="step-detail"><p>Determines the <code>maxEmails</code> per-folder cap via a single boolean: <code>isPreOnboarding = profile &amp;&amp; !profile.onboarding_completed_at</code>. If pre-onboarding, uses <code>PRE_ONBOARDING_EMAIL_CAP = 500</code>; otherwise uses <code>POST_ONBOARDING_EMAIL_CAP = 50</code>. The same cap logic is applied to both inbox folders and the sent-items fetch in step 09.</p></div>
       </div>
       <div class="step" onclick="toggleStep(this)">
         <div class="step-head"><span class="step-num">08</span><span class="step-name">per-folder-fetch-push</span></div>
@@ -218,7 +218,7 @@ header p { color:var(--text-muted); font-size:14px; }
         <div class="step-head"><span class="step-num">09</span><span class="step-name">sent-items-sync</span></div>
         <div class="step-desc">Separate fetch for Sent Items. Status set to completed (not queued for drafts).</div>
         <div class="step-meta"><span class="step-tag tag-writes">writes · emails table (status=completed)</span></div>
-        <div class="step-detail"><p>Separate non-blocking fetch via <code>handleGetSentItems()</code> with the same <code>maxSentEmails</code> cap logic (50 if incremental, else <code>MAX_CATCHUP_EMAILS</code>). Enriches via <code>enrichEmailsBatched()</code>, transforms rows with <code>status: "completed"</code> (intentionally not queued for draft generation), and pushes to Supabase. Sent item failure doesn't block inbox sync completion.</p></div>
+        <div class="step-detail"><p>Separate non-blocking fetch via <code>handleGetSentItems()</code> using the same pre/post-onboarding cap as step 07 (500 or 50). Enriches via <code>enrichEmailsBatched()</code>, transforms rows with <code>status: "completed"</code> (intentionally not queued for draft generation), and pushes to Supabase. Sent-items failure doesn't block inbox sync completion.</p></div>
       </div>
       <div class="step" onclick="toggleStep(this)">
         <div class="step-head"><span class="step-num">10</span><span class="step-name">persist-lastSyncTime</span></div>
@@ -247,7 +247,7 @@ header p { color:var(--text-muted); font-size:14px; }
     </div>
     <div class="harden-callout">
       <h4>Hardening note</h4>
-      <p>Step 14 runs after ALL folder syncs complete, preventing the 'flag set but emails not landed' race. But per-folder failures in step 09 are non-blocking — a user could have initial_sync_complete=true with only partial folder coverage. The email_count >= 500 gate in Phase B mitigates this.</p>
+      <p>Step 13 runs after ALL folder syncs complete, preventing the 'flag set but emails not landed' race. But per-folder failures in step 08 are non-blocking — a user could have initial_sync_complete=true with only partial folder coverage. The email_count >= 500 gate in Phase B mitigates this.</p>
     </div>
   </div>
 </div>
@@ -280,14 +280,14 @@ header p { color:var(--text-muted); font-size:14px; }
       </div>
       <div class="step" onclick="toggleStep(this)">
         <div class="step-head"><span class="step-num">16</span><span class="step-name">run-onboarding</span></div>
-        <div class="step-desc">Calls into runner.py to execute the three-stage pipeline.</div>
-        <div class="step-meta"><span class="step-tag tag-writes">writes · onboarding_status = running</span></div>
-        <div class="step-detail"><p>Invokes <code>run_onboarding(db, uid, profile)</code> from <code>runner.py</code>, which executes the full three-stage onboarding pipeline. Sets <code>onboarding_status</code> to "running" on entry. <strong>Edge case:</strong> if the function crashes before completion, status remains "running" and blocks all future attempts — the stuck-onboarding recovery in <code>_recover_stuck_onboarding()</code> resets these to "pending" on worker restart.</p></div>
+        <div class="step-desc">Calls into runner.py to execute the three-stage pipeline. Progresses through granular status values at each stage.</div>
+        <div class="step-meta"><span class="step-tag tag-writes">writes · onboarding_status = starting → collecting → statistics → persisting → extracting → synthesizing → style_guide → training → complete</span></div>
+        <div class="step-detail"><p>Invokes <code>run_onboarding(db, uid, profile)</code> from <code>runner.py</code>, which executes the full three-stage onboarding pipeline. Sets <code>onboarding_status = "starting"</code> on entry, then advances through granular progress states as each stage runs: <code>collecting</code> → <code>statistics</code> → <code>persisting</code> → <code>extracting</code> (Haiku) → <code>synthesizing</code> (Sonnet) → <code>style_guide</code> (final writes) → <code>training</code> (classifier) → <code>complete</code> or <code>complete_partial</code>. <strong>Edge case:</strong> if the function crashes mid-flight, status remains at whichever intermediate value was last written and blocks all future attempts — the stuck-onboarding recovery in <code>_recover_stuck_onboarding()</code> resets any non-terminal status to "pending" on worker restart.</p></div>
       </div>
     </div>
     <div class="harden-callout">
       <h4>Hardening note</h4>
-      <p>If step 12 crashes before completion, onboarding_status stays 'running' — the gate condition (status in {null, pending, failed}) blocks all future attempts. Consider a timeout or heartbeat mechanism that resets 'running' to 'failed' after N minutes of inactivity.</p>
+      <p>If step 16 crashes mid-pipeline, onboarding_status stays at whichever intermediate value (starting, collecting, synthesizing, etc.) was last written — the gate condition (status in {null, pending, failed}) blocks all future attempts. <code>_recover_stuck_onboarding()</code> mitigates this on worker restart by resetting any non-terminal status back to "pending", but an in-process watchdog would catch stalls without requiring a restart.</p>
     </div>
   </div>
 </div>
@@ -363,35 +363,41 @@ header p { color:var(--text-muted); font-size:14px; }
       </div>
     </div>
     <div class="parallel-block">
-      <div class="parallel-label">Sonnet synthesis — 4 parallel passes</div>
+      <div class="parallel-label">Sonnet + Opus synthesis — 4 parallel passes</div>
       <div class="parallel-row">
         <div class="parallel-box" style="border-color:var(--purple-border)">
-          <h4 style="color:var(--purple)">Topics</h4>
+          <h4 style="color:var(--purple)">Topics (Sonnet)</h4>
           <p>Keyword frequency analysis → topic taxonomy. Always runs.</p>
         </div>
         <div class="parallel-box dashed" style="border-color:var(--amber-border)">
-          <h4 style="color:var(--amber)">Style guide</h4>
+          <h4 style="color:var(--amber)">Style guide (Opus)</h4>
           <p>Style features → writing style guide (tone, formality, habits).</p>
           <div class="skip-note">Skipped if skip_guides</div>
         </div>
         <div class="parallel-box dashed" style="border-color:var(--amber-border)">
-          <h4 style="color:var(--amber)">Behavioral</h4>
+          <h4 style="color:var(--amber)">Behavioral (Opus)</h4>
           <p>Behavioral features → behavioral profile (decision, commitment, scope).</p>
           <div class="skip-note">Skipped if skip_guides</div>
         </div>
         <div class="parallel-box" style="border-color:var(--purple-border)">
-          <h4 style="color:var(--purple)">Preference</h4>
+          <h4 style="color:var(--purple)">Preference (Opus)</h4>
           <p>Decision quotes → investment orientation + positional stance categories.</p>
-          <div class="new-note">NEW · always runs · own threshold (8 decisions/trait)</div>
+          <div class="new-note">always runs · minimum 4 decision_moments required (else returns None)</div>
         </div>
       </div>
     </div>
     <div class="step-list">
       <div class="step" onclick="toggleStep(this)">
+        <div class="step-head"><span class="step-num">24a</span><span class="step-name">personality-blurb</span></div>
+        <div class="step-desc">Opus aggregates the 3 guides into one cohesive personality blurb.</div>
+        <div class="step-meta"><span class="step-tag tag-reads">reads · style_guide + behavioral_profile + preference_profile</span><span class="step-tag tag-writes">writes · personality_blurb</span><span class="step-tag tag-nonfatal">failure → fall back to 3-guide concat in drafts</span></div>
+        <div class="step-detail"><p>Calls <code>synthesize_personality_blurb()</code> which merges the style, behavioral, and preference guides into a single 2nd-person plain-prose blurb via Opus. This blurb is injected into draft prompts in place of the 3 concatenated guides. If any guide is missing, blurbs what's present; if all are missing or the call fails, draft generation falls back to the existing concat logic.</p></div>
+      </div>
+      <div class="step" onclick="toggleStep(this)">
         <div class="step-head"><span class="step-num">24</span><span class="step-name">persist-stage2</span></div>
-        <div class="step-desc">Writes topic profile, style guide, behavioral profile, preference profile to DB.</div>
-        <div class="step-meta"><span class="step-tag tag-writes">writes · profiles table (guides + preference)</span><span class="step-tag tag-new">writes · preference_profile (JSONB)</span></div>
-        <div class="step-detail"><p>Writes all AI enrichments to DB: <code>upsert_topic_profile()</code>, <code>update_writing_style()</code>, <code>update_behavioral_profile()</code>, <code>update_preference_profile()</code> (JSONB column). Tracks <code>missing_components</code> (style_guide, behavioral_profile) for degraded completion status. Preference profile absence does <strong>not</strong> degrade status — it's an optional additive layer.</p></div>
+        <div class="step-desc">Writes topic profile, style guide, behavioral profile, preference profile, and personality blurb to DB.</div>
+        <div class="step-meta"><span class="step-tag tag-writes">writes · profiles table (guides + preference + personality_blurb)</span><span class="step-tag tag-new">writes · personality_blurb</span></div>
+        <div class="step-detail"><p>Writes all AI enrichments to DB: <code>upsert_topic_profile()</code>, <code>update_writing_style()</code>, <code>update_behavioral_profile()</code>, <code>update_preference_profile()</code>, <code>update_personality_blurb()</code>. Tracks <code>missing_components</code> (style_guide, behavioral_profile) for degraded completion status. Preference profile and personality blurb absence does <strong>not</strong> degrade status — they're optional additive layers.</p></div>
       </div>
     </div>
     <div class="section-divider"><span>Stage 3 — Completion</span></div>
@@ -479,7 +485,7 @@ header p { color:var(--text-muted); font-size:14px; }
         <div class="step-head"><span class="step-num">32</span><span class="step-name">signal-extraction-batch</span></div>
         <div class="step-desc">Submits Haiku batch via Anthropic Batches API. Extracts 9 signals per email: mc, ar, ub, dl, rt, target, pri, draft, reason.</div>
         <div class="step-meta"><span class="step-tag tag-writes">writes · token_usage (haiku/signals)</span><span class="step-tag tag-reads">reads · pre-processed bodies + context</span><span class="step-tag tag-nonfatal">batch failure → sync fallback</span></div>
-        <div class="step-detail"><p>Constructs one <code>extract_signals_batch_params()</code> request per email and submits to the Anthropic Batches API (Haiku, temp=0, max_tokens=200). Each request includes: pre-processed body, subject, sender metadata (name, email, tier, contact_type, significance), thread metadata (depth, has_unanswered), user identity (name, email, position, TO/CC fields), and feedback hints. Returns 9 signals per email: <code>mc</code> (material consequence), <code>ar</code> (action request), <code>ub</code> (user bottleneck), <code>dl</code> (deadline), <code>rt</code> (response type: none/ack/ans/act/dec), <code>target</code> (user/other/all/unclear), <code>pri</code> (high/med/low), <code>draft</code> (boolean), <code>reason</code> (&lt;30 words). Polls at <code>BATCH_POLL_INTERVAL</code> (default 3s) for up to <code>BATCH_MAX_WAIT</code> (default 900s).</p></div>
+        <div class="step-detail"><p>Constructs one <code>extract_signals_batch_params()</code> request per email and submits to the Anthropic Batches API (Haiku, temp=0, max_tokens=200). Each request includes: pre-processed body, subject, sender metadata (name, email, tier, contact_type, significance), thread metadata (depth, has_unanswered), user identity (name, email, position, TO/CC fields), and feedback hints. Returns 9 signals per email: <code>mc</code> (material consequence), <code>ar</code> (action request), <code>ub</code> (user bottleneck), <code>dl</code> (deadline), <code>rt</code> (response type: none/ack/ans/act/dec), <code>target</code> (user/other/all/unclear), <code>pri</code> (high/med/low), <code>draft</code> (boolean), <code>reason</code> (truncated to 200 chars post-parse). Polls at <code>BATCH_POLL_INTERVAL</code> (default 3s) for up to <code>BATCH_MAX_WAIT</code> (default 900s).</p></div>
       </div>
       <div class="step" onclick="toggleStep(this)">
         <div class="step-head"><span class="step-num">33</span><span class="step-name">signal-fallback-sync</span></div>
@@ -524,12 +530,12 @@ header p { color:var(--text-muted); font-size:14px; }
         <div class="step-head"><span class="step-num">36</span><span class="step-name">draft-generation-batch</span></div>
         <div class="step-desc">Sonnet batch with 3-layer profile injection (style + behavioral + preference). Deduplicates candidates. Builds batch via DraftGenerator.build_batch_params().</div>
         <div class="step-meta"><span class="step-tag tag-writes">writes · token_usage (sonnet/draft)</span><span class="step-tag tag-reads">reads · draft_candidates, style_guide, behavioral_profile, preference_profile</span><span class="step-tag tag-nonfatal">batch failure → per-draft sync fallback</span></div>
-        <div class="step-detail"><p>Initializes <code>DraftGenerator</code> with config and <code>get_draft_prompt_template()</code>. Deduplicates candidates by <code>db_id</code>. Builds batch requests via <code>build_batch_params()</code>, injecting the three-layer profile into the user message: <strong>style guide</strong> (how to write), <strong>behavioral profile</strong> (how to express), <strong>preference profile</strong> (what to decide — Investment Orientation + Positional Stance). System prompt enforces an 8-step thinking process (<code>&lt;thinking&gt;</code> tags) culminating in one of three verdicts: <code>direct</code>, <code>diagnostic</code>, or <code>scaffold</code>. Submits as Sonnet batch (temp=0.3, max_tokens=2048). Fallback to sync <code>generate_draft()</code> for missing batch results. Output validated via <code>_validate_output()</code> (rejects NO_DRAFT_NEEDED, &lt;20 chars, error messages).</p></div>
+        <div class="step-detail"><p>Initializes <code>DraftGenerator</code> with config. <code>DEFAULT_DRAFT_PROMPT_TEMPLATE</code> is <code>None</code> — there is <strong>no system prompt</strong>; instructions are assembled into a single structured user message. Deduplicates candidates by <code>db_id</code>. <code>build_batch_params()</code> composes the user message with labeled sections: <strong>PERSONALITY PROFILE</strong> (style guide — how to write), <strong>BEHAVIORAL PROFILE</strong> (how to express decisions), <strong>PREFERENCE PROFILE</strong> (what to decide — Investment Orientation + Positional Stance), followed by <strong>NEVER</strong> rules, the <strong>EMAIL</strong> body, optional <strong>THREAD SUMMARY</strong>/<strong>CONTACT SUMMARY</strong>, and a final "Draft a reply" instruction. Null profile layers are omitted (graceful degradation). Submits as Sonnet batch (temp=0.3, max_tokens=2048). Fallback to sync <code>generate_draft()</code> for missing batch results. The model's output may include <code>&lt;thinking&gt;…&lt;/thinking&gt;</code> blocks which are stripped by post-processing and retained separately as <code>response_events.summary</code>. Output validated via <code>_validate_output()</code> (rejects NO_DRAFT_NEEDED, &lt;20 chars, error messages).</p></div>
       </div>
     </div>
     <div class="harden-callout">
       <h4>Three-layer draft composition</h4>
-      <p>Each draft uses three profile layers: <strong>style guide</strong> (how to write), <strong>behavioral profile</strong> (how to express decisions), and <strong>preference profile</strong> (what to decide). The preference layer resolves decision direction via Investment Orientation and Positional Stance. Null layers are omitted — graceful degradation, not failure.</p>
+      <p>Each draft uses three profile layers composed into a single user message (no system prompt): <strong>style guide</strong> (how to write), <strong>behavioral profile</strong> (how to express decisions), and <strong>preference profile</strong> (what to decide). The preference layer resolves decision direction via Investment Orientation and Positional Stance. Null layers are omitted — graceful degradation, not failure.</p>
     </div>
     <div class="step-list">
       <div class="step" onclick="toggleStep(this)">

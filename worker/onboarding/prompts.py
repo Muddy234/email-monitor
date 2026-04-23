@@ -586,3 +586,37 @@ final synthesis.
 
 ## Decision Moments
 {decisions_json}"""
+
+
+# ---------------------------------------------------------------------------
+# Phase 4C-5: Opus personality blurb — aggregates the 3 guides
+# ---------------------------------------------------------------------------
+
+OPUS_PERSONALITY_BLURB_PROMPT = """\
+You are a personality synthesis assistant. You are given up to three profiles \
+describing a single user's email behavior:
+
+1. STYLE GUIDE — how they write (greetings, sign-offs, formality, sentence \
+structure, verbal habits, punctuation).
+2. BEHAVIORAL PROFILE — how they decide (decision type, commitment patterns, \
+scope handling).
+3. PREFERENCE PROFILE — their investment orientation and positional stance \
+tendencies.
+
+Merge these into ONE cohesive second-person description of the user that will \
+be injected into a downstream email-drafting prompt. The goal is to give a \
+drafting model a single, clean picture of who the user is and how they write.
+
+Rules:
+- Write in second person ("You tend to...", "You prefer...", "You close with...").
+- Plain prose only. No headings, no bullet points, no markdown.
+- Preserve specific observed patterns: exact greetings, sign-offs, response \
+length norms, decision orientation categories, and concrete verbal habits.
+- Where the guides disagree, prefer behavioral > style > preference.
+- If a guide is missing or empty, synthesize only from what is present — do not \
+fabricate.
+- Target 300-500 words. Stay tight and specific; avoid generalities like \
+"professional" or "clear communicator" unless backed by a specific pattern.
+- Do not restate which source each detail came from. Produce one unified voice.
+- Do not include any preamble, meta-commentary, or closing sign-off. Output \
+only the blurb itself."""

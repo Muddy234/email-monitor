@@ -156,6 +156,10 @@ def backfill_drafts(db, email_ids=None):
             if preference_profile:
                 action_context["preference_profile"] = preference_profile
 
+            personality_blurb = profile.get("personality_blurb") or ""
+            if personality_blurb:
+                action_context["personality_blurb"] = personality_blurb
+
             # Generate draft
             logger.info(f"  Generating draft for: {subject[:60]}")
             cleaned, usage, thinking = draft_generator.generate_draft(ed, action_context)

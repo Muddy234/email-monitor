@@ -617,6 +617,19 @@ class SupabaseWorkerClient:
             data["preference_decision_count"] = decision_count
         self.client.table("profiles").update(data).eq("id", user_id).execute()
 
+    def update_personality_blurb(self, user_id, blurb):
+        """Store the Opus-aggregated personality blurb on the user's profile.
+
+        Args:
+            user_id: UUID string.
+            blurb: Plain-text blurb aggregating the 3 guides.
+        """
+        data = {
+            "personality_blurb": blurb,
+            "personality_blurbed_at": datetime.utcnow().isoformat(),
+        }
+        self.client.table("profiles").update(data).eq("id", user_id).execute()
+
     # ------------------------------------------------------------------
     # Batch context fetchers (for enrichment pipeline)
     # ------------------------------------------------------------------

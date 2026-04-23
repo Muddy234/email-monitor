@@ -58,10 +58,18 @@ class DraftGenerator:
 
     @staticmethod
     def _build_personality_profile(action_context):
-        """Concatenate style guide + behavioral profile + preference profile.
+        """Return the Opus-aggregated personality blurb, or fall back to concat.
 
-        Returns "No personality profile available." if all are empty.
+        Prefers the pre-aggregated `personality_blurb` (produced by Opus during
+        onboarding). Falls back to concatenating style_guide + behavioral_profile
+        + preference_profile when the blurb is missing.
+
+        Returns "No personality profile available." if nothing is available.
         """
+        personality_blurb = action_context.get("personality_blurb", "")
+        if personality_blurb:
+            return "PERSONALITY PROFILE:\n" + personality_blurb
+
         parts = []
 
         style_guide = action_context.get("style_guide", "")
