@@ -174,9 +174,9 @@ header p { color:var(--text-muted); font-size:14px; }
       </div>
       <div class="step" onclick="toggleStep(this)">
         <div class="step-head"><span class="step-num">02</span><span class="step-name">user-change-detection</span></div>
-        <div class="step-desc">If different user than last sync, wipes lastSyncTime, cachedFolders, connectedOutlookEmail.</div>
+        <div class="step-desc">If different user than last sync, loads that user&#x27;s state from chrome.storage.local (sync:{userId}).</div>
         <div class="step-meta"><span class="step-tag tag-writes">writes · resets in-memory state</span></div>
-        <div class="step-detail"><p>Compares the current <code>userId</code> against <code>lastSyncUserId</code> stored in <code>chrome.storage.local</code>. If they differ (or on first run), resets <code>lastSyncTime</code>, <code>connectedOutlookEmail</code>, <code>cachedFolders</code>, and <code>folderCacheTime</code> to force a full catchup on account switch. Stores the new <code>lastSyncUserId</code> to prevent repeated resets.</p></div>
+        <div class="step-detail"><p>Compares the current <code>userId</code> against in-memory <code>currentUserId</code>. If they differ (or on first run), calls <code>loadUserStateIntoMemory(userId)</code> which reads the per-user blob at <code>chrome.storage.local["sync:{userId}"]</code> and hydrates <code>lastSyncTime</code>, <code>foldersCache</code>, and <code>connectedOutlookEmail</code> from that blob. Each user has their own keyed state; switching accounts naturally loads that account&#x27;s values (or nulls on first sync) without needing an explicit wipe.</p></div>
       </div>
       <div class="step" onclick="toggleStep(this)">
         <div class="step-head"><span class="step-num">03</span><span class="step-name">profile-fetch</span></div>
@@ -223,8 +223,8 @@ header p { color:var(--text-muted); font-size:14px; }
       <div class="step" onclick="toggleStep(this)">
         <div class="step-head"><span class="step-num">10</span><span class="step-name">persist-lastSyncTime</span></div>
         <div class="step-desc">Saves sync timestamp after all folder fetches complete. Persisted to chrome.storage.local.</div>
-        <div class="step-meta"><span class="step-tag tag-writes">writes · lastSyncTime + chrome.storage.local</span></div>
-        <div class="step-detail"><p>Sets <code>lastSyncTime = new Date().toISOString()</code> and calls <code>persistSyncTime()</code> to write to <code>chrome.storage.local</code> after all folder and sent fetches complete. Also stores <code>lastSyncUserId</code> to track account identity. This timestamp gates incremental vs. catchup mode in future cycles (steps 06 and 07).</p></div>
+        <div class="step-meta"><span class="step-tag tag-writes">writes · sync:{userId}.lastSyncTime</span></div>
+        <div class="step-detail"><p>Sets <code>lastSyncTime = new Date().toISOString()</code> and calls <code>writeUserState(userId, { lastSyncTime })</code> to merge into the per-user blob at <code>chrome.storage.local["sync:{userId}"]</code>. Account identity is carried by the key itself, so no separate <code>lastSyncUserId</code> is needed. This timestamp gates incremental vs. catchup mode in future cycles (steps 06 and 07).</p></div>
       </div>
       <div class="step" onclick="toggleStep(this)">
         <div class="step-head"><span class="step-num">11</span><span class="step-name">alias-detection</span></div>
@@ -434,46 +434,31 @@ header p { color:var(--text-muted); font-size:14px; }
     <span class="phase-chevron">&rsaquo;</span>
   </div>
   <div class="phase-body">
-    <div class="section-divider"><span>Stage 0 — Init + late-arrival filter</span></div>
-    <div class="step-list">
-      <div class="step" onclick="toggleStep(this)">
-        <div class="step-head"><span class="step-num">28</span><span class="step-name">late-arrival-filter</span></div>
-        <div class="step-desc">Marks pre-onboarding emails as &#x27;onboarding&#x27; to exclude from drafting. Compares received_time against onboarding_completed_at.</div>
-        <div class="step-meta"><span class="step-tag tag-writes">writes · emails.status = onboarding</span><span class="step-tag tag-reads">reads · emails, profiles.onboarding_completed_at</span><span class="step-tag tag-gate">gate · onboarding_completed_at exists</span></div>
-        <div class="step-detail"><p>Catches emails that arrived via the extension's catchup sync <em>after</em> onboarding completed but with a <code>received_time</code> older than <code>onboarding_completed_at</code>. These are historical emails that should never be drafted — they get bulk-updated to <code>status = "onboarding"</code> via <code>db.bulk_update_email_status()</code>. If <strong>all</strong> emails in the batch are late arrivals, the pipeline run is marked completed with zero processing and returns early.</p></div>
-      </div>
-    </div>
-    <div class="gate-box">
-      <h4>Early exit — all pre-onboarding</h4>
-      <ul>
-        <li><code>All emails have received_time &lt; onboarding_completed_at — nothing to process</code></li>
-      </ul>
-    </div>
     <div class="section-divider"><span>Stage 1 — Rule-based filtering</span></div>
     <div class="step-list">
       <div class="step" onclick="toggleStep(this)">
-        <div class="step-head"><span class="step-num">29</span><span class="step-name">filter-emails</span></div>
-        <div class="step-desc">Rule-based filter (blacklist senders, subject patterns) + signal-based auto-skip (terminal ack, FYI). Skipped emails written to DB immediately.</div>
-        <div class="step-meta"><span class="step-tag tag-writes">writes · classifications (skip), emails.status = processed</span><span class="step-tag tag-reads">reads · emails</span><span class="step-tag tag-nonfatal">empty result → early exit</span></div>
-        <div class="step-detail"><p>Two-layer filter executed by <code>filter_emails()</code>. <strong>Layer 1 — Rule-based:</strong> <code>EmailFilter.classify()</code> checks blacklist senders (<code>noreply@</code>, <code>mailer-daemon@</code>), blacklist subject patterns (<code>accepted:</code>, <code>out of office</code>), whitelists, and project keywords. Empty-body emails are <em>deferred</em> (kept as "unprocessed") for up to 10 minutes to allow re-sync. <strong>Layer 2 — Signal auto-skip:</strong> <code>_should_auto_skip()</code> catches terminal acknowledgments ("Thanks", "Got it") and FYI-language emails. Skipped emails are batch-written to DB immediately (<code>status = processed</code>, <code>classification = skip reason</code>).</p></div>
+        <div class="step-head"><span class="step-num">28</span><span class="step-name">filter-emails</span></div>
+        <div class="step-desc">Marks pre-onboarding arrivals as &#x27;onboarding&#x27;, then runs rule-based filter + signal-based auto-skip. Skipped emails written to DB immediately.</div>
+        <div class="step-meta"><span class="step-tag tag-writes">writes · emails.status = onboarding/processed, classifications (skip)</span><span class="step-tag tag-reads">reads · emails, profiles.onboarding_completed_at</span><span class="step-tag tag-nonfatal">empty result → early exit</span></div>
+        <div class="step-detail"><p>Three-phase filter executed by <code>filter_emails()</code>. <strong>Phase 0 — Late-arrival sweep:</strong> If <code>profile.onboarding_completed_at</code> is set, any email with <code>received_time &lt; onboarding_completed_at</code> is a historical catchup arrival and gets bulk-updated to <code>status = "onboarding"</code> via <code>db.bulk_update_email_status()</code>, then dropped from the batch. <strong>Phase 1 — Rule-based:</strong> <code>EmailFilter.classify()</code> checks blacklist senders (<code>noreply@</code>, <code>mailer-daemon@</code>), blacklist subject patterns (<code>accepted:</code>, <code>out of office</code>), whitelists, and project keywords. Empty-body emails are <em>deferred</em> (kept as "unprocessed") for up to 10 minutes to allow re-sync. <strong>Phase 2 — Signal auto-skip:</strong> <code>_should_auto_skip()</code> catches terminal acknowledgments ("Thanks", "Got it") and FYI-language emails. Skipped emails are batch-written to DB immediately (<code>status = processed</code>, <code>classification = skip reason</code>).</p></div>
       </div>
     </div>
     <div class="gate-box">
       <h4>Early exit — all filtered out</h4>
       <ul>
-        <li><code>Every email matched blacklist sender/subject or auto-skip signals — nothing reaches Stage 2</code></li>
+        <li><code>All emails were late arrivals, blacklisted, or auto-skipped — nothing reaches Stage 2</code></li>
       </ul>
     </div>
     <div class="section-divider"><span>Stage 2 — Context fetch + pre-process</span></div>
     <div class="step-list">
       <div class="step" onclick="toggleStep(this)">
-        <div class="step-head"><span class="step-num">30</span><span class="step-name">context-fetch</span></div>
+        <div class="step-head"><span class="step-num">29</span><span class="step-name">context-fetch</span></div>
         <div class="step-desc">Fetches contacts, threads, domain tiers, feedback summaries. Upserts contact stats for unknown senders. Labels retroactive responses.</div>
         <div class="step-meta"><span class="step-tag tag-writes">writes · contacts (upsert stats), response_events (retro labels)</span><span class="step-tag tag-reads">reads · contacts, threads, domains, feedback, profiles</span></div>
         <div class="step-detail"><p>Fetches five data sources for signal extraction: <strong>(1)</strong> <code>_fetch_batch_context()</code> — per-sender contacts and per-conversation threads. <strong>(2)</strong> <code>_fetch_thread_emails_batch()</code> — prior emails in each thread for content isolation. <strong>(3)</strong> <code>_get_domain_tiers()</code> — domain-level tier overrides. <strong>(4)</strong> <code>_resolve_user_domain()</code> — user's org domain for internal/external classification. <strong>(5)</strong> <code>db.fetch_feedback_summary()</code> — per-sender feedback history from prior user corrections. Also performs two writes: <code>_update_contact_stats()</code> upserts stats for newly seen senders, and <code>_update_response_labels()</code> retroactively labels prior emails in threads where the user has since responded.</p></div>
       </div>
       <div class="step" onclick="toggleStep(this)">
-        <div class="step-head"><span class="step-num">31</span><span class="step-name">pre-process-bodies</span></div>
+        <div class="step-head"><span class="step-num">30</span><span class="step-name">pre-process-bodies</span></div>
         <div class="step-desc">Per email: isolates new content from thread history, strips signatures, truncates to 2500 tokens via pre_process_email().</div>
         <div class="step-meta"><span class="step-tag tag-reads">reads · email body + thread_emails_map</span></div>
         <div class="step-detail"><p>Per-email body preparation for Haiku. Calls <code>pre_process_email()</code> which runs three transformations: <strong>(1)</strong> <code>isolate_new_content()</code> — diffs against prior thread bodies to strip quoted/replied text, leaving only the newest message (forwards left intact). <strong>(2)</strong> <code>strip_signatures()</code> — removes "Best regards", "Kind regards", confidentiality disclaimers from the tail. <strong>(3)</strong> <code>truncate_smart()</code> — caps at ~2500 tokens; if over limit, takes first 1600 chars + <code>[... truncated ...]</code> + last 1600 chars. Also resolves per-email metadata: sender tier via <code>resolve_sender_tier()</code> (waterfall: contact override → domain_tiers → org domain → prior history → unknown), thread depth and unanswered status via <code>compute_thread_meta()</code>, user position (TO vs CC), and feedback hints.</p></div>
@@ -482,13 +467,13 @@ header p { color:var(--text-muted); font-size:14px; }
     <div class="section-divider"><span>Stage 3 — Signal extraction (Haiku batch)</span></div>
     <div class="step-list">
       <div class="step" onclick="toggleStep(this)">
-        <div class="step-head"><span class="step-num">32</span><span class="step-name">signal-extraction-batch</span></div>
+        <div class="step-head"><span class="step-num">31</span><span class="step-name">signal-extraction-batch</span></div>
         <div class="step-desc">Submits Haiku batch via Anthropic Batches API. Extracts 9 signals per email: mc, ar, ub, dl, rt, target, pri, draft, reason.</div>
         <div class="step-meta"><span class="step-tag tag-writes">writes · token_usage (haiku/signals)</span><span class="step-tag tag-reads">reads · pre-processed bodies + context</span><span class="step-tag tag-nonfatal">batch failure → sync fallback</span></div>
         <div class="step-detail"><p>Constructs one <code>extract_signals_batch_params()</code> request per email and submits to the Anthropic Batches API (Haiku, temp=0, max_tokens=200). Each request includes: pre-processed body, subject, sender metadata (name, email, tier, contact_type, significance), thread metadata (depth, has_unanswered), user identity (name, email, position, TO/CC fields), and feedback hints. Returns 9 signals per email: <code>mc</code> (material consequence), <code>ar</code> (action request), <code>ub</code> (user bottleneck), <code>dl</code> (deadline), <code>rt</code> (response type: none/ack/ans/act/dec), <code>target</code> (user/other/all/unclear), <code>pri</code> (high/med/low), <code>draft</code> (boolean), <code>reason</code> (truncated to 200 chars post-parse). Polls at <code>BATCH_POLL_INTERVAL</code> (default 3s) for up to <code>BATCH_MAX_WAIT</code> (default 900s).</p></div>
       </div>
       <div class="step" onclick="toggleStep(this)">
-        <div class="step-head"><span class="step-num">33</span><span class="step-name">signal-fallback-sync</span></div>
+        <div class="step-head"><span class="step-num">32</span><span class="step-name">signal-fallback-sync</span></div>
         <div class="step-desc">For emails missing batch results: runs synchronous extract_signals() one-by-one. Same signals, higher latency.</div>
         <div class="step-meta"><span class="step-tag tag-writes">writes · token_usage (haiku/signals)</span><span class="step-tag tag-reads">reads · email bodies</span><span class="step-tag tag-nonfatal">per-email failure → skip that email</span></div>
         <div class="step-detail"><p>Iterates emails missing from <code>batch_results</code> (batch failed or individual results returned null). For each, calls synchronous <code>extract_signals()</code> — a single Anthropic API call producing the same 9 signals. Results are JSON-serialized back into <code>batch_results</code> for uniform downstream post-processing. Per-email failures are caught and logged; the email is skipped from further processing.</p></div>
@@ -497,10 +482,10 @@ header p { color:var(--text-muted); font-size:14px; }
     <div class="section-divider"><span>Stage 4 — Post-process + classify</span></div>
     <div class="step-list">
       <div class="step" onclick="toggleStep(this)">
-        <div class="step-head"><span class="step-num">34</span><span class="step-name">post-process-signals</span></div>
-        <div class="step-desc">Parses signal JSON, applies contact overrides (VIP, priority, draft preference), builds response_events, writes classification. Routes emails into draft_candidates vs notable_candidates.</div>
+        <div class="step-head"><span class="step-num">33</span><span class="step-name">post-process-signals</span></div>
+        <div class="step-desc">Parses signal JSON, applies contact overrides (VIP, priority, draft preference), builds response_events, writes classification. Appends to unified candidates list with route=draft|notable.</div>
         <div class="step-meta"><span class="step-tag tag-writes">writes · classifications, emails.status = processed, response_events</span><span class="step-tag tag-reads">reads · batch_results, contacts_map</span></div>
-        <div class="step-detail"><p>Iterates every email in <code>email_context</code>. For each: <strong>(1)</strong> Parses signal JSON via <code>parse_signal_response()</code> with field coercion and fallback defaults. <strong>(2)</strong> Applies <code>_apply_contact_overrides()</code>: <code>is_vip</code> → <code>pri=high</code>, <code>priority_override</code> → overrides <code>pri</code>, <code>draft_preference=always</code> → forces <code>draft=True</code>, <code>=never</code> → forces <code>draft=False</code>. Hard override: <code>ar=True + target=other</code> → <code>draft=False</code>. <strong>(3)</strong> Builds <code>response_event</code> and writes classification. <strong>(4)</strong> Routes: <code>draft=True</code> + age &lt; 24h + generation enabled → <strong>draft candidate</strong> (with style_guide, behavioral_profile, preference_profile in action_context). Otherwise checks notable criteria (<code>pri=high/med</code>, <code>mc=True</code>, <code>tier=C/I</code>, <code>rt != none</code>) → <strong>notable candidate</strong>.</p></div>
+        <div class="step-detail"><p>Iterates every email in <code>email_context</code>. For each: <strong>(1)</strong> Parses signal JSON via <code>parse_signal_response()</code> with field coercion and fallback defaults. <strong>(2)</strong> Applies <code>_apply_contact_overrides()</code>: <code>is_vip</code> → <code>pri=high</code>, <code>priority_override</code> → overrides <code>pri</code>, <code>draft_preference=always</code> → forces <code>draft=True</code>, <code>=never</code> → forces <code>draft=False</code>. Hard override: <code>ar=True + target=other</code> → <code>draft=False</code>. <strong>(3)</strong> Builds <code>response_event</code> and writes classification. <strong>(4)</strong> Appends to a single <code>candidates</code> list with a <code>route</code> field: <code>draft=True</code> + age &lt; 24h + generation enabled → <code>route="draft"</code> (with style_guide, behavioral_profile, preference_profile in action_context). Otherwise if notable criteria match (<code>pri=high/med</code>, <code>mc=True</code>, <code>tier=C/I</code>, <code>rt != none</code>) → <code>route="notable"</code>. Downstream stages filter by route (<code>[c for c in candidates if c["route"]=="draft"]</code>).</p></div>
       </div>
     </div>
     <div class="parallel-block">
@@ -518,18 +503,18 @@ header p { color:var(--text-muted); font-size:14px; }
     </div>
     <div class="step-list">
       <div class="step" onclick="toggleStep(this)">
-        <div class="step-head"><span class="step-num">35</span><span class="step-name">notable-summaries</span></div>
+        <div class="step-head"><span class="step-num">34</span><span class="step-name">notable-summaries</span></div>
         <div class="step-desc">Haiku batch generates concise summaries for non-draft notable emails. Stored on response_events.summary.</div>
-        <div class="step-meta"><span class="step-tag tag-writes">writes · response_events.summary, token_usage (haiku/summary)</span><span class="step-tag tag-reads">reads · notable_candidates, thread history</span><span class="step-tag tag-nonfatal">batch failure → no summaries</span></div>
+        <div class="step-meta"><span class="step-tag tag-writes">writes · response_events.summary, token_usage (haiku/summary)</span><span class="step-tag tag-reads">reads · candidates (route=notable), thread history</span><span class="step-tag tag-nonfatal">batch failure → no summaries</span></div>
         <div class="step-detail"><p>For emails routed to the notable path (not draft-worthy but significant). Builds Haiku batch requests using <code>build_notable_summary_prompt()</code> with email body and optional conversation history. Uses <code>NOTABLE_SUMMARY_SYSTEM_PROMPT</code>. Submits via <code>submit_and_wait()</code>. Summaries are stored as <code>response_events.summary</code> via targeted Supabase update. Entire stage is non-fatal — if the batch fails, emails simply have no summary.</p></div>
       </div>
     </div>
     <div class="section-divider"><span>Stage 5 — Draft generation (Sonnet batch)</span></div>
     <div class="step-list">
       <div class="step" onclick="toggleStep(this)">
-        <div class="step-head"><span class="step-num">36</span><span class="step-name">draft-generation-batch</span></div>
+        <div class="step-head"><span class="step-num">35</span><span class="step-name">draft-generation-batch</span></div>
         <div class="step-desc">Sonnet batch with 3-layer profile injection (style + behavioral + preference). Deduplicates candidates. Builds batch via DraftGenerator.build_batch_params().</div>
-        <div class="step-meta"><span class="step-tag tag-writes">writes · token_usage (sonnet/draft)</span><span class="step-tag tag-reads">reads · draft_candidates, style_guide, behavioral_profile, preference_profile</span><span class="step-tag tag-nonfatal">batch failure → per-draft sync fallback</span></div>
+        <div class="step-meta"><span class="step-tag tag-writes">writes · token_usage (sonnet/draft)</span><span class="step-tag tag-reads">reads · candidates (route=draft), style_guide, behavioral_profile, preference_profile</span><span class="step-tag tag-nonfatal">batch failure → per-draft sync fallback</span></div>
         <div class="step-detail"><p>Initializes <code>DraftGenerator</code> with config. <code>DEFAULT_DRAFT_PROMPT_TEMPLATE</code> is <code>None</code> — there is <strong>no system prompt</strong>; instructions are assembled into a single structured user message. Deduplicates candidates by <code>db_id</code>. <code>build_batch_params()</code> composes the user message with labeled sections: <strong>PERSONALITY PROFILE</strong> (style guide — how to write), <strong>BEHAVIORAL PROFILE</strong> (how to express decisions), <strong>PREFERENCE PROFILE</strong> (what to decide — Investment Orientation + Positional Stance), followed by <strong>NEVER</strong> rules, the <strong>EMAIL</strong> body, optional <strong>THREAD SUMMARY</strong>/<strong>CONTACT SUMMARY</strong>, and a final "Draft a reply" instruction. Null profile layers are omitted (graceful degradation). Submits as Sonnet batch (temp=0.3, max_tokens=2048). Fallback to sync <code>generate_draft()</code> for missing batch results. The model's output may include <code>&lt;thinking&gt;…&lt;/thinking&gt;</code> blocks which are stripped by post-processing and retained separately as <code>response_events.summary</code>. Output validated via <code>_validate_output()</code> (rejects NO_DRAFT_NEEDED, &lt;20 chars, error messages).</p></div>
       </div>
     </div>
@@ -539,7 +524,7 @@ header p { color:var(--text-muted); font-size:14px; }
     </div>
     <div class="step-list">
       <div class="step" onclick="toggleStep(this)">
-        <div class="step-head"><span class="step-num">37</span><span class="step-name">quality-check</span></div>
+        <div class="step-head"><span class="step-num">36</span><span class="step-name">quality-check</span></div>
         <div class="step-desc">5-check QC pipeline: leaked artifacts, tag hygiene, sign-off, greeting, word count. Auto-fixes minor issues. Single retry with revision notes on failure.</div>
         <div class="step-meta"><span class="step-tag tag-writes">writes · token_usage (sonnet/draft) on retry</span><span class="step-tag tag-reads">reads · draft body, style_guide (QC config)</span><span class="step-tag tag-nonfatal">retry failure → deliver with quality_issues</span></div>
         <div class="step-detail"><p>Five-check QC pipeline via <code>check_draft_quality()</code>: <strong>(1)</strong> Leaked artifacts — strips <code>&lt;thinking&gt;</code> fragments, "Here's a draft" meta-commentary, header leaks. <strong>(2)</strong> Tag hygiene — removes standalone <code>[USER TO CONFIRM]</code> before content, deduplicates tags, flags unclosed brackets and bare <code>[PLACEHOLDER]</code>. <strong>(3)</strong> Sign-off — validates closing greeting + correct user name; auto-fixes double sign-offs; flags truncated/wrong names for retry. <strong>(4)</strong> Greeting — validates opening salutation addresses recipient, not user. <strong>(5)</strong> Word count — flags drafts outside 0.25x–3x target range (from style guide). <code>QCConfig</code> is parsed once per user from the style guide via <code>parse_qc_config()</code>.</p></div>
@@ -551,16 +536,16 @@ header p { color:var(--text-muted); font-size:14px; }
     </div>
     <div class="step-list">
       <div class="step" onclick="toggleStep(this)">
-        <div class="step-head"><span class="step-num">38</span><span class="step-name">persist-drafts</span></div>
+        <div class="step-head"><span class="step-num">37</span><span class="step-name">persist-drafts</span></div>
         <div class="step-desc">Inserts passing drafts via db.insert_draft(). Records quality_issues and quality_retry_count. Stores draft thinking as response_events.summary.</div>
         <div class="step-meta"><span class="step-tag tag-writes">writes · drafts table, response_events.summary</span></div>
         <div class="step-detail"><p>For each candidate with a non-null cleaned draft: calls <code>db.insert_draft(db_id, user_id, cleaned)</code> with optional <code>quality_issues</code> and <code>quality_retry_count</code>. Stores Sonnet's <code>&lt;thinking&gt;</code> block as <code>response_events.summary</code> for dashboard reasoning view. Drafts that are null after QC and fallback are logged as DROPPED with diagnostic context (source=batch/fallback, draft_body truthy/None).</p></div>
       </div>
       <div class="step" onclick="toggleStep(this)">
-        <div class="step-head"><span class="step-num">39</span><span class="step-name">finalize-run</span></div>
+        <div class="step-head"><span class="step-num">38</span><span class="step-name">finalize-run</span></div>
         <div class="step-desc">Detects partial failure (some drafts dropped). Updates pipeline_run with final counts. On unhandled exception: marks all emails as error, records failure.</div>
         <div class="step-meta"><span class="step-tag tag-writes">writes · pipeline_runs (status, counts, error_message), emails.status = error</span><span class="step-tag tag-fatal">unhandled exception → all emails marked error</span></div>
-        <div class="step-detail"><p>Computes final pipeline status. If <code>draft_candidates</code> existed but <code>drafts_generated &lt; len(draft_candidates)</code>, status is <code>"partial_failure"</code> with error message counting dropped drafts. Otherwise <code>"completed"</code>. Updates <code>pipeline_runs</code> with all counters (<code>emails_scanned</code>, <code>emails_processed</code>, <code>emails_classified</code>, <code>emails_drafted</code>, <code>drafts_generated</code>). The outer <code>except</code> block catches any unhandled exception: marks every email as <code>status = "error"</code>, records <code>status = "failed"</code> with the exception message (truncated to 500 chars), and returns <code>(0, 0)</code>.</p></div>
+        <div class="step-detail"><p>Computes final pipeline status. If draft-route candidates existed but <code>drafts_generated</code> is less than the draft-route count, status is <code>"partial_failure"</code> with error message counting dropped drafts. Otherwise <code>"completed"</code>. Updates <code>pipeline_runs</code> with all counters (<code>emails_scanned</code>, <code>emails_processed</code>, <code>emails_classified</code>, <code>emails_drafted</code>, <code>drafts_generated</code>). The outer <code>except</code> block catches any unhandled exception: marks every email as <code>status = "error"</code>, records <code>status = "failed"</code> with the exception message (truncated to 500 chars), and returns <code>(0, 0)</code>.</p></div>
       </div>
     </div>
   </div>

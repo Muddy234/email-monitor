@@ -43,22 +43,46 @@ let isSyncing = false;   // lock to prevent concurrent Supabase syncs
 let lastSyncTime = null; // ISO string of last successful sync
 let connectedOutlookEmail = null; // cached connected_outlook_email from profile
 let hasCompletedFolderSync = false; // Set true after first successful folder discovery
-let cachedFolders = null;      // Array of { id, displayName, isDistinguished }
-let folderCacheTime = null;    // ISO timestamp of last folder discovery
+let foldersCache = null;       // { folders: [{id,displayName,isDistinguished}], expiresAt: ms }
 let outlookTabId = null;       // Tab ID of the active Outlook page (from content script)
+let currentUserId = null;      // User whose state is currently loaded into memory
 const FOLDER_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
-/** Persist lastSyncTime to chrome.storage.local. */
-function persistSyncTime() {
-  if (lastSyncTime) {
-    chrome.storage.local.set({ lastSyncTime });
-  }
+// ---------------------------------------------------------------------------
+// Per-user state (chrome.storage.local key: `sync:{userId}`)
+// Blob: { lastSyncTime, foldersCache, connectedOutlookEmail }
+// ---------------------------------------------------------------------------
+
+function userStateKey(userId) {
+  return `sync:${userId}`;
 }
 
-/** Restore lastSyncTime from chrome.storage.local on SW wake. */
-async function restoreSyncTime() {
-  const result = await chrome.storage.local.get("lastSyncTime");
-  if (result.lastSyncTime) lastSyncTime = result.lastSyncTime;
+async function readUserState(userId) {
+  if (!userId) return {};
+  const key = userStateKey(userId);
+  const out = await chrome.storage.local.get(key);
+  return out[key] || {};
+}
+
+async function writeUserState(userId, patch) {
+  if (!userId) return;
+  const key = userStateKey(userId);
+  const existing = (await chrome.storage.local.get(key))[key] || {};
+  await chrome.storage.local.set({ [key]: { ...existing, ...patch } });
+}
+
+async function clearUserState(userId) {
+  if (!userId) return;
+  await chrome.storage.local.remove(userStateKey(userId));
+}
+
+/** Load per-user state into module variables. */
+async function loadUserStateIntoMemory(userId) {
+  const state = await readUserState(userId);
+  lastSyncTime = state.lastSyncTime || null;
+  foldersCache = state.foldersCache || null;
+  connectedOutlookEmail = state.connectedOutlookEmail || null;
+  currentUserId = userId;
 }
 
 // ---------------------------------------------------------------------------
@@ -796,9 +820,8 @@ async function handleGetSentItems(params) {
 
 async function discoverMailFolders() {
   // Return cache if still fresh
-  if (cachedFolders && cachedFolders.length > 0 && folderCacheTime) {
-    const age = Date.now() - new Date(folderCacheTime).getTime();
-    if (age < FOLDER_CACHE_TTL_MS) return cachedFolders;
+  if (foldersCache && foldersCache.folders?.length > 0 && Date.now() < foldersCache.expiresAt) {
+    return foldersCache.folders;
   }
 
   // OWA's service.svc does not support FindFolder. Instead, we inject a
@@ -912,9 +935,10 @@ async function discoverMailFolders() {
     throw new Error("No folders found in Outlook sidebar — Mail view may not be open");
   }
 
-  cachedFolders = folders;
-  folderCacheTime = new Date().toISOString();
-  chrome.storage.local.set({ cachedFolders, folderCacheTime });
+  foldersCache = { folders, expiresAt: Date.now() + FOLDER_CACHE_TTL_MS };
+  if (currentUserId) {
+    writeUserState(currentUserId, { foldersCache });
+  }
 
   if (DEBUG) console.log("Discovered mail folders:", folders.map(f => f.displayName));
   return folders;
@@ -1015,21 +1039,10 @@ async function syncEmailsToSupabase() {
     const userId = session.user.id;
     if (DEBUG) console.log("userId:", userId);
 
-    // @pipeline step="user-change-detection" num="02" desc="If different user than last sync, wipes lastSyncTime, cachedFolders, connectedOutlookEmail." writes="resets in-memory state"
-    // --- New-account detection: reset sync state on user change ---
-    await restoreSyncTime();
-    const stored = await chrome.storage.local.get("lastSyncUserId");
-    if (!stored.lastSyncUserId || stored.lastSyncUserId !== userId) {
-      // No stored user (first run after update) or different user — full catchup
-      if (stored.lastSyncUserId) {
-        if (DEBUG) console.log("User changed — resetting lastSyncTime for full catchup");
-      }
-      lastSyncTime = null;
-      connectedOutlookEmail = null;
-      cachedFolders = null;
-      folderCacheTime = null;
-      await chrome.storage.local.remove(["lastSyncTime", "cachedFolders", "folderCacheTime"]);
-      await chrome.storage.local.set({ lastSyncUserId: userId });
+    // @pipeline step="user-change-detection" num="02" desc="Loads per-user state blob (sync:{userId}). User-scoped keys eliminate cross-user bleed." writes="resets in-memory state"
+    // --- Load per-user state into memory (fresh on user change) ---
+    if (currentUserId !== userId) {
+      await loadUserStateIntoMemory(userId);
     }
 
     // @pipeline step="profile-fetch" num="03" desc="Gets connected_outlook_email, onboarding_completed_at, initial_sync_complete from Supabase." reads="profiles table"
@@ -1055,6 +1068,7 @@ async function syncEmailsToSupabase() {
 
       const connectedEmail = profile?.connected_outlook_email?.toLowerCase();
       connectedOutlookEmail = connectedEmail || null; // keep module cache in sync
+      writeUserState(userId, { connectedOutlookEmail });
 
       // @pipeline step="outlook-account-lock" num="05" desc="First sync locks connected_outlook_email. Subsequent syncs verify token matches the lock." writes="profiles.connected_outlook_email" gate="mismatch = abort"
       if (!connectedEmail) {
@@ -1217,10 +1231,9 @@ async function syncEmailsToSupabase() {
       if (DEBUG) console.error("Sent items sync error:", err.message);
     }
 
-    // @pipeline step="persist-lastSyncTime" num="10" desc="Saves sync timestamp after all folder fetches complete. Persisted to chrome.storage.local." writes="lastSyncTime + chrome.storage.local"
+    // @pipeline step="persist-lastSyncTime" num="10" desc="Saves sync timestamp after all folder fetches complete. Persisted to sync:{userId} in chrome.storage.local." writes="sync:{userId}.lastSyncTime"
     lastSyncTime = new Date().toISOString();
-    persistSyncTime();
-    chrome.storage.local.set({ lastSyncUserId: userId });
+    await writeUserState(userId, { lastSyncTime });
 
     // @pipeline step="alias-detection" num="11" desc="Detects email aliases from sent items + auth email. Updates profiles.user_email_aliases in Supabase." writes="profiles.user_email_aliases"
     // Auto-detect user's Outlook email aliases from sent items + auth email
@@ -1421,12 +1434,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // Clear cached token and folder cache if session was removed (logout)
     chrome.storage.local.get("supabaseSession", (result) => {
       if (!result.supabaseSession) {
+        const loggedOutUser = currentUserId;
         token = null;
         lastSyncTime = null;
         connectedOutlookEmail = null;
-        cachedFolders = null;
-        folderCacheTime = null;
-        chrome.storage.local.remove(["cachedFolders", "folderCacheTime", "lastSyncTime", "lastSyncUserId"]);
+        foldersCache = null;
+        currentUserId = null;
+        if (loggedOutUser) clearUserState(loggedOutUser);
         updateBadge();
       }
     });
@@ -1477,29 +1491,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 (async () => {
   await restoreToken();
-  await restoreSyncTime();
 
   // Clear stale Outlook mismatch state on startup (email detection may have improved)
   await chrome.storage.local.remove("outlookMismatch");
-
-  // Restore folder cache from storage
-  const folderData = await chrome.storage.local.get(["cachedFolders", "folderCacheTime"]);
-  if (folderData.cachedFolders) {
-    cachedFolders = folderData.cachedFolders;
-    folderCacheTime = folderData.folderCacheTime || null;
-  }
 
   updateBadge();
 
   // Initialize Supabase features (sync alarm + Realtime)
   await initSupabase();
 
-  // Populate connectedOutlookEmail cache + send heartbeat if logged in
+  // Load per-user state + populate connectedOutlookEmail cache if logged in
   const initSession = await getSupabaseSession();
   if (initSession?.user?.id) {
+    await loadUserStateIntoMemory(initSession.user.id);
     try {
       const profiles = await getProfile(initSession.user.id);
-      connectedOutlookEmail = profiles?.[0]?.connected_outlook_email?.toLowerCase() || null;
+      const email = profiles?.[0]?.connected_outlook_email?.toLowerCase() || null;
+      if (email && email !== connectedOutlookEmail) {
+        connectedOutlookEmail = email;
+        writeUserState(initSession.user.id, { connectedOutlookEmail });
+      }
     } catch (_) {}
     updateHeartbeat(initSession.user.id).catch(() => {});
   }

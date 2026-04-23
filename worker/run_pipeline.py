@@ -853,7 +853,7 @@ def process_user_batch_signals(db, user_id, profile, emails):
 
     try:
         # @pipeline divider="Stage 1 — Rule-based filtering"
-        # @pipeline step="filter-emails" num="29" desc="Late-arrival filter (pre-onboarding emails marked 'onboarding') + rule-based filter (blacklist senders, subject patterns) + signal-based auto-skip (terminal ack, FYI). Skipped emails written to DB immediately." reads="emails, profiles.onboarding_completed_at" writes="classifications (skip), emails.status in (onboarding, processed)" nonfatal="empty result → early exit"
+        # @pipeline step="filter-emails" num="28" desc="Late-arrival filter (pre-onboarding emails marked 'onboarding') + rule-based filter (blacklist senders, subject patterns) + signal-based auto-skip (terminal ack, FYI). Skipped emails written to DB immediately." reads="emails, profiles.onboarding_completed_at" writes="classifications (skip), emails.status in (onboarding, processed)" nonfatal="empty result → early exit"
 
         # ── Stage 1: Filter (includes late-arrival sweep) ────────
         filtered = filter_emails(db, emails, user_id, config)
@@ -869,7 +869,7 @@ def process_user_batch_signals(db, user_id, profile, emails):
         # @pipeline gate="Early exit — all filtered out" standalone="true" condition-1="Every email matched blacklist sender/subject or auto-skip signals — nothing reaches Stage 2"
 
         # @pipeline divider="Stage 2 — Context fetch + pre-process"
-        # @pipeline step="context-fetch" num="30" desc="Fetches contacts, threads, domain tiers, feedback summaries. Upserts contact stats for unknown senders. Labels retroactive responses." reads="contacts, threads, domains, feedback, profiles" writes="contacts (upsert stats), response_events (retro labels)"
+        # @pipeline step="context-fetch" num="29" desc="Fetches contacts, threads, domain tiers, feedback summaries. Upserts contact stats for unknown senders. Labels retroactive responses." reads="contacts, threads, domains, feedback, profiles" writes="contacts (upsert stats), response_events (retro labels)"
 
         # ── Stage 2: Pre-process + context fetch ─────────────────
         # Fetch batch context (contacts, threads)
@@ -902,10 +902,10 @@ def process_user_batch_signals(db, user_id, profile, emails):
         except Exception:
             pass
 
-        # @pipeline step="pre-process-bodies" num="31" desc="Per email: isolates new content from thread history, strips signatures, truncates to 2500 tokens via pre_process_email()." reads="email body + thread_emails_map"
+        # @pipeline step="pre-process-bodies" num="30" desc="Per email: isolates new content from thread history, strips signatures, truncates to 2500 tokens via pre_process_email()." reads="email body + thread_emails_map"
 
         # @pipeline divider="Stage 3 — Signal extraction (Haiku batch)"
-        # @pipeline step="signal-extraction-batch" num="32" desc="Submits Haiku batch via Anthropic Batches API. Extracts 9 signals per email: mc, ar, ub, dl, rt, target, pri, draft, reason." reads="pre-processed bodies + context" writes="token_usage (haiku/signals)" nonfatal="batch failure → sync fallback"
+        # @pipeline step="signal-extraction-batch" num="31" desc="Submits Haiku batch via Anthropic Batches API. Extracts 9 signals per email: mc, ar, ub, dl, rt, target, pri, draft, reason." reads="pre-processed bodies + context" writes="token_usage (haiku/signals)" nonfatal="batch failure → sync fallback"
 
         # ── Stage 3: Signal extraction (Haiku batch) ─────────────
         batch_requests = []
@@ -1004,7 +1004,7 @@ def process_user_batch_signals(db, user_id, profile, emails):
             except Exception as e:
                 logger.warning(f"  Signal extraction batch failed: {e}")
 
-        # @pipeline step="signal-fallback-sync" num="33" desc="For emails missing batch results: runs synchronous extract_signals() one-by-one. Same signals, higher latency." reads="email bodies" writes="token_usage (haiku/signals)" nonfatal="per-email failure → skip that email"
+        # @pipeline step="signal-fallback-sync" num="32" desc="For emails missing batch results: runs synchronous extract_signals() one-by-one. Same signals, higher latency." reads="email bodies" writes="token_usage (haiku/signals)" nonfatal="per-email failure → skip that email"
 
         # Fallback: sync extraction for emails without batch results
         for db_id, ctx in email_context.items():
@@ -1035,7 +1035,7 @@ def process_user_batch_signals(db, user_id, profile, emails):
                     logger.warning(f"  Sync signal extraction failed for {db_id[:8]}: {e}")
 
         # @pipeline divider="Stage 4 — Post-process + classify"
-        # @pipeline step="post-process-signals" num="34" desc="Parses signal JSON, applies contact overrides (VIP, priority, draft preference), builds response_events, writes classification. Routes emails into draft_candidates vs notable_candidates." reads="batch_results, contacts_map" writes="classifications, emails.status = processed, response_events"
+        # @pipeline step="post-process-signals" num="33" desc="Parses signal JSON, applies contact overrides (VIP, priority, draft preference), builds response_events, writes classification. Appends to unified candidates list with route=draft|notable." reads="batch_results, contacts_map" writes="classifications, emails.status = processed, response_events"
 
         # @pipeline parallel="draft-notable-split" label="Email routing — two paths"
         # @pipeline parallel-box="draft-path" group="draft-notable-split" title="Draft path" desc="draft=True + age < 24h + generation enabled. Collects style_guide, behavioral_profile, preference_profile into action_context." color="teal"
@@ -1162,7 +1162,7 @@ def process_user_batch_signals(db, user_id, profile, emails):
             except Exception as e:
                 logger.warning(f"  Failed to persist response_events: {e}")
 
-        # @pipeline step="notable-summaries" num="35" desc="Haiku batch generates concise summaries for non-draft notable emails. Stored on response_events.summary." reads="candidates (route=notable), thread history" writes="response_events.summary, token_usage (haiku/summary)" nonfatal="batch failure → no summaries"
+        # @pipeline step="notable-summaries" num="34" desc="Haiku batch generates concise summaries for non-draft notable emails. Stored on response_events.summary." reads="candidates (route=notable), thread history" writes="response_events.summary, token_usage (haiku/summary)" nonfatal="batch failure → no summaries"
 
         # ── Stage 4b: Notable summaries (Haiku batch) ────────────
         notable_candidates = [c for c in candidates if c["route"] == "notable"]
@@ -1317,7 +1317,7 @@ def process_user_batch_signals(db, user_id, profile, emails):
                     candidate["action_context"]["thread_summary"] = "No prior thread history."
 
         # @pipeline divider="Stage 5 — Draft generation (Sonnet batch)"
-        # @pipeline step="draft-generation-batch" num="36" desc="Sonnet batch with 3-layer profile injection (style + behavioral + preference). Deduplicates candidates. Builds batch via DraftGenerator.build_batch_params()." reads="draft_candidates, style_guide, behavioral_profile, preference_profile" writes="token_usage (sonnet/draft)" nonfatal="batch failure → per-draft sync fallback"
+        # @pipeline step="draft-generation-batch" num="35" desc="Sonnet batch with 3-layer profile injection (style + behavioral + preference). Deduplicates candidates. Builds batch via DraftGenerator.build_batch_params()." reads="candidates (route=draft), style_guide, behavioral_profile, preference_profile" writes="token_usage (sonnet/draft)" nonfatal="batch failure → per-draft sync fallback"
         # @pipeline harden="Three-layer draft composition" body="Each draft uses three profile layers: <strong>style guide</strong> (how to write), <strong>behavioral profile</strong> (how to express decisions), and <strong>preference profile</strong> (what to decide). The preference layer resolves decision direction via Investment Orientation and Positional Stance. Null layers are omitted — graceful degradation, not failure."
 
         # ── Stage 5: Draft generation (Sonnet batch) ─────────────
@@ -1396,7 +1396,7 @@ def process_user_batch_signals(db, user_id, profile, emails):
                     thinking = DraftGenerator._extract_thinking(draft_body)
                     cleaned = draft_generator._validate_output(draft_body, ed)
 
-                # @pipeline step="quality-check" num="37" desc="5-check QC pipeline: leaked artifacts, tag hygiene, sign-off, greeting, word count. Auto-fixes minor issues. Single retry with revision notes on failure." reads="draft body, style_guide (QC config)" writes="token_usage (sonnet/draft) on retry" nonfatal="retry failure → deliver with quality_issues"
+                # @pipeline step="quality-check" num="36" desc="5-check QC pipeline: leaked artifacts, tag hygiene, sign-off, greeting, word count. Auto-fixes minor issues. Single retry with revision notes on failure." reads="draft body, style_guide (QC config)" writes="token_usage (sonnet/draft) on retry" nonfatal="retry failure → deliver with quality_issues"
                 # @pipeline harden="QC retry semantics" body="If the first QC check fails, a single retry is attempted with <code>build_revision_notes()</code> injected into the prompt. If the retry also fails QC, the draft is delivered with <code>quality_issues</code> recorded. If retry returns nothing, the original draft is kept with issues flagged. No second retry — prevents API cost spiraling."
 
                 # --- QC check + retry ---
@@ -1463,7 +1463,7 @@ def process_user_batch_signals(db, user_id, profile, emails):
                                 f"using original with issues"
                             )
 
-                # @pipeline step="persist-drafts" num="38" desc="Inserts passing drafts via db.insert_draft(). Records quality_issues and quality_retry_count. Stores draft thinking as response_events.summary." writes="drafts table, response_events.summary"
+                # @pipeline step="persist-drafts" num="37" desc="Inserts passing drafts via db.insert_draft(). Records quality_issues and quality_retry_count. Stores draft thinking as response_events.summary." writes="drafts table, response_events.summary"
 
                 if cleaned:
                     thread_summary = candidate["action_context"].get("thread_summary")
@@ -1492,7 +1492,7 @@ def process_user_batch_signals(db, user_id, profile, emails):
                     except Exception as e:
                         logger.warning(f"  Failed to store draft thinking for {db_id[:8]}: {e}")
 
-        # @pipeline step="finalize-run" num="39" desc="Detects partial failure (some drafts dropped). Updates pipeline_run with final counts. On unhandled exception: marks all emails as error, records failure." writes="pipeline_runs (status, counts, error_message), emails.status = error" fatal="unhandled exception → all emails marked error"
+        # @pipeline step="finalize-run" num="38" desc="Detects partial failure (some drafts dropped). Updates pipeline_run with final counts. On unhandled exception: marks all emails as error, records failure." writes="pipeline_runs (status, counts, error_message), emails.status = error" fatal="unhandled exception → all emails marked error"
 
         # Detect partial failure: drafts expected but some/all dropped
         status = "completed"
