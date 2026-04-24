@@ -15,6 +15,9 @@ class DraftGenerator:
         self.model = config.get("draft_model", "opus")
         self.timeout = config.get("draft_cli_timeout_seconds", 90)
         self.user_name = config.get("draft_user_name", "")
+        aliases = config.get("user_email_aliases", []) or []
+        self.user_email_primary = aliases[0] if aliases else ""
+        self.user_email_aliases = aliases[1:] if len(aliases) > 1 else []
         self.api_key = config.get("anthropic_api_key")  # None → env var
 
     def _build_draft_prompt(self, email_data, action_context, revision_notes=None):
@@ -25,7 +28,7 @@ class DraftGenerator:
         """
         sections = []
 
-        # 1. Personality profile
+        # 1. Personality profile (with identity prepended)
         sections.append(self._build_personality_profile(action_context))
 
         # 2. NEVER guardrails
@@ -56,19 +59,49 @@ class DraftGenerator:
 
         return prompt
 
-    @staticmethod
-    def _build_personality_profile(action_context):
-        """Return the Opus-aggregated personality blurb, or fall back to concat.
+    def _build_identity_header(self):
+        """Build the USER identity block prepended to the personality profile.
+
+        Anchors the second-person blurb ("You tend to...") to a specific
+        name and email so the drafter cannot misattribute "the USER" to
+        another thread participant. Returns "" when no user_name is
+        configured (preserves legacy behavior).
+        """
+        if not self.user_name:
+            return ""
+
+        lines = []
+        if self.user_email_primary:
+            lines.append(f"You are {self.user_name} <{self.user_email_primary}>.")
+        else:
+            lines.append(f"You are {self.user_name}.")
+        lines.append(
+            f"Always sign off as {self.user_name}. "
+            "Never sign off as any other person on this thread, "
+            "even if they appear in the From/To/Cc headers or thread history."
+        )
+        if self.user_email_aliases:
+            alias_list = ", ".join(self.user_email_aliases)
+            lines.append(f"You also receive mail at: {alias_list}.")
+        return "\n".join(lines)
+
+    def _build_personality_profile(self, action_context):
+        """Return the identity header + Opus-aggregated personality blurb.
 
         Prefers the pre-aggregated `personality_blurb` (produced by Opus during
         onboarding). Falls back to concatenating style_guide + behavioral_profile
-        + preference_profile when the blurb is missing.
+        + preference_profile when the blurb is missing. In all cases the
+        identity header is prepended so the second-person "you" is anchored.
 
-        Returns "No personality profile available." if nothing is available.
+        Returns "No personality profile available." (plus identity header) if
+        no profile content is available.
         """
+        identity = self._build_identity_header()
+        prefix = f"{identity}\n\n" if identity else ""
+
         personality_blurb = action_context.get("personality_blurb", "")
         if personality_blurb:
-            return "PERSONALITY PROFILE:\n" + personality_blurb
+            return "PERSONALITY PROFILE:\n" + prefix + personality_blurb
 
         parts = []
 
@@ -87,18 +120,18 @@ class DraftGenerator:
                 parts.append(preference_profile)
 
         if not parts:
-            return "PERSONALITY PROFILE:\nNo personality profile available."
+            return "PERSONALITY PROFILE:\n" + prefix + "No personality profile available."
 
-        return "PERSONALITY PROFILE:\n" + "\n\n".join(parts)
+        return "PERSONALITY PROFILE:\n" + prefix + "\n\n".join(parts)
 
-    @staticmethod
-    def _get_never_list():
-        """Return static NEVER guardrails."""
+    def _get_never_list(self):
+        """Return NEVER guardrails, pinning the signoff rule to the user name."""
+        signoff_target = self.user_name if self.user_name else "the USER"
         return (
             "NEVER:\n"
             "- Never fabricate information.\n"
             "- Never restate the sender's question back to them.\n"
-            "- Never sign-off or act on behalf of anyone other than the USER.\n"
+            f"- Never sign-off or act on behalf of anyone other than {signoff_target}.\n"
             "- Never answer on behalf of another person or an item that is "
             "outside of the USER authority; either produce no draft or "
             "acknowledge that the question is for the other person.\n"
