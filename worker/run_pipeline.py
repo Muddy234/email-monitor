@@ -11,6 +11,8 @@ import os
 import re
 from datetime import datetime, timezone, timedelta
 
+from status import LegacyEmailStatus, LegacyPipelineRunStatus
+
 from pipeline.filter import EmailFilter
 from pipeline.drafts import DraftGenerator
 from pipeline.prompts import (
@@ -142,7 +144,7 @@ def filter_emails(db_client, emails, user_id, config):
                     if (em.get("received_time") or "") < onboarding_at]
         if late_ids:
             logger.info(f"  Marking {len(late_ids)} late-arriving pre-onboarding emails")
-            db_client.bulk_update_email_status(late_ids, "onboarding")
+            db_client.bulk_update_email_status(late_ids, LegacyEmailStatus.ONBOARDING)
             emails = [em for em in emails
                       if (em.get("received_time") or "") >= onboarding_at]
 
@@ -217,12 +219,12 @@ def filter_emails(db_client, emails, user_id, config):
 
     # Reset deferred (empty body) emails back to unprocessed
     if deferred_ids:
-        db_client.bulk_update_email_status(deferred_ids, "unprocessed")
+        db_client.bulk_update_email_status(deferred_ids, LegacyEmailStatus.UNPROCESSED)
         logger.info(f"  Deferred {len(deferred_ids)} empty-body emails for re-processing")
 
     # Batch-write all skipped emails in bulk
     if skip_ids:
-        db_client.bulk_update_email_status(skip_ids, "processed")
+        db_client.bulk_update_email_status(skip_ids, LegacyEmailStatus.PROCESSED)
         db_client.bulk_insert_classifications(skip_classifications)
         logger.info(f"  Batch-wrote {len(skip_ids)} skipped emails")
 
@@ -328,13 +330,13 @@ def process_classification_results(db_client, action_items, filtered_emails,
                 "action_context": action_context,
             })
 
-        db_client.update_email_status(db_id, "processed")
+        db_client.update_email_status(db_id, LegacyEmailStatus.PROCESSED)
         emails_processed += 1
 
     # Mark any remaining filtered emails that didn't get an action item
     for ed in filtered_emails:
         try:
-            db_client.update_email_status(ed["_db_id"], "processed")
+            db_client.update_email_status(ed["_db_id"], LegacyEmailStatus.PROCESSED)
         except Exception:
             pass
 
@@ -860,7 +862,7 @@ def process_user_batch_signals(db, user_id, profile, emails):
         if not filtered:
             logger.info(f"  User {user_id[:8]}...: all emails filtered out")
             db.update_pipeline_run(
-                run_id, status="completed",
+                run_id, status=LegacyPipelineRunStatus.COMPLETED,
                 emails_scanned=len(emails), emails_processed=0,
                 emails_classified=0, emails_drafted=0, drafts_generated=0,
             )
@@ -1090,7 +1092,7 @@ def process_user_batch_signals(db, user_id, profile, emails):
                 "priority": {"high": 2, "med": 1, "low": 0}.get(signals["pri"], 0),
             }
             db.insert_classification(db_id, user_id, classification)
-            db.update_email_status(db_id, "processed")
+            db.update_email_status(db_id, LegacyEmailStatus.PROCESSED)
             emails_processed += 1
 
             # Check if draft needed
@@ -1495,11 +1497,11 @@ def process_user_batch_signals(db, user_id, profile, emails):
         # @pipeline step="finalize-run" num="38" desc="Detects partial failure (some drafts dropped). Updates pipeline_run with final counts. On unhandled exception: marks all emails as error, records failure." writes="pipeline_runs (status, counts, error_message), emails.status = error" fatal="unhandled exception → all emails marked error"
 
         # Detect partial failure: drafts expected but some/all dropped
-        status = "completed"
+        status = LegacyPipelineRunStatus.COMPLETED
         error_msg = None
         if draft_candidates and drafts_generated < len(draft_candidates):
             dropped = len(draft_candidates) - drafts_generated
-            status = "partial_failure"
+            status = LegacyPipelineRunStatus.PARTIAL_FAILURE
             error_msg = (
                 f"{dropped}/{len(draft_candidates)} drafts failed to generate"
             )
@@ -1520,10 +1522,10 @@ def process_user_batch_signals(db, user_id, profile, emails):
         logger.exception(f"  User {user_id[:8]}...: signal pipeline error: {e}")
         for email in emails:
             try:
-                db.update_email_status(email["id"], "error")
+                db.update_email_status(email["id"], LegacyEmailStatus.ERROR)
             except Exception:
                 pass
         db.update_pipeline_run(
-            run_id, status="failed", error_message=str(e)[:500]
+            run_id, status=LegacyPipelineRunStatus.FAILED, error_message=str(e)[:500]
         )
         return 0, 0

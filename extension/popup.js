@@ -38,9 +38,16 @@ function removeSkeleton(id) {
 
 // Onboarding status ordering — maps worker pipeline phases to linear progression
 const ONBOARDING_ORDER = [
-  "starting", "collecting", "statistics", "persisting",
-  "extracting", "synthesizing", "style_guide", "training",
-  "complete", "complete_partial",
+  LegacyOnboardingStatus.STARTING,
+  LegacyOnboardingStatus.COLLECTING,
+  LegacyOnboardingStatus.STATISTICS,
+  LegacyOnboardingStatus.PERSISTING,
+  LegacyOnboardingStatus.EXTRACTING,
+  LegacyOnboardingStatus.SYNTHESIZING,
+  LegacyOnboardingStatus.STYLE_GUIDE,
+  LegacyOnboardingStatus.TRAINING,
+  LegacyOnboardingStatus.COMPLETE,
+  LegacyOnboardingStatus.COMPLETE_PARTIAL,
 ];
 
 function onboardingAtLeast(current, threshold) {
@@ -322,7 +329,7 @@ async function checkSessionAndRender() {
   } else {
     // Check onboarding_status to determine correct view
     const obStatus = await fetchOnboardingStatus(session);
-    if (obStatus === "complete" || obStatus === "complete_partial") {
+    if (obStatus === LegacyOnboardingStatus.COMPLETE || obStatus === LegacyOnboardingStatus.COMPLETE_PARTIAL) {
       await setState("complete");
       showStatusView(session);
     } else {
@@ -381,7 +388,7 @@ async function updateSetupChecklist(session) {
 
   // Handle failed state
   const errorEl = document.getElementById("setupError");
-  if (obStatus === "failed") {
+  if (obStatus === LegacyOnboardingStatus.FAILED) {
     errorEl.textContent = "Something went wrong during setup. Please try syncing again.";
     errorEl.style.display = "block";
     setCheck("checkSyncing", "pending");
@@ -395,10 +402,10 @@ async function updateSetupChecklist(session) {
   }
 
   // Determine step states based on onboarding_status
-  const syncingDone = onboardingAtLeast(obStatus, "statistics");
-  const behaviorDone = onboardingAtLeast(obStatus, "extracting");
-  const styleDone = onboardingAtLeast(obStatus, "training");
-  const allDone = obStatus === "complete" || obStatus === "complete_partial";
+  const syncingDone = onboardingAtLeast(obStatus, LegacyOnboardingStatus.STATISTICS);
+  const behaviorDone = onboardingAtLeast(obStatus, LegacyOnboardingStatus.EXTRACTING);
+  const styleDone = onboardingAtLeast(obStatus, LegacyOnboardingStatus.TRAINING);
+  const allDone = obStatus === LegacyOnboardingStatus.COMPLETE || obStatus === LegacyOnboardingStatus.COMPLETE_PARTIAL;
 
   // Syncing emails — time-based progress (4 cycles × 45s = 180s)
   const SYNC_DURATION_MS = 180_000;

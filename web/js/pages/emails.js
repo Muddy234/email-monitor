@@ -10,6 +10,12 @@ import { supabase } from "../supabase-client.js";
 import { showError, showEmpty, showToast, getParam, setParam, formatDate, relativeTime, escapeHtml } from "../ui.js";
 import { renderFeedbackControls, bindFeedbackEvents } from "../components/feedback.js";
 import { traceStage, renderStage5_draft } from "../components/trace-renderers.js";
+import {
+    LegacyDraftStatus,
+    LegacyEmailStatus,
+    draftExcludedValues,
+    emailResolvedValues,
+} from "../constants/status.js";
 
 import { ensureAccess } from "../subscription.js";
 
@@ -93,14 +99,14 @@ async function loadEmails() {
             supabase
                 .from("emails")
                 .select("*, classifications(*), drafts(*)")
-                .neq("drafts.status", "deleted")
+                .not("drafts.status", "in", `(${draftExcludedValues().join(",")})`)  // DUAL-READ (Phase 2)
                 .gte("received_time", thirtyDaysAgo)
                 .order("received_time", { ascending: false }),
             // Emails with drafts — no date filter so drafts are always visible
             supabase
                 .from("emails")
                 .select("*, classifications(*), drafts!inner(*)")
-                .neq("drafts.status", "deleted")
+                .not("drafts.status", "in", `(${draftExcludedValues().join(",")})`)  // DUAL-READ (Phase 2)
                 .order("received_time", { ascending: false }),
             supabase
                 .from("response_events")
@@ -363,7 +369,7 @@ function renderEmailCard(email) {
     const cls = email.classifications?.[0];
     const draft = email.drafts?.[0];
     const ev = responseEvents[email.id];
-    const isCompleted = email.status === "completed" || email.status === "dismissed";
+    const isCompleted = emailResolvedValues().includes(email.status);  // DUAL-READ (Phase 2)
 
     // Priority badge
     let priorityBadge = "";
@@ -555,7 +561,7 @@ function bindCardEvents() {
 
             try {
                 const ids = emailsToMark.map(e => e.id);
-                const newStatus = activeTab === "notable" ? "dismissed" : "completed";
+                const newStatus = activeTab === "notable" ? LegacyEmailStatus.DISMISSED : LegacyEmailStatus.COMPLETED;
                 const { error } = await supabase
                     .from("emails")
                     .update({ status: newStatus })
@@ -587,7 +593,7 @@ function bindCardEvents() {
             try {
                 const { error } = await supabase
                     .from("emails")
-                    .update({ status: "unprocessed" })
+                    .update({ status: LegacyEmailStatus.UNPROCESSED })
                     .eq("id", emailId);
 
                 if (error) throw error;
@@ -597,7 +603,7 @@ function bindCardEvents() {
                 btn.classList.add("em-btn-secondary");
 
                 const email = allEmails.find(e => e.id === emailId);
-                if (email) email.status = "unprocessed";
+                if (email) email.status = LegacyEmailStatus.UNPROCESSED;
 
                 showToast("Draft generation queued");
             } catch (err) {
@@ -689,7 +695,7 @@ async function markEmailDone(emailId, btn) {
 
     try {
         const email = allEmails.find(e => e.id === emailId);
-        const newStatus = (activeTab === "notable" && !hasDraft(email)) ? "dismissed" : "completed";
+        const newStatus = (activeTab === "notable" && !hasDraft(email)) ? LegacyEmailStatus.DISMISSED : LegacyEmailStatus.COMPLETED;
 
         const { error } = await supabase
             .from("emails")
@@ -714,7 +720,7 @@ async function markEmailDone(emailId, btn) {
 
 async function toggleEmailDone(emailId, btn) {
     const email = allEmails.find(e => e.id === emailId);
-    const isCompleted = email && (email.status === "completed" || email.status === "dismissed");
+    const isCompleted = email && emailResolvedValues().includes(email.status);  // DUAL-READ (Phase 2)
 
     if (isCompleted) {
         btn.disabled = true;
@@ -722,11 +728,11 @@ async function toggleEmailDone(emailId, btn) {
         try {
             const { error } = await supabase
                 .from("emails")
-                .update({ status: "processed" })
+                .update({ status: LegacyEmailStatus.PROCESSED })
                 .eq("id", emailId);
             if (error) throw error;
 
-            email.status = "processed";
+            email.status = LegacyEmailStatus.PROCESSED;
             renderEmails();
             showToast("Marked as incomplete");
         } catch (err) {

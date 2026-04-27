@@ -11,6 +11,7 @@
 
 // Load Supabase modules (must be synchronous, at top of SW)
 importScripts(
+  "status.js",
   "supabase-config.js",
   "supabase-auth.js",
   "supabase-rest.js",
@@ -720,6 +721,35 @@ async function enrichEmailsBatched(emails) {
 
 // --- CreateItem — save draft -----------------------------------------------
 
+/**
+ * Fetch the current ChangeKey for an item via a lightweight GetItem(IdOnly).
+ * Exchange requires ChangeKey on ReferenceItemId for write operations.
+ * Throws an Error with name "ParentItemGone" when the parent is missing/invalid.
+ */
+async function fetchItemChangeKey(itemId) {
+  const body = {
+    __type: "GetItemRequest:#Exchange",
+    ItemShape: {
+      __type: "ItemResponseShape:#Exchange",
+      BaseShape: "IdOnly",
+    },
+    ItemIds: [{ __type: "ItemId:#Exchange", Id: itemId }],
+  };
+  const data = await owaFetch("GetItem", body);
+  const ri = data.Body?.ResponseMessages?.Items?.[0];
+  const code = ri?.ResponseCode;
+  if (code === "NoError" && ri.Items?.[0]?.ItemId) {
+    const { Id, ChangeKey } = ri.Items[0].ItemId;
+    return { Id, ChangeKey };
+  }
+  if (code === "ErrorItemNotFound" || code === "ErrorInvalidIdMalformed") {
+    const err = new Error(`Parent item unavailable: ${code}`);
+    err.name = "ParentItemGone";
+    throw err;
+  }
+  throw new Error(`GetItem failed: ${code || "unknown"}`);
+}
+
 async function handleSaveDraft(params) {
   const htmlBody = params.body || "";
   const bodyType = params.body_type || "HTML";
@@ -728,10 +758,12 @@ async function handleSaveDraft(params) {
   let item;
 
   if (parentItemId) {
-    // Threaded reply-all: single call that threads correctly in Outlook
+    // Threaded reply-all: fetch fresh ChangeKey first (Exchange requires it
+    // for write operations on a referenced item), then ReplyAllToItem.
+    const { Id, ChangeKey } = await fetchItemChangeKey(parentItemId);
     item = {
       __type: "ReplyAllToItem:#Exchange",
-      ReferenceItemId: { __type: "ItemId:#Exchange", Id: parentItemId },
+      ReferenceItemId: { __type: "ItemId:#Exchange", Id, ChangeKey },
       NewBodyContent: { BodyType: bodyType, Value: htmlBody },
     };
   } else {
@@ -1219,7 +1251,7 @@ async function syncEmailsToSupabase() {
           importance: ["Low", "Normal", "High"][e.importance] || "Normal",
           is_read: e.is_read ?? true,
           recipients: e.recipients || [],
-          status: "completed",
+          status: LegacyEmailStatus.COMPLETED,
         }));
 
         await pushEmails(sentRows);

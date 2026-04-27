@@ -25,6 +25,7 @@ import sys
 import time
 from datetime import datetime, timezone
 
+from status import LegacyOnboardingStatus
 from supabase_client import SupabaseWorkerClient
 from run_pipeline import process_user_batch_signals
 from onboarding import run_onboarding
@@ -213,7 +214,12 @@ def _recover_stuck_onboarding(db):
     'collecting', 'extracting', etc.  Reset them to 'pending' so
     onboarding restarts cleanly on the next loop.
     """
-    TERMINAL = {"complete", "complete_partial", "pending", "failed"}
+    TERMINAL = {
+        LegacyOnboardingStatus.COMPLETE,
+        LegacyOnboardingStatus.COMPLETE_PARTIAL,
+        LegacyOnboardingStatus.PENDING,
+        LegacyOnboardingStatus.FAILED,
+    }
     result = (
         db.client.table("profiles")
         .select("id, onboarding_status")
@@ -228,7 +234,7 @@ def _recover_stuck_onboarding(db):
                 f"Recovering stuck onboarding for {uid[:8]}... "
                 f"(was '{status}') → resetting to 'pending'"
             )
-            db.update_onboarding_status(uid, "pending")
+            db.update_onboarding_status(uid, LegacyOnboardingStatus.PENDING)
 
 
 def main():

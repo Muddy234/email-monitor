@@ -10,6 +10,16 @@ from datetime import datetime, timedelta, timezone
 
 from supabase import create_client, Client
 
+from status import (
+    LegacyDraftStatus,
+    LegacyEmailStatus,
+    LegacyOnboardingStatus,
+    LegacyPipelineRunStatus,
+    email_active_values,
+    email_pending_values,
+    pipeline_run_active_values,
+)
+
 logger = logging.getLogger("worker")
 
 
@@ -68,7 +78,7 @@ class SupabaseWorkerClient:
         result = (
             self.client.table("emails")
             .select("user_id")
-            .eq("status", "unprocessed")
+            .in_("status", list(email_pending_values()))  # DUAL-READ (Phase 2)
             .execute()
         )
         # Deduplicate
@@ -127,7 +137,7 @@ class SupabaseWorkerClient:
         running = (
             self.client.table("pipeline_runs")
             .select("id")
-            .eq("status", "running")
+            .in_("status", list(pipeline_run_active_values()))  # DUAL-READ (Phase 2)
             .execute()
         )
         if running.data:
@@ -136,8 +146,8 @@ class SupabaseWorkerClient:
         # No active pipeline — any 'processing' emails are orphaned
         result = (
             self.client.table("emails")
-            .update({"status": "unprocessed"})
-            .eq("status", "processing")
+            .update({"status": LegacyEmailStatus.UNPROCESSED})
+            .in_("status", list(email_active_values()))  # DUAL-READ (Phase 2)
             .execute()
         )
         return len(result.data) if result.data else 0
@@ -199,7 +209,7 @@ class SupabaseWorkerClient:
                 self.client.table("emails")
                 .select("id")
                 .eq("user_id", user_id)
-                .eq("status", "unprocessed")
+                .in_("status", list(email_pending_values()))  # DUAL-READ (Phase 2)
                 .limit(batch_size)
                 .execute()
             )
@@ -207,7 +217,7 @@ class SupabaseWorkerClient:
             if not ids:
                 break
             self.client.table("emails").update(
-                {"status": "onboarding"}
+                {"status": LegacyEmailStatus.ONBOARDING}
             ).in_("id", ids).execute()
             total += len(ids)
         return total
@@ -294,7 +304,7 @@ class SupabaseWorkerClient:
 
         payload = {
             "draft_body": draft_body,
-            "status": "pending",
+            "status": LegacyDraftStatus.PENDING,
             "user_edited": False,
             "quality_issues": quality_issues,
             "quality_retry_count": quality_retry_count,
@@ -354,7 +364,7 @@ class SupabaseWorkerClient:
         row = {
             "user_id": user_id,
             "trigger_type": trigger_type,
-            "status": "running",
+            "status": LegacyPipelineRunStatus.RUNNING,
             "started_at": datetime.utcnow().isoformat(),
         }
         result = self.client.table("pipeline_runs").insert(row).execute()
@@ -370,7 +380,12 @@ class SupabaseWorkerClient:
         if not run_id:
             return
         update = {k: v for k, v in kwargs.items() if v is not None}
-        if "finished_at" not in update and update.get("status") in ("completed", "failed", "partial_failure"):
+        terminal_run_states = (
+            LegacyPipelineRunStatus.COMPLETED,
+            LegacyPipelineRunStatus.FAILED,
+            LegacyPipelineRunStatus.PARTIAL_FAILURE,
+        )
+        if "finished_at" not in update and update.get("status") in terminal_run_states:
             update["finished_at"] = datetime.utcnow().isoformat()
         self.client.table("pipeline_runs").update(update).eq("id", run_id).execute()
 
@@ -402,7 +417,10 @@ class SupabaseWorkerClient:
         for row in result.data:
             uid = row["id"]
             status = row.get("onboarding_status")
-            if status and status not in ("pending", "failed"):
+            if status and status not in (
+                LegacyOnboardingStatus.PENDING,
+                LegacyOnboardingStatus.FAILED,
+            ):
                 continue
 
             if not row.get("initial_sync_complete"):

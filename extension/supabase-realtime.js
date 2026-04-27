@@ -130,7 +130,7 @@ async function handleNewDraft(record) {
     const emailId = record.email_id;
     const draftBody = record.draft_body;
 
-    if (!draftBody || record.status !== "pending") return;
+    if (!draftBody || record.status !== LegacyDraftStatus.PENDING) return;
 
     // Layer 2: fail closed — don't write draft if token account can't be verified
     if (await isTokenAccountMismatch()) {
@@ -160,45 +160,55 @@ async function handleNewDraft(record) {
 
     const replyHtml = `<div>${escapeHtml(draftBody).replace(/\n/g, "<br>")}</div>`;
 
-    let result;
-
-    if (parentEmail.email_ref) {
-      // Threaded reply-all via ReplyAllToItem (single OWA call)
-      result = await handleSaveDraft({
-        parent_item_id: parentEmail.email_ref,
-        body: replyHtml,
-        body_type: "HTML",
-      });
-    } else {
-      // Fallback: standalone draft with manual recipients + quoted body
-      if (DEBUG) console.warn("Realtime: no email_ref, falling back to standalone draft");
-
+    const saveStandalone = () => {
       let { toRecipients, ccRecipients } = buildReplyAllRecipients(parentEmail, userAliases);
       if (toRecipients.length === 0 && parentEmail.sender_email) {
         toRecipients = [{ name: parentEmail.sender_name || "", address: parentEmail.sender_email }];
       }
-
       const subject = parentEmail.subject?.startsWith("Re: ")
         ? parentEmail.subject
         : `Re: ${parentEmail.subject || ""}`;
-
-      result = await handleSaveDraft({
+      return handleSaveDraft({
         subject,
         body: buildThreadedBody(draftBody, parentEmail),
         to_recipients: toRecipients,
         cc_recipients: ccRecipients,
         body_type: "HTML",
       });
+    };
+
+    let result;
+
+    if (parentEmail.email_ref) {
+      // Threaded reply-all via ReplyAllToItem (single OWA call)
+      try {
+        result = await handleSaveDraft({
+          parent_item_id: parentEmail.email_ref,
+          body: replyHtml,
+          body_type: "HTML",
+        });
+      } catch (err) {
+        if (err?.name === "ParentItemGone") {
+          console.warn(`Realtime: parent item gone for draft ${draftId}, using standalone fallback`);
+          result = await saveStandalone();
+        } else {
+          throw err;
+        }
+      }
+    } else {
+      // Fallback: standalone draft with manual recipients + quoted body
+      if (DEBUG) console.warn("Realtime: no email_ref, falling back to standalone draft");
+      result = await saveStandalone();
     }
 
     if (result.success) {
-      await updateDraftStatus(draftId, "written", result.draft_ref);
-      if (DEBUG) console.log("Realtime: draft written to Outlook:", subject);
+      await updateDraftStatus(draftId, LegacyDraftStatus.WRITTEN, result.draft_ref);
+      if (DEBUG) console.log(`Realtime: draft ${draftId} written to Outlook`);
     } else {
-      if (DEBUG) console.error("Realtime: failed to save draft to Outlook");
+      console.error(`Realtime: failed to save draft ${draftId} to Outlook`);
     }
   } catch (err) {
-    if (DEBUG) console.error("Realtime: error handling draft:", err.message);
+    console.error(`Realtime: error handling draft ${record?.id}:`, err.message);
   }
 }
 
@@ -342,7 +352,7 @@ async function sweepStaleDrafts() {
     for (const draft of staleDrafts) {
       try {
         // Only call OWA DeleteItem for drafts already written to Outlook
-        if (draft.status === "written" && draft.outlook_draft_id) {
+        if (draft.status === LegacyDraftStatus.WRITTEN && draft.outlook_draft_id) {
           await handleDeleteItem(draft.outlook_draft_id);
         }
 
@@ -351,7 +361,7 @@ async function sweepStaleDrafts() {
           method: "PATCH",
           body: {
             draft_deleted: true,
-            status: "deleted",
+            status: LegacyDraftStatus.DELETED,
             updated_at: new Date().toISOString(),
           },
         });

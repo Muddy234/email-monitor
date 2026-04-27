@@ -3,6 +3,7 @@
  * Used by both Dev Tools (pipeline-trace.js) and Emails page (emails.js).
  */
 import { escapeHtml, formatDate } from "../ui.js";
+import { emailActiveValues, emailPendingValues } from "../constants/status.js";
 
 /** Tier label map. */
 const _tierLabels = { C: "Critical", I: "Internal", P: "Professional", U: "Unknown" };
@@ -82,13 +83,13 @@ export function renderStage3_signals(evt, email, wasFiltered) {
     }
 
     if (!evt) {
-        if (email.status === "processing") {
+        if (emailActiveValues().includes(email.status)) {  // DUAL-READ (Phase 2)
             return traceStage("Stage 3: Signals", "pending", `
                 <div class="em-trace-verdict em-trace-verdict-pending">Processing</div>
                 <div class="em-trace-note">Email is in the processing queue. Signal data will appear once the worker completes this batch.</div>
             `);
         }
-        if (email.status === "unprocessed") {
+        if (emailPendingValues().includes(email.status)) {  // DUAL-READ (Phase 2)
             return traceStage("Stage 3: Signals", "pending", `
                 <div class="em-trace-verdict em-trace-verdict-pending">Queued</div>
                 <div class="em-trace-note">Email is queued but not yet claimed by the worker.</div>
@@ -190,7 +191,7 @@ export function renderStage4_context(contact, evt, email, wasFiltered) {
     }
 
     if (!contact && !evt) {
-        if (email.status === "processing" || email.status === "unprocessed") {
+        if (emailActiveValues().includes(email.status) || emailPendingValues().includes(email.status)) {  // DUAL-READ (Phase 2)
             return traceStage("Stage 4: Context", "pending", `
                 <div class="em-trace-note">Waiting for earlier pipeline stages to complete.</div>
             `);

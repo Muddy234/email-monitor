@@ -31,6 +31,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
+from status import LegacyOnboardingStatus
 from onboarding.collectors import collect_onboarding_emails
 from onboarding.extraction import (
     extract_email_features,
@@ -72,7 +73,7 @@ def run_onboarding(db, user_id, profile):
 
     try:
         db.update_onboarding_status(
-            user_id, "starting",
+            user_id, LegacyOnboardingStatus.STARTING,
             started_at=datetime.utcnow().isoformat(),
         )
 
@@ -84,7 +85,7 @@ def run_onboarding(db, user_id, profile):
 
         # @pipeline step="collect-emails" num="17" desc="Fetches 1500 emails over 180 days, filters spam/noise, caps at 500. Requires >= 10 received." reads="emails table" fatal="< 10 received → fail immediately"
         # ── Phase 1: Collect ─────────────────────────────────────
-        db.update_onboarding_status(user_id, "collecting")
+        db.update_onboarding_status(user_id, LegacyOnboardingStatus.COLLECTING)
         _t_collect = time.time()
         email_data = collect_onboarding_emails(db, user_id, aliases, days=180, max_emails=1500)
         received = email_data["received"]
@@ -98,7 +99,7 @@ def run_onboarding(db, user_id, profile):
 
         if len(received) < 10:
             logger.warning(f"Only {len(received)} received emails — too few for onboarding")
-            db.update_onboarding_status(user_id, "failed")
+            db.update_onboarding_status(user_id, LegacyOnboardingStatus.FAILED)
             return False
 
         # @pipeline step="style-gate" num="18" desc="If < 30 sent emails, sets skip_guides = True. Onboarding continues without style/behavioral guides." gate="30 sent minimum for guides"
@@ -115,7 +116,7 @@ def run_onboarding(db, user_id, profile):
 
         # @pipeline step="stats-extraction" num="19" desc="Extracts contacts, response events, threads, domains, user profile baseline." reads="collected emails"
         # ── Phase 2: Full statistical extraction ──────────────────
-        db.update_onboarding_status(user_id, "statistics")
+        db.update_onboarding_status(user_id, LegacyOnboardingStatus.STATISTICS)
         _t_stats = time.time()
         all_emails = received + sent
         logger.debug(f"[STATS] starting extract_all with {len(all_emails)} emails")
@@ -145,7 +146,7 @@ def run_onboarding(db, user_id, profile):
 
         # @pipeline step="persist-stage1" num="20" desc="Writes response_events, threads, domains, contacts, topic profile to DB." writes="multiple tables" fatal="any write failure → status failed"
         # ── Persist Stage 1 data to DB ────────────────────────────
-        db.update_onboarding_status(user_id, "persisting")
+        db.update_onboarding_status(user_id, LegacyOnboardingStatus.PERSISTING)
         stage1_failures = []
 
         # Response events
@@ -197,7 +198,7 @@ def run_onboarding(db, user_id, profile):
 
         if stage1_failures:
             logger.error(f"Stage 1: {len(stage1_failures)} writes failed: {stage1_failures}")
-            db.update_onboarding_status(user_id, "failed")
+            db.update_onboarding_status(user_id, LegacyOnboardingStatus.FAILED)
             return False
 
         logger.info("Stage 1 complete: core data persisted")
@@ -217,7 +218,7 @@ def run_onboarding(db, user_id, profile):
         # @pipeline harden="Hardening note — Haiku fan-in" body="Behavioral extraction failure now kills both the behavioral profile AND the preference profile, because decision quotes are extracted alongside behavioral features. If behavioral Haiku returns a malformed response, decision_moments defaults to [] and preference synthesis receives nothing."
 
         # ── Phase 3 + 4C-1 + 4C-1b: Parallel Haiku extraction ────
-        db.update_onboarding_status(user_id, "extracting")
+        db.update_onboarding_status(user_id, LegacyOnboardingStatus.EXTRACTING)
         _t_haiku = time.time()
 
         extraction_result = None
@@ -269,7 +270,7 @@ def run_onboarding(db, user_id, profile):
 
         if extraction_result is None:
             logger.error("Phase 3 extraction failed completely")
-            db.update_onboarding_status(user_id, "failed")
+            db.update_onboarding_status(user_id, LegacyOnboardingStatus.FAILED)
             return False
 
         # Record Haiku usage from all three extraction phases
@@ -302,7 +303,7 @@ def run_onboarding(db, user_id, profile):
 
         # @pipeline step="contact-synthesis" num="22" desc="Sonnet synthesizes up to 50 contact profiles. Falls back to stats-only if Sonnet fails." reads="Stage 1 contacts" writes="contact_profiles" nonfatal="failure → stats-only fallback"
         # ── Phase 4A: Contact profile synthesis ──────────────────
-        db.update_onboarding_status(user_id, "synthesizing")
+        db.update_onboarding_status(user_id, LegacyOnboardingStatus.SYNTHESIZING)
         _t_synth = time.time()
 
         contact_profiles, contacts_usage = synthesize_contacts(
@@ -344,7 +345,7 @@ def run_onboarding(db, user_id, profile):
         # @pipeline parallel-box="sonnet-preference" group="sonnet-synthesis" title="Preference (Opus)" desc="Decision quotes → investment orientation + positional stance categories." color="purple" new-note="NEW · always runs · own threshold (8 decisions/trait)"
 
         # ── Phase 4B + 4C-2 + 4C-3: Parallel Sonnet synthesis ────
-        db.update_onboarding_status(user_id, "style_guide")
+        db.update_onboarding_status(user_id, LegacyOnboardingStatus.STYLE_GUIDE)
         _t_guides = time.time()
 
         topic_result = None
@@ -516,7 +517,7 @@ def run_onboarding(db, user_id, profile):
         # @pipeline divider="Stage 3 — Completion"
 
         # @pipeline step="train-classifier" num="25" desc="Trains per-user importance model from email features." nonfatal="failure → non-fatal"
-        db.update_onboarding_status(user_id, "training")
+        db.update_onboarding_status(user_id, LegacyOnboardingStatus.TRAINING)
         _t_train = time.time()
         try:
             params = train_user_model(db, user_id)
@@ -542,12 +543,12 @@ def run_onboarding(db, user_id, profile):
             logger.warning(f"Onboarding complete with missing components: {missing_components}. "
                            "Drafts may be less personalized.")
             db.update_onboarding_status(
-                user_id, "complete_partial",
+                user_id, LegacyOnboardingStatus.COMPLETE_PARTIAL,
                 completed_at=datetime.utcnow().isoformat(),
             )
         else:
             db.update_onboarding_status(
-                user_id, "complete",
+                user_id, LegacyOnboardingStatus.COMPLETE,
                 completed_at=datetime.utcnow().isoformat(),
             )
 
@@ -558,7 +559,7 @@ def run_onboarding(db, user_id, profile):
 
     except Exception:
         logger.exception(f"Onboarding failed for user {user_id}")
-        db.update_onboarding_status(user_id, "failed")
+        db.update_onboarding_status(user_id, LegacyOnboardingStatus.FAILED)
         return False
 
 

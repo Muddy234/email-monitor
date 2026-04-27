@@ -7,6 +7,7 @@ import { supabase } from "../supabase-client.js";
 import { showError, showEmpty, formatDate, formatDuration } from "../ui.js";
 
 import { ensureAccess } from "../subscription.js";
+import { LegacyPipelineRunStatus, pipelineRunDoneValues } from "../constants/status.js";
 
 await requireAuth();
 await ensureAccess();
@@ -46,16 +47,16 @@ async function loadRuns() {
                 ? new Date(run.finished_at) - new Date(run.started_at)
                 : null;
 
-            const statusBadge = run.status === "completed"
+            const statusBadge = pipelineRunDoneValues().includes(run.status)  // DUAL-READ (Phase 2)
                 ? `<span class="em-badge em-badge-green">completed</span>`
-                : run.status === "failed"
+                : run.status === LegacyPipelineRunStatus.FAILED
                 ? `<span class="em-badge em-badge-red">failed</span>`
-                : run.status === "partial_failure"
+                : run.status === LegacyPipelineRunStatus.PARTIAL_FAILURE
                 ? `<span class="em-badge em-badge-amber">partial failure</span>`
                 : `<span class="em-badge em-badge-amber">${escapeHtml(run.status)}</span>`;
 
             const hasDetail = run.error_message || run.log_output;
-            const rowClass = (run.status === "failed" || run.status === "partial_failure") ? " em-row-failed" : "";
+            const rowClass = (run.status === LegacyPipelineRunStatus.FAILED || run.status === LegacyPipelineRunStatus.PARTIAL_FAILURE) ? " em-row-failed" : "";
 
             return `
                 <tr class="em-table-clickable${rowClass}" data-run-id="${run.id}">
