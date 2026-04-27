@@ -138,3 +138,22 @@ function draftDeliveredValues() {
 function pipelineRunActiveValues() {
   return [LegacyPipelineRunStatus.RUNNING, Status.ACTIVE];
 }
+
+// Emails a user has resolved from the inbox view — legacy completed/dismissed
+// plus their new-vocabulary equivalents (done / skipped-with-user_dismissed).
+// Over-matches skipped-for-onboarding emails by one status value; callers that
+// need to distinguish must check deferred_reason.
+function emailResolvedValues() {
+  return [
+    LegacyEmailStatus.COMPLETED,
+    LegacyEmailStatus.DISMISSED,
+    Status.DONE,
+    Status.SKIPPED,
+  ];
+}
+
+// Values used to exclude tombstoned drafts from inbox joins.
+// Legacy 'deleted' and its new-vocabulary equivalent 'skipped'.
+function draftExcludedValues() {
+  return [LegacyDraftStatus.DELETED, Status.SKIPPED];
+}
