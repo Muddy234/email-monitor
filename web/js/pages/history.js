@@ -7,7 +7,7 @@ import { supabase } from "../supabase-client.js";
 import { showError, showEmpty, formatDate, formatDuration } from "../ui.js";
 
 import { ensureAccess } from "../subscription.js";
-import { LegacyPipelineRunStatus, pipelineRunDoneValues } from "../constants/status.js";
+import { Status, LegacyPipelineRunStatus, pipelineRunDoneValues } from "../constants/status.js";
 
 await requireAuth();
 await ensureAccess();
@@ -47,16 +47,24 @@ async function loadRuns() {
                 ? new Date(run.finished_at) - new Date(run.started_at)
                 : null;
 
-            const statusBadge = pipelineRunDoneValues().includes(run.status)  // DUAL-READ (Phase 2)
-                ? `<span class="em-badge em-badge-green">completed</span>`
-                : run.status === LegacyPipelineRunStatus.FAILED
-                ? `<span class="em-badge em-badge-red">failed</span>`
-                : run.status === LegacyPipelineRunStatus.PARTIAL_FAILURE
+            // DUAL-READ (Phase 4): partial-failure is now status='done' + has_partial_failures=true.
+            // Legacy rows still carry status='partial_failure'. Check partial first so unified-
+            // vocab partial runs aren't mis-rendered as green "completed".
+            const isPartialFailure = run.has_partial_failures === true
+                || run.status === LegacyPipelineRunStatus.PARTIAL_FAILURE;
+            const isFailed = run.status === Status.FAILED;  // legacy and unified both = "failed"
+            const isDone = pipelineRunDoneValues().includes(run.status);
+
+            const statusBadge = isPartialFailure
                 ? `<span class="em-badge em-badge-amber">partial failure</span>`
+                : isFailed
+                ? `<span class="em-badge em-badge-red">failed</span>`
+                : isDone
+                ? `<span class="em-badge em-badge-green">completed</span>`
                 : `<span class="em-badge em-badge-amber">${escapeHtml(run.status)}</span>`;
 
             const hasDetail = run.error_message || run.log_output;
-            const rowClass = (run.status === LegacyPipelineRunStatus.FAILED || run.status === LegacyPipelineRunStatus.PARTIAL_FAILURE) ? " em-row-failed" : "";
+            const rowClass = (isFailed || isPartialFailure) ? " em-row-failed" : "";
 
             return `
                 <tr class="em-table-clickable${rowClass}" data-run-id="${run.id}">
