@@ -11,8 +11,8 @@ import { showError, showEmpty, showToast, getParam, setParam, formatDate, relati
 import { renderFeedbackControls, bindFeedbackEvents } from "../components/feedback.js";
 import { traceStage, renderStage5_draft } from "../components/trace-renderers.js";
 import {
-    LegacyDraftStatus,
-    LegacyEmailStatus,
+    DeferredReason,
+    Status,
     draftExcludedValues,
     emailResolvedValues,
 } from "../constants/status.js";
@@ -561,16 +561,22 @@ function bindCardEvents() {
 
             try {
                 const ids = emailsToMark.map(e => e.id);
-                const newStatus = activeTab === "notable" ? LegacyEmailStatus.DISMISSED : LegacyEmailStatus.COMPLETED;
+                const isDismiss = activeTab === "notable";
+                const updatePayload = isDismiss
+                    ? { status: Status.SKIPPED, deferred_reason: DeferredReason.USER_DISMISSED }
+                    : { status: Status.DONE };
                 const { error } = await supabase
                     .from("emails")
-                    .update({ status: newStatus })
+                    .update(updatePayload)
                     .in("id", ids);
 
                 if (error) throw error;
 
                 for (const email of emailsToMark) {
-                    email.status = newStatus;
+                    email.status = updatePayload.status;
+                    if (updatePayload.deferred_reason) {
+                        email.deferred_reason = updatePayload.deferred_reason;
+                    }
                 }
                 renderEmails();
                 showToast(`Marked ${ids.length} emails as done`);
@@ -593,7 +599,7 @@ function bindCardEvents() {
             try {
                 const { error } = await supabase
                     .from("emails")
-                    .update({ status: LegacyEmailStatus.UNPROCESSED })
+                    .update({ status: Status.PENDING })
                     .eq("id", emailId);
 
                 if (error) throw error;
@@ -603,7 +609,7 @@ function bindCardEvents() {
                 btn.classList.add("em-btn-secondary");
 
                 const email = allEmails.find(e => e.id === emailId);
-                if (email) email.status = LegacyEmailStatus.UNPROCESSED;
+                if (email) email.status = Status.PENDING;
 
                 showToast("Draft generation queued");
             } catch (err) {
@@ -695,16 +701,24 @@ async function markEmailDone(emailId, btn) {
 
     try {
         const email = allEmails.find(e => e.id === emailId);
-        const newStatus = (activeTab === "notable" && !hasDraft(email)) ? LegacyEmailStatus.DISMISSED : LegacyEmailStatus.COMPLETED;
+        const isDismiss = activeTab === "notable" && !hasDraft(email);
+        const updatePayload = isDismiss
+            ? { status: Status.SKIPPED, deferred_reason: DeferredReason.USER_DISMISSED }
+            : { status: Status.DONE };
 
         const { error } = await supabase
             .from("emails")
-            .update({ status: newStatus })
+            .update(updatePayload)
             .eq("id", emailId);
 
         if (error) throw error;
 
-        if (email) email.status = newStatus;
+        if (email) {
+            email.status = updatePayload.status;
+            if (updatePayload.deferred_reason) {
+                email.deferred_reason = updatePayload.deferred_reason;
+            }
+        }
         renderEmails();
         showToast("Marked as done");
     } catch (err) {
@@ -726,13 +740,20 @@ async function toggleEmailDone(emailId, btn) {
         btn.disabled = true;
         btn.classList.add("em-check-saving");
         try {
+            // NOTE: Phase 4 collapses legacy 'processed' (worker terminal) and
+            // 'completed' (user terminal) into a single Status.DONE. The
+            // toggle-incomplete UX cannot recover the old "worker-done but
+            // user-not-done" sub-state without a separate user_resolved flag.
+            // Preserving prior behaviour by writing Status.DONE; the toast
+            // message ("Marked as incomplete") is now misleading. Tracked for
+            // a follow-up.
             const { error } = await supabase
                 .from("emails")
-                .update({ status: LegacyEmailStatus.PROCESSED })
+                .update({ status: Status.DONE })
                 .eq("id", emailId);
             if (error) throw error;
 
-            email.status = LegacyEmailStatus.PROCESSED;
+            email.status = Status.DONE;
             renderEmails();
             showToast("Marked as incomplete");
         } catch (err) {

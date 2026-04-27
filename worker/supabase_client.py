@@ -11,10 +11,10 @@ from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
 
 from status import (
-    LegacyDraftStatus,
-    LegacyEmailStatus,
+    DeferredReason,
+    DeliveryState,
     LegacyOnboardingStatus,
-    LegacyPipelineRunStatus,
+    Status,
     email_active_values,
     email_pending_values,
     pipeline_run_active_values,
@@ -146,7 +146,7 @@ class SupabaseWorkerClient:
         # No active pipeline — any 'processing' emails are orphaned
         result = (
             self.client.table("emails")
-            .update({"status": LegacyEmailStatus.UNPROCESSED})
+            .update({"status": Status.PENDING})
             .in_("status", list(email_active_values()))  # DUAL-READ (Phase 2)
             .execute()
         )
@@ -175,32 +175,38 @@ class SupabaseWorkerClient:
     # Email status
     # ------------------------------------------------------------------
 
-    def update_email_status(self, email_id, status):
+    def update_email_status(self, email_id, status, deferred_reason=None):
         """Update an email's processing status.
 
         Args:
             email_id: UUID string.
-            status: One of 'unprocessed', 'processing', 'completed', 'error'.
+            status: One of Status.{PENDING,ACTIVE,DONE,FAILED,SKIPPED}.
+            deferred_reason: Optional DeferredReason value. Required when
+                status=Status.SKIPPED so dashboard joins can distinguish
+                onboarding-deferred from user-dismissed rows.
         """
-        self.client.table("emails").update(
-            {"status": status}
-        ).eq("id", email_id).execute()
+        payload = {"status": status}
+        if deferred_reason is not None:
+            payload["deferred_reason"] = deferred_reason
+        self.client.table("emails").update(payload).eq("id", email_id).execute()
 
-    def bulk_update_email_status(self, email_ids, status, batch_size=100):
+    def bulk_update_email_status(self, email_ids, status, batch_size=100,
+                                 deferred_reason=None):
         """Update status for multiple emails, batched to avoid URL length limits."""
         if not email_ids:
             return
+        payload = {"status": status}
+        if deferred_reason is not None:
+            payload["deferred_reason"] = deferred_reason
         for i in range(0, len(email_ids), batch_size):
             batch = email_ids[i : i + batch_size]
-            self.client.table("emails").update(
-                {"status": status}
-            ).in_("id", batch).execute()
+            self.client.table("emails").update(payload).in_("id", batch).execute()
 
     def mark_all_emails_onboarding(self, user_id, batch_size=100):
-        """Mark all unprocessed emails for a user as 'onboarding'.
+        """Mark all pending emails for a user as skipped+onboarding.
 
         Called at end of onboarding so the pipeline's claim RPC
-        (which only selects status='unprocessed') naturally skips them.
+        (which only selects status='pending') naturally skips them.
         Batches updates to avoid Supabase statement timeouts.
         """
         total = 0
@@ -217,7 +223,8 @@ class SupabaseWorkerClient:
             if not ids:
                 break
             self.client.table("emails").update(
-                {"status": LegacyEmailStatus.ONBOARDING}
+                {"status": Status.SKIPPED,
+                 "deferred_reason": DeferredReason.ONBOARDING}
             ).in_("id", ids).execute()
             total += len(ids)
         return total
@@ -304,7 +311,8 @@ class SupabaseWorkerClient:
 
         payload = {
             "draft_body": draft_body,
-            "status": LegacyDraftStatus.PENDING,
+            "status": Status.PENDING,
+            "delivery_state": DeliveryState.NOT_DELIVERED,
             "user_edited": False,
             "quality_issues": quality_issues,
             "quality_retry_count": quality_retry_count,
@@ -364,7 +372,7 @@ class SupabaseWorkerClient:
         row = {
             "user_id": user_id,
             "trigger_type": trigger_type,
-            "status": LegacyPipelineRunStatus.RUNNING,
+            "status": Status.ACTIVE,
             "started_at": datetime.utcnow().isoformat(),
         }
         result = self.client.table("pipeline_runs").insert(row).execute()
@@ -380,11 +388,7 @@ class SupabaseWorkerClient:
         if not run_id:
             return
         update = {k: v for k, v in kwargs.items() if v is not None}
-        terminal_run_states = (
-            LegacyPipelineRunStatus.COMPLETED,
-            LegacyPipelineRunStatus.FAILED,
-            LegacyPipelineRunStatus.PARTIAL_FAILURE,
-        )
+        terminal_run_states = (Status.DONE, Status.FAILED)
         if "finished_at" not in update and update.get("status") in terminal_run_states:
             update["finished_at"] = datetime.utcnow().isoformat()
         self.client.table("pipeline_runs").update(update).eq("id", run_id).execute()

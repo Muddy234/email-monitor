@@ -202,7 +202,9 @@ async function handleNewDraft(record) {
     }
 
     if (result.success) {
-      await updateDraftStatus(draftId, LegacyDraftStatus.WRITTEN, result.draft_ref);
+      await updateDraftStatus(
+        draftId, Status.DONE, result.draft_ref, DeliveryState.DELIVERED,
+      );
       if (DEBUG) console.log(`Realtime: draft ${draftId} written to Outlook`);
     } else {
       console.error(`Realtime: failed to save draft ${draftId} to Outlook`);
@@ -351,8 +353,10 @@ async function sweepStaleDrafts() {
 
     for (const draft of staleDrafts) {
       try {
-        // Only call OWA DeleteItem for drafts already written to Outlook
-        if (draft.status === LegacyDraftStatus.WRITTEN && draft.outlook_draft_id) {
+        // Only call OWA DeleteItem for drafts already written to Outlook.
+        // Dual-read: accept legacy 'written' AND new-vocab 'done' during the
+        // hybrid window. Phase 5 narrows this to Status.DONE only.
+        if (draftDeliveredValues().includes(draft.status) && draft.outlook_draft_id) {
           await handleDeleteItem(draft.outlook_draft_id);
         }
 
@@ -361,7 +365,9 @@ async function sweepStaleDrafts() {
           method: "PATCH",
           body: {
             draft_deleted: true,
-            status: LegacyDraftStatus.DELETED,
+            status: Status.SKIPPED,
+            delivery_state: DeliveryState.USER_DELETED,
+            written_by_extension_version: chrome.runtime.getManifest().version,
             updated_at: new Date().toISOString(),
           },
         });

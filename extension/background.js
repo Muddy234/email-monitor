@@ -1251,7 +1251,7 @@ async function syncEmailsToSupabase() {
           importance: ["Low", "Normal", "High"][e.importance] || "Normal",
           is_read: e.is_read ?? true,
           recipients: e.recipients || [],
-          status: LegacyEmailStatus.COMPLETED,
+          status: Status.DONE,
         }));
 
         await pushEmails(sentRows);

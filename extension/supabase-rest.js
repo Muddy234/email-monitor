@@ -98,14 +98,20 @@ async function patchProfileAliases(userId, aliases) {
 }
 
 /**
- * Update a draft's status and optionally set the outlook_draft_id.
+ * Update a draft's status and optionally set delivery_state and outlook_draft_id.
+ *
+ * Phase 4: Always stamps written_by_extension_version from the manifest so
+ * Phase 5 telemetry can confirm >99% of writes come from new-vocab writers
+ * before legacy compat is removed.
  */
-async function updateDraftStatus(draftId, status, outlookDraftId) {
+async function updateDraftStatus(draftId, status, outlookDraftId, deliveryState) {
   const body = {
     status,
     updated_at: new Date().toISOString(),
+    written_by_extension_version: chrome.runtime.getManifest().version,
   };
   if (outlookDraftId) body.outlook_draft_id = outlookDraftId;
+  if (deliveryState) body.delivery_state = deliveryState;
 
   return supabaseRequest(`/drafts?id=eq.${draftId}`, {
     method: "PATCH",
