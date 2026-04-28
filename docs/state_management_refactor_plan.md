@@ -1806,28 +1806,52 @@ def transition_to(db, entity_type, entity_id, new_status, error=None):
 
 ### Reaper scaffold (post-refactor)
 
+**Placement (locked, iteration 1):** `run_reaper(db)` is called **once per
+loop iteration, as the final step**, after all per-user processing has
+completed. No startup invocation. No mid-cycle invocation. Single call site
+in `worker/main.py`.
+
+**Shutdown awareness:** the driver checks `_shutdown` between entity types
+(emails → drafts → pipeline_runs) so a SIGTERM during reaper exits within a
+few seconds rather than blocking on the full sweep.
+
+**Null-column handling (locked):**
+- `state_entered_at IS NULL` → row is skipped by the RPC and the count is
+  logged. Backfill is a separate task if the count is non-zero on prod.
+- `failure_count IS NULL` → treated as `0` via `COALESCE` in the retry-budget
+  check.
+
 ```python
 # worker/reaper.py
 from worker.status import Status
 
 STUCK_TIMEOUTS = {
-    "emails": timedelta(minutes=10),
-    "drafts": timedelta(minutes=10),
-    "pipeline_runs": timedelta(minutes=30),
-    "profiles": timedelta(minutes=30),  # onboarding
+    "emails":        timedelta(minutes=10),
+    "drafts":        timedelta(minutes=10),
+    "pipeline_runs": timedelta(minutes=60),  # accommodates Anthropic Batches API
+    "profiles":      timedelta(minutes=30),  # onboarding (iteration 2)
 }
 
 RETRY_BUDGET = 3
 
 def run_reaper(db):
+    if not reaper_enabled():
+        return
     stuck = db.rpc("find_stuck_entities").execute()
     for row in stuck.data:
-        if row["failure_count"] >= RETRY_BUDGET:
+        if _shutdown:
+            return
+        if (row.get("failure_count") or 0) >= RETRY_BUDGET:
             transition_to(db, row["entity"], row["id"], Status.FAILED,
                           error=f"Exceeded retry budget ({RETRY_BUDGET})")
         else:
             transition_to(db, row["entity"], row["id"], Status.PENDING)
 ```
+
+**`pipeline_runs` timeout rationale:** classification + draft batches via
+the Anthropic Batches API can each take several minutes. On a wide window
+or slow batch, total time can approach 30 min. 60 min gives headroom while
+still catching genuinely crashed runs. Revisit if false positives surface.
 
 ---
 
@@ -1840,6 +1864,31 @@ deferred.
 **Locked decision (iteration 1):** primary reaper driver is **drafts**.
 Onboarding keeps `_recover_stuck_onboarding` running until a later iteration
 brings it into the unified model.
+
+**Locked decision (iteration 1) — reaper placement:**
+- Reaper runs **once per cycle, at the end**, after all per-user processing
+  completes. No startup invocation. No mid-cycle calls.
+- Legacy `reset_stuck_processing` (call site `worker/main.py:286`,
+  definition `worker/supabase_client.py:123`) is **removed in the same
+  commit** that introduces `worker/reaper.py`.
+- Accepted tradeoff: after worker restart, orphaned `active` rows aged past
+  their timeout during downtime wait one full cycle (~45–90s) before
+  recovery. Acceptable for single-placement clarity.
+
+**Locked decision (iteration 1) — kill switch default:**
+- The `system_config.reaper_enabled` row is seeded `'true'::jsonb` in
+  migration 044. Reaper ships enabled; disable via SQL if issues surface.
+
+**Locked decision (iteration 1) — null-column handling:**
+- `find_stuck_entities` RPC skips rows where `state_entered_at IS NULL` and
+  returns the skipped count for logging. Worker logs it once per tick. A
+  non-zero count signals a backfill is needed.
+- Retry-budget check uses `COALESCE(failure_count, 0)` so legacy rows
+  without the column populated retry up to `RETRY_BUDGET` times.
+
+**Locked decision (iteration 1) — `pipeline_runs` timeout:**
+- 60 minutes (not 30) to accommodate Anthropic Batches API runtime.
+  Revisit if a real false positive is observed.
 
 ### 17.1 Iteration 1 ship: A + B + F (drafts fully covered)
 
@@ -1944,8 +1993,8 @@ that works: a table.
 
 ### 19.1 Schema
 
-**Migration: `supabase/migrations/044_system_config.sql`** (ships with reaper,
-not with Phase 1–5):
+**Migration: `supabase/migrations/046_system_config.sql`** (ships with reaper,
+not with Phase 1–5; numbered after the existing `045_lock_unified_vocabulary`):
 
 ```sql
 create table if not exists public.system_config (
@@ -2082,7 +2131,8 @@ except Exception as exc:
 
 Option A (preferred): column-level grant.
 
-**Migration: `supabase/migrations/045_last_error_rls.sql`**
+**Migration: `supabase/migrations/048_last_error_rls.sql`**
+(numbered after `046_system_config.sql` and `047_find_stuck_entities.sql`):
 
 ```sql
 -- Revoke column-level access from anon and authenticated.

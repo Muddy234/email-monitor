@@ -120,35 +120,6 @@ class SupabaseWorkerClient:
             return []
         return data
 
-    def reset_stuck_processing(self):
-        """Reset orphaned emails stuck in 'active' status.
-
-        If no pipeline_run is currently 'active', any emails in 'active'
-        are orphans from a crashed run. Reset them to 'pending' so they
-        get picked up on the next cycle.
-
-        Returns:
-            int: Number of emails reset.
-        """
-        # Check if any pipeline is currently running
-        running = (
-            self.client.table("pipeline_runs")
-            .select("id")
-            .eq("status", Status.ACTIVE)
-            .execute()
-        )
-        if running.data:
-            return 0  # Pipeline is active, don't reset
-
-        # No active pipeline — any 'active' emails are orphaned
-        result = (
-            self.client.table("emails")
-            .update({"status": Status.PENDING})
-            .eq("status", Status.ACTIVE)
-            .execute()
-        )
-        return len(result.data) if result.data else 0
-
     # ------------------------------------------------------------------
     # Profile / config
     # ------------------------------------------------------------------

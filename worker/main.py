@@ -30,6 +30,7 @@ from supabase_client import SupabaseWorkerClient
 from run_pipeline import process_user_batch_signals
 from onboarding import run_onboarding
 from onboarding.model_trainer import check_retrain_needed, train_user_model
+from reaper import run_reaper
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -281,14 +282,6 @@ def main():
         except Exception as e:
             logger.error(f"Model re-training check error: {e}")
 
-        # -- Recover stuck emails --------------------------------------
-        try:
-            reset_count = db.reset_stuck_processing()
-            if reset_count:
-                logger.warning(f"Recovered {reset_count} stuck processing email(s)")
-        except Exception as e:
-            logger.error(f"Stuck-email recovery error: {e}")
-
         logger.info(f"--- Accumulation window: {WINDOW_SECONDS}s ---")
 
         try:
@@ -298,51 +291,58 @@ def main():
             accumulated = {}
             onboarding_needed = False
 
-        # If accumulation broke early for onboarding, skip straight to next loop
-        if onboarding_needed:
-            continue
+        # Process accumulated emails (skipped when onboarding broke early
+        # or when no emails arrived). The reaper runs unconditionally below.
+        if not onboarding_needed:
+            total_emails = sum(len(u["emails"]) for u in accumulated.values())
 
-        # Check if any emails were found
-        total_emails = sum(len(u["emails"]) for u in accumulated.values())
+            if total_emails == 0:
+                logger.info("No emails found")
+            else:
+                logger.info(f"Found {total_emails} emails across {len(accumulated)} user(s)")
 
-        if total_emails == 0:
-            logger.info("No emails found")
-            continue
+                total_processed = 0
+                total_drafts = 0
 
-        logger.info(f"Found {total_emails} emails across {len(accumulated)} user(s)")
+                for user_id, data in accumulated.items():
+                    if _shutdown:
+                        break
+                    if not data["emails"]:
+                        continue
 
-        # Process each user's batch
-        total_processed = 0
-        total_drafts = 0
+                    if not db.is_subscription_active(user_id):
+                        logger.info(f"Skipping user {user_id[:8]}...: no active subscription")
+                        continue
 
-        for user_id, data in accumulated.items():
-            if _shutdown:
-                break
-            if not data["emails"]:
-                continue
+                    logger.info(f"Processing user {user_id[:8]}...: {len(data['emails'])} emails")
+                    try:
+                        db.set_pipeline_stage(user_id, "gathering")
+                    except Exception:
+                        pass
+                    try:
+                        processed, drafts = process_user_batch_signals(
+                            db, user_id, data["profile"], data["emails"]
+                        )
+                        total_processed += processed
+                        total_drafts += drafts
+                    finally:
+                        try:
+                            db.set_pipeline_stage(user_id, "idle")
+                        except Exception:
+                            pass
 
-            if not db.is_subscription_active(user_id):
-                logger.info(f"Skipping user {user_id[:8]}...: no active subscription")
-                continue
+                logger.info(f"Window complete: {total_processed} processed, {total_drafts} drafts")
 
-            logger.info(f"Processing user {user_id[:8]}...: {len(data['emails'])} emails")
-            try:
-                db.set_pipeline_stage(user_id, "gathering")
-            except Exception:
-                pass
-            try:
-                processed, drafts = process_user_batch_signals(
-                    db, user_id, data["profile"], data["emails"]
-                )
-                total_processed += processed
-                total_drafts += drafts
-            finally:
-                try:
-                    db.set_pipeline_stage(user_id, "idle")
-                except Exception:
-                    pass
-
-        logger.info(f"Window complete: {total_processed} processed, {total_drafts} drafts")
+        # -- Reaper: end-of-cycle reconciliation -----------------------
+        # Replaces legacy reset_stuck_processing. Resets rows in 'active'
+        # that have aged past their per-entity timeout (find_stuck_entities
+        # RPC). Retries within budget; fails when budget exhausted. Runs
+        # every cycle, including cycles that skipped processing (no emails,
+        # onboarding break) so stuck rows still get reconciled.
+        try:
+            run_reaper(db, shutdown_probe=lambda: _shutdown)
+        except Exception as e:
+            logger.error(f"Reaper error: {e}")
 
     logger.info("Worker stopped")
 
