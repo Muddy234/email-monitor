@@ -40,14 +40,17 @@ const COOKIE_AUTH_HOSTS = new Set(["outlook.live.com"]);
 // ---------------------------------------------------------------------------
 
 let token = null;        // { token, expiresOn, cachedAt, clientId, origin }
-let isSyncing = false;   // lock to prevent concurrent Supabase syncs
 let lastSyncTime = null; // ISO string of last successful sync
 let connectedOutlookEmail = null; // cached connected_outlook_email from profile
-let hasCompletedFolderSync = false; // Set true after first successful folder discovery
 let foldersCache = null;       // { folders: [{id,displayName,isDistinguished}], expiresAt: ms }
-let outlookTabId = null;       // Tab ID of the active Outlook page (from content script)
-let currentUserId = null;      // User whose state is currently loaded into memory
 const FOLDER_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+// Phase 6 — runtime flags moved to chrome.storage.session so they survive
+// MV3 service-worker kills. Helpers live in the next section. Names retired:
+//   isSyncing             → syncing:{userId}      (timestamped, stale-detected)
+//   hasCompletedFolderSync→ folderSyncComplete:{userId}
+//   outlookTabId          → outlookTabId          (global)
+//   currentUserId         → currentUserId         (global)
 
 // ---------------------------------------------------------------------------
 // Per-user state (chrome.storage.local key: `sync:{userId}`)
@@ -83,7 +86,88 @@ async function loadUserStateIntoMemory(userId) {
   lastSyncTime = state.lastSyncTime || null;
   foldersCache = state.foldersCache || null;
   connectedOutlookEmail = state.connectedOutlookEmail || null;
-  currentUserId = userId;
+  await setCurrentUserId(userId);
+}
+
+// ---------------------------------------------------------------------------
+// Session-scoped runtime state (chrome.storage.session)
+// ---------------------------------------------------------------------------
+//
+// Phase 6: these flags used to be module globals. chrome.storage.session
+// survives SW kills (clears on browser restart) which matches the lifecycle
+// we want. Tradeoff: every read/write is async, so callers must await.
+
+const SYNC_LOCK_STALE_MS = 5 * 60 * 1000;
+
+async function getSyncLock(userId) {
+  if (!userId) return false;
+  const key = `syncing:${userId}`;
+  const data = await chrome.storage.session.get(key);
+  const entry = data[key];
+  if (!entry || entry.value !== true) return false;
+  // Stale-detect: a SW kill mid-sync leaves the lock held forever otherwise.
+  if (typeof entry.timestamp === "number" && Date.now() - entry.timestamp > SYNC_LOCK_STALE_MS) {
+    await chrome.storage.session.remove(key);
+    return false;
+  }
+  return true;
+}
+
+async function setSyncLock(userId, value) {
+  if (!userId) return;
+  const key = `syncing:${userId}`;
+  if (value) {
+    await chrome.storage.session.set({ [key]: { value: true, timestamp: Date.now() } });
+  } else {
+    await chrome.storage.session.remove(key);
+  }
+}
+
+async function clearStaleSyncLocks() {
+  // Sweep on SW spin-up. Any lock older than the threshold was orphaned.
+  const all = await chrome.storage.session.get(null);
+  const cutoff = Date.now() - SYNC_LOCK_STALE_MS;
+  const stale = [];
+  for (const [k, v] of Object.entries(all)) {
+    if (k.startsWith("syncing:") && v && typeof v.timestamp === "number" && v.timestamp < cutoff) {
+      stale.push(k);
+    }
+  }
+  if (stale.length) await chrome.storage.session.remove(stale);
+}
+
+async function getFolderSyncComplete(userId) {
+  if (!userId) return false;
+  const key = `folderSyncComplete:${userId}`;
+  const data = await chrome.storage.session.get(key);
+  return data[key] === true;
+}
+
+async function setFolderSyncComplete(userId, value) {
+  if (!userId) return;
+  const key = `folderSyncComplete:${userId}`;
+  if (value) await chrome.storage.session.set({ [key]: true });
+  else await chrome.storage.session.remove(key);
+}
+
+async function getOutlookTabId() {
+  const data = await chrome.storage.session.get("outlookTabId");
+  return data.outlookTabId ?? null;
+}
+
+async function setOutlookTabId(tabId) {
+  if (tabId == null) await chrome.storage.session.remove("outlookTabId");
+  else await chrome.storage.session.set({ outlookTabId: tabId });
+}
+
+async function getCurrentUserId() {
+  const data = await chrome.storage.session.get("currentUserId");
+  return data.currentUserId ?? null;
+}
+
+async function setCurrentUserId(userId) {
+  if (userId == null) await chrome.storage.session.remove("currentUserId");
+  else await chrome.storage.session.set({ currentUserId: userId });
 }
 
 // ---------------------------------------------------------------------------
@@ -187,7 +271,8 @@ function usesCookieAuth() {
  * Used for personal accounts (outlook.live.com) where Bearer tokens don't work.
  */
 async function owaFetchViaTab(action, body) {
-  if (!outlookTabId) throw new Error("No Outlook tab available for OWA request");
+  const tabId = await getOutlookTabId();
+  if (!tabId) throw new Error("No Outlook tab available for OWA request");
   const url = getServiceUrl(action);
   if (!url) throw new Error("No OWA endpoint — token origin unknown");
   if (!token || !token.token) throw new Error("No Exchange token available");
@@ -196,7 +281,7 @@ async function owaFetchViaTab(action, body) {
   const bearerToken = token.token;
 
   const results = await chrome.scripting.executeScript({
-    target: { tabId: outlookTabId },
+    target: { tabId },
     world: "MAIN",
     func: async (fetchUrl, fetchAction, fetchBody, authToken) => {
       try {
@@ -859,10 +944,11 @@ async function discoverMailFolders() {
   // OWA's service.svc does not support FindFolder. Instead, we inject a
   // script into the Outlook tab's MAIN world via chrome.scripting to read
   // folder IDs from React's internal fiber tree on the sidebar DOM nodes.
-  if (!outlookTabId) throw new Error("No Outlook tab ID available");
+  const tabId = await getOutlookTabId();
+  if (!tabId) throw new Error("No Outlook tab ID available");
 
   const results = await chrome.scripting.executeScript({
-    target: { tabId: outlookTabId },
+    target: { tabId },
     world: "MAIN",
     func: async () => {
       const SKIP = new Set([
@@ -968,8 +1054,9 @@ async function discoverMailFolders() {
   }
 
   foldersCache = { folders, expiresAt: Date.now() + FOLDER_CACHE_TTL_MS };
-  if (currentUserId) {
-    writeUserState(currentUserId, { foldersCache });
+  const cacheUserId = await getCurrentUserId();
+  if (cacheUserId) {
+    writeUserState(cacheUserId, { foldersCache });
   }
 
   if (DEBUG) console.log("Discovered mail folders:", folders.map(f => f.displayName));
@@ -1048,32 +1135,38 @@ async function detectAndUpdateAliases(userId, authEmail, sentEmails) {
 // @pipeline connector="connector-a" label="emails + profiles + sync flag → Supabase"
 async function syncEmailsToSupabase() {
   if (DEBUG) console.log("syncEmailsToSupabase called");
-  if (isSyncing) { if (DEBUG) console.log("Skipped — isSyncing is true"); return { skipped: true }; }
-  isSyncing = true;
+
+  // Ensure token is restored from storage (SW may have just woken up)
+  await restoreToken();
+
+  // @pipeline step="token-check" num="01" desc="Validates Outlook token + Supabase session. Bails if either missing or expired." gate="both tokens required"
+  // Check both tokens exist (early-bail before acquiring sync lock)
+  if (!token || !token.token || isTokenExpired()) {
+    if (DEBUG) console.log("Exiting — no valid Outlook token");
+    return { error: "No valid Outlook token" };
+  }
+
+  const session = await getSupabaseSession();
+  if (!session || !session.access_token) {
+    if (DEBUG) console.log("Exiting — no Supabase session");
+    return { error: "Not logged in to Supabase" };
+  }
+
+  const userId = session.user.id;
+  if (DEBUG) console.log("userId:", userId);
+
+  // Per-user sync lock (chrome.storage.session). Acquired AFTER userId is known
+  // so simultaneous syncs across users don't deadlock each other.
+  if (await getSyncLock(userId)) {
+    if (DEBUG) console.log("Skipped — sync lock held for user");
+    return { skipped: true };
+  }
+  await setSyncLock(userId, true);
 
   try {
-    // Ensure token is restored from storage (SW may have just woken up)
-    await restoreToken();
-
-    // @pipeline step="token-check" num="01" desc="Validates Outlook token + Supabase session. Bails if either missing or expired." gate="both tokens required"
-    // Check both tokens exist
-    if (!token || !token.token || isTokenExpired()) {
-      if (DEBUG) console.log("Exiting — no valid Outlook token");
-      return { error: "No valid Outlook token" };
-    }
-
-    const session = await getSupabaseSession();
-    if (!session || !session.access_token) {
-      if (DEBUG) console.log("Exiting — no Supabase session");
-      return { error: "Not logged in to Supabase" };
-    }
-
-    const userId = session.user.id;
-    if (DEBUG) console.log("userId:", userId);
-
     // @pipeline step="user-change-detection" num="02" desc="Loads per-user state blob (sync:{userId}). User-scoped keys eliminate cross-user bleed." writes="resets in-memory state"
     // --- Load per-user state into memory (fresh on user change) ---
-    if (currentUserId !== userId) {
+    if ((await getCurrentUserId()) !== userId) {
       await loadUserStateIntoMemory(userId);
     }
 
@@ -1091,11 +1184,11 @@ async function syncEmailsToSupabase() {
         if (DEBUG) console.warn("getProfile failed:", err.message);
       }
 
-      // @pipeline step="seed-folder-sync" num="04" desc="If initial_sync_complete=true in DB, sets in-memory flag. Survives MV3 service worker kills." reads="profile.initial_sync_complete"
-      // Seed hasCompletedFolderSync from profile (survives MV3 service worker kills)
+      // @pipeline step="seed-folder-sync" num="04" desc="If initial_sync_complete=true in DB, sets session flag. Survives MV3 service worker kills." reads="profile.initial_sync_complete"
+      // Seed folder-sync flag from profile (survives MV3 service worker kills)
       if (profile?.initial_sync_complete) {
-        hasCompletedFolderSync = true;
-        if (DEBUG) console.log("[Clarion] hasCompletedFolderSync seeded from profile (initial_sync_complete=true)");
+        await setFolderSyncComplete(userId, true);
+        if (DEBUG) console.log("[Clarion] folderSyncComplete seeded from profile (initial_sync_complete=true)");
       }
 
       const connectedEmail = profile?.connected_outlook_email?.toLowerCase();
@@ -1128,14 +1221,14 @@ async function syncEmailsToSupabase() {
       await chrome.storage.local.remove("outlookMismatch");
     }
 
-    // @pipeline step="folder-discovery" num="06" desc="Reads Outlook sidebar DOM for subfolder IDs. On success, sets hasCompletedFolderSync = true." reads="Outlook DOM" nonfatal="failure → inbox only"
+    // @pipeline step="folder-discovery" num="06" desc="Reads Outlook sidebar DOM for subfolder IDs. On success, sets folderSyncComplete = true." reads="Outlook DOM" nonfatal="failure → inbox only"
     // Discover mail folders from Outlook's sidebar DOM via chrome.scripting
     // Always start with Inbox (discovery only returns subfolders).
     let folders = [{ id: null, displayName: "Inbox", isDistinguished: true }];
     try {
       const discovered = await discoverMailFolders();
-      hasCompletedFolderSync = true; // Discovery succeeded — sidebar was readable
-      if (DEBUG) console.log("[Clarion] hasCompletedFolderSync set to true (folder discovery succeeded)");
+      await setFolderSyncComplete(userId, true); // Discovery succeeded — sidebar was readable
+      if (DEBUG) console.log("[Clarion] folderSyncComplete set to true (folder discovery succeeded)");
       // Filter out any discovered "Inbox" — we already prepend it above
       const filtered = discovered.filter(f => f.displayName.toLowerCase() !== "inbox");
       if (DEBUG) console.log(`[Clarion] Discovered ${discovered.length} subfolders (${discovered.length - filtered.length} duplicate Inbox removed):`, filtered.map(f => f.displayName));
@@ -1276,11 +1369,12 @@ async function syncEmailsToSupabase() {
     // Update heartbeat so the worker knows we're active
     updateHeartbeat(userId).catch(() => {});
 
-    // @pipeline step="signal-initial-sync" num="13" desc="If hasCompletedFolderSync=true AND initial_sync_complete=false → PATCHes to true." writes="profiles.initial_sync_complete" nonfatal="PATCH failure → retries next cycle"
+    // @pipeline step="signal-initial-sync" num="13" desc="If folderSyncComplete=true AND initial_sync_complete=false → PATCHes to true." writes="profiles.initial_sync_complete" nonfatal="PATCH failure → retries next cycle"
     // @pipeline harden="Hardening note" body="Step 14 runs after ALL folder syncs complete, preventing the 'flag set but emails not landed' race. But per-folder failures in step 09 are non-blocking — a user could have initial_sync_complete=true with only partial folder coverage. The email_count >= 500 gate in Phase B mitigates this."
     // Signal sync completion to worker (gates onboarding)
     // Allow signal even after onboarding re-runs (onboarding_completed_at may be set)
-    if (hasCompletedFolderSync && profile && !profile.initial_sync_complete) {
+    const folderSyncDone = await getFolderSyncComplete(userId);
+    if (folderSyncDone && profile && !profile.initial_sync_complete) {
       if (DEBUG) console.log("[Clarion] Signaling initial_sync_complete to Supabase");
       setInitialSyncComplete(userId).then(() => {
         if (DEBUG) console.log("[Clarion] initial_sync_complete set successfully");
@@ -1298,7 +1392,7 @@ async function syncEmailsToSupabase() {
     }
     return { error: err.message };
   } finally {
-    isSyncing = false;
+    await setSyncLock(userId, false);
   }
 }
 
@@ -1418,7 +1512,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       // Token is acceptable — cache it
       const firstValidToken = !token || !token.token || isTokenExpired();
       token = msg.data;
-      if (sender.tab?.id) outlookTabId = sender.tab.id;
+      if (sender.tab?.id) setOutlookTabId(sender.tab.id);
       persistToken();
       // Clear mismatch state if we're accepting a good token
       if (connectedOutlookEmail && incomingEmail && incomingEmail === connectedOutlookEmail) {
@@ -1447,7 +1541,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   } else if (msg.type === "getStatus") {
     // Ensure token is restored from storage before reporting status
     // (service worker may have just woken up)
-    restoreToken().then(() => {
+    (async () => {
+      await restoreToken();
+      const uid = await getCurrentUserId();
+      const isSyncing = uid ? await getSyncLock(uid) : false;
       sendResponse({
         has_token: !!(token && token.token),
         token_expired: isTokenExpired(),
@@ -1460,18 +1557,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         realtime_connected: isRealtimeConnected(),
         is_syncing: isSyncing,
       });
-    });
+    })();
     return true; // keep message channel open for async response
   } else if (msg.type === "supabaseSessionChanged") {
     // Clear cached token and folder cache if session was removed (logout)
-    chrome.storage.local.get("supabaseSession", (result) => {
+    chrome.storage.local.get("supabaseSession", async (result) => {
       if (!result.supabaseSession) {
-        const loggedOutUser = currentUserId;
+        const loggedOutUser = await getCurrentUserId();
         token = null;
         lastSyncTime = null;
         connectedOutlookEmail = null;
         foldersCache = null;
-        currentUserId = null;
+        await setCurrentUserId(null);
         if (loggedOutUser) clearUserState(loggedOutUser);
         updateBadge();
       }
@@ -1523,6 +1620,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 (async () => {
   await restoreToken();
+
+  // Phase 6: clear sync locks orphaned by a SW kill mid-sync. Runs on every
+  // SW spin-up; chrome.storage.session itself clears on browser restart.
+  await clearStaleSyncLocks();
 
   // Clear stale Outlook mismatch state on startup (email detection may have improved)
   await chrome.storage.local.remove("outlookMismatch");
