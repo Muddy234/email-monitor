@@ -203,8 +203,8 @@ async function fetchCounts(session) {
     // Fetch drafts, notable signals, and weekly stats in parallel
     const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
 
-    const emailExcluded = emailResolvedValues().join(",");  // DUAL-READ (Phase 2)
-    const draftExcluded = draftExcludedValues().join(",");  // DUAL-READ (Phase 2)
+    const emailExcluded = `${Status.DONE},${Status.SKIPPED}`;
+    const draftExcluded = Status.SKIPPED;
 
     const [emails, events, runs] = await Promise.all([
       supabaseQuery(`emails?select=id,status,classifications(needs_response),drafts(id,status)&user_id=eq.${uid}&status=not.in.(${emailExcluded})&drafts.status=not.in.(${draftExcluded})&order=received_time.desc`, session),

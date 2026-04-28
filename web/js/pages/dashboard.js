@@ -7,7 +7,7 @@ import { renderNav } from "../nav.js";
 import { supabase } from "../supabase-client.js";
 import { showError, showEmpty, getParam, setParam, relativeTime, escapeHtml } from "../ui.js";
 import { ensureAccess, isSubscriptionActive, isGrandfathered, openPortal } from "../subscription.js";
-import { draftExcludedValues, emailResolvedValues } from "../constants/status.js";
+import { Status } from "../constants/status.js";
 
 await requireAuth();
 const subscription = await ensureAccess();
@@ -85,8 +85,8 @@ async function loadDashboard() {
             supabase
                 .from("emails")
                 .select("id, status, sender, sender_name, sender_email, subject, received_time, classifications(needs_response, action, context), drafts(id, draft_body, status)")
-                .not("status", "in", `(${emailResolvedValues().join(",")})`)  // DUAL-READ (Phase 2)
-                .not("drafts.status", "in", `(${draftExcludedValues().join(",")})`)  // DUAL-READ (Phase 2)
+                .not("status", "in", `(${Status.DONE},${Status.SKIPPED})`)
+                .neq("drafts.status", Status.SKIPPED)
                 .order("received_time", { ascending: false }),
             supabase
                 .from("emails")

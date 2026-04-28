@@ -130,7 +130,7 @@ async function handleNewDraft(record) {
     const emailId = record.email_id;
     const draftBody = record.draft_body;
 
-    if (!draftBody || record.status !== LegacyDraftStatus.PENDING) return;
+    if (!draftBody || record.status !== Status.PENDING) return;
 
     // Layer 2: fail closed — don't write draft if token account can't be verified
     if (await isTokenAccountMismatch()) {
@@ -353,10 +353,8 @@ async function sweepStaleDrafts() {
 
     for (const draft of staleDrafts) {
       try {
-        // Only call OWA DeleteItem for drafts already written to Outlook.
-        // Dual-read: accept legacy 'written' AND new-vocab 'done' during the
-        // hybrid window. Phase 5 narrows this to Status.DONE only.
-        if (draftDeliveredValues().includes(draft.status) && draft.outlook_draft_id) {
+        // Only call OWA DeleteItem for drafts already delivered to Outlook.
+        if (draft.status === Status.DONE && draft.outlook_draft_id) {
           await handleDeleteItem(draft.outlook_draft_id);
         }
 

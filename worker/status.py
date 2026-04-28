@@ -1,22 +1,19 @@
 """Status vocabulary constants for the Email_Monitor worker.
 
-Phase 1 of the state management refactor introduces this module. During
-Phase 1 and 2, writers continue emitting legacy values but reference them
-through the Legacy* classes so the eventual cutover is a single import
-swap rather than a grep-and-replace exercise across every call site.
-
-Unified vocabulary (target state):
+Unified vocabulary (current state):
     pending  -> queued, not yet started
     active   -> in progress
     done     -> completed successfully
     failed   -> failed, retry permitted within budget
     skipped  -> intentionally not processed (noise, deferred, user action)
 
-Legacy classes capture values actually observed in production today
-(verified via grep against worker/, extension/, web/). Values that were
-defined but never written (e.g. drafts.status = 'sent'/'edited'/'obsolete',
-emails.status = 'failed', profiles.onboarding_status = 'running') are
-deliberately absent.
+Phase 5 stripped the legacy classes, mapping tables, and dual-read helpers
+that bridged the migration from the pre-unified vocabularies. The CHECK
+constraints in migration 045 now reject any non-unified value at the DB.
+
+LegacyOnboardingStatus is preserved — onboarding uses its own multi-stage
+FSM that is intentionally separate from the email/draft/pipeline_run
+status columns and is out of scope for this refactor.
 """
 
 
@@ -30,43 +27,12 @@ class Status:
     SKIPPED = "skipped"
 
 
-class LegacyEmailStatus:
-    """Values actually written to emails.status today."""
-
-    UNPROCESSED = "unprocessed"   # worker: newly ingested
-    PROCESSING = "processing"     # worker: claimed by RPC
-    PROCESSED = "processed"       # worker: pipeline success
-    ONBOARDING = "onboarding"     # worker: deferred during onboarding sweep
-    ERROR = "error"               # worker: pipeline failure
-    COMPLETED = "completed"       # dashboard user action
-    DISMISSED = "dismissed"       # dashboard user action
-    # NOTE: 'failed' is defined in many enumerations but never written
-    # by any current code path on the emails table.
-
-
-class LegacyDraftStatus:
-    """Values actually written to drafts.status today."""
-
-    PENDING = "pending"   # worker: created, awaiting extension
-    WRITTEN = "written"   # extension: pushed to Outlook successfully
-    DELETED = "deleted"   # extension: user deleted (always with draft_deleted=true)
-    # NOTE: 'sent', 'edited', 'obsolete', 'failed' are NOT written today.
-
-
-class LegacyPipelineRunStatus:
-    """Values actually written to pipeline_runs.status today."""
-
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    PARTIAL_FAILURE = "partial_failure"
-
-
 class LegacyOnboardingStatus:
-    """Values actually written to profiles.onboarding_status today.
+    """Values written to profiles.onboarding_status.
 
-    Retained as legacy-only for iteration 1; collapse into the unified
-    vocabulary is deferred to iteration 2+ (scope option C).
+    Onboarding uses a 12-state FSM that is intentionally separate from the
+    unified email/draft/pipeline_run vocabulary and is out of scope for the
+    Phase 1-5 refactor.
     """
 
     PENDING = "pending"
@@ -99,72 +65,3 @@ class DeferredReason:
 
     ONBOARDING = "onboarding"
     USER_DISMISSED = "user_dismissed"
-
-
-# ============================================================
-# Legacy-to-new vocabulary mappings.
-# Used by the Phase 3 migration and by dual-read helpers during Phase 2.
-# ============================================================
-
-EMAIL_LEGACY_TO_NEW = {
-    LegacyEmailStatus.UNPROCESSED: Status.PENDING,
-    LegacyEmailStatus.PROCESSING: Status.ACTIVE,
-    LegacyEmailStatus.PROCESSED: Status.DONE,
-    LegacyEmailStatus.COMPLETED: Status.DONE,        # dashboard user "mark complete"
-    LegacyEmailStatus.ERROR: Status.FAILED,
-    LegacyEmailStatus.ONBOARDING: Status.SKIPPED,    # + deferred_reason='onboarding'
-    LegacyEmailStatus.DISMISSED: Status.SKIPPED,     # + deferred_reason='user_dismissed'
-}
-
-DRAFT_LEGACY_TO_NEW = {
-    LegacyDraftStatus.PENDING: Status.PENDING,
-    LegacyDraftStatus.WRITTEN: Status.DONE,          # + delivery_state='delivered'
-    LegacyDraftStatus.DELETED: Status.SKIPPED,       # + delivery_state='user_deleted'
-}
-
-PIPELINE_RUN_LEGACY_TO_NEW = {
-    LegacyPipelineRunStatus.RUNNING: Status.ACTIVE,
-    LegacyPipelineRunStatus.COMPLETED: Status.DONE,
-    LegacyPipelineRunStatus.FAILED: Status.FAILED,
-    LegacyPipelineRunStatus.PARTIAL_FAILURE: Status.DONE,   # + has_partial_failures=true
-}
-
-
-# ============================================================
-# Dual-read helpers.
-# Return the tuple of accepted values during Phase 2, so filter queries
-# can match both legacy and new vocabulary without branching on phase.
-# ============================================================
-
-def email_pending_values() -> tuple[str, ...]:
-    """Values that mean "queued, not yet claimed" for emails."""
-    return (LegacyEmailStatus.UNPROCESSED, Status.PENDING)
-
-
-def email_active_values() -> tuple[str, ...]:
-    """Values that mean "currently being processed" for emails."""
-    return (LegacyEmailStatus.PROCESSING, Status.ACTIVE)
-
-
-def email_done_values() -> tuple[str, ...]:
-    """Values that mean "terminal success" for emails."""
-    return (
-        LegacyEmailStatus.PROCESSED,
-        LegacyEmailStatus.COMPLETED,
-        Status.DONE,
-    )
-
-
-def draft_pending_values() -> tuple[str, ...]:
-    """Values that mean "awaiting delivery" for drafts."""
-    return (LegacyDraftStatus.PENDING, Status.PENDING)
-
-
-def draft_delivered_values() -> tuple[str, ...]:
-    """Values that mean "successfully delivered to Outlook" for drafts."""
-    return (LegacyDraftStatus.WRITTEN, Status.DONE)
-
-
-def pipeline_run_active_values() -> tuple[str, ...]:
-    """Values that mean "currently executing" for pipeline_runs."""
-    return (LegacyPipelineRunStatus.RUNNING, Status.ACTIVE)

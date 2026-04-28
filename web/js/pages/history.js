@@ -7,7 +7,7 @@ import { supabase } from "../supabase-client.js";
 import { showError, showEmpty, formatDate, formatDuration } from "../ui.js";
 
 import { ensureAccess } from "../subscription.js";
-import { Status, LegacyPipelineRunStatus, pipelineRunDoneValues } from "../constants/status.js";
+import { Status } from "../constants/status.js";
 
 await requireAuth();
 await ensureAccess();
@@ -47,13 +47,10 @@ async function loadRuns() {
                 ? new Date(run.finished_at) - new Date(run.started_at)
                 : null;
 
-            // DUAL-READ (Phase 4): partial-failure is now status='done' + has_partial_failures=true.
-            // Legacy rows still carry status='partial_failure'. Check partial first so unified-
-            // vocab partial runs aren't mis-rendered as green "completed".
-            const isPartialFailure = run.has_partial_failures === true
-                || run.status === LegacyPipelineRunStatus.PARTIAL_FAILURE;
-            const isFailed = run.status === Status.FAILED;  // legacy and unified both = "failed"
-            const isDone = pipelineRunDoneValues().includes(run.status);
+            // Partial failure: status='done' + has_partial_failures=true.
+            const isPartialFailure = run.has_partial_failures === true;
+            const isFailed = run.status === Status.FAILED;
+            const isDone = run.status === Status.DONE;
 
             const statusBadge = isPartialFailure
                 ? `<span class="em-badge em-badge-amber">partial failure</span>`

@@ -13,8 +13,6 @@ import { traceStage, renderStage5_draft } from "../components/trace-renderers.js
 import {
     DeferredReason,
     Status,
-    draftExcludedValues,
-    emailResolvedValues,
 } from "../constants/status.js";
 
 import { ensureAccess } from "../subscription.js";
@@ -99,14 +97,14 @@ async function loadEmails() {
             supabase
                 .from("emails")
                 .select("*, classifications(*), drafts(*)")
-                .not("drafts.status", "in", `(${draftExcludedValues().join(",")})`)  // DUAL-READ (Phase 2)
+                .neq("drafts.status", Status.SKIPPED)
                 .gte("received_time", thirtyDaysAgo)
                 .order("received_time", { ascending: false }),
             // Emails with drafts — no date filter so drafts are always visible
             supabase
                 .from("emails")
                 .select("*, classifications(*), drafts!inner(*)")
-                .not("drafts.status", "in", `(${draftExcludedValues().join(",")})`)  // DUAL-READ (Phase 2)
+                .neq("drafts.status", Status.SKIPPED)
                 .order("received_time", { ascending: false }),
             supabase
                 .from("response_events")
@@ -369,7 +367,7 @@ function renderEmailCard(email) {
     const cls = email.classifications?.[0];
     const draft = email.drafts?.[0];
     const ev = responseEvents[email.id];
-    const isCompleted = emailResolvedValues().includes(email.status);  // DUAL-READ (Phase 2)
+    const isCompleted = email.status === Status.DONE || email.status === Status.SKIPPED;
 
     // Priority badge
     let priorityBadge = "";
@@ -734,7 +732,7 @@ async function markEmailDone(emailId, btn) {
 
 async function toggleEmailDone(emailId, btn) {
     const email = allEmails.find(e => e.id === emailId);
-    const isCompleted = email && emailResolvedValues().includes(email.status);  // DUAL-READ (Phase 2)
+    const isCompleted = email && (email.status === Status.DONE || email.status === Status.SKIPPED);
 
     if (isCompleted) {
         btn.disabled = true;

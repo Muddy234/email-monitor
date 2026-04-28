@@ -68,7 +68,7 @@ def build_row(email: dict, user_id: str) -> dict:
     row["email_ref"] = f"test-{uuid.uuid4()}"
     row["sender"] = f"{row['sender_name']} <{row['sender_email']}>"
     row["received_time"] = datetime.now(timezone.utc).isoformat()
-    row["status"] = "unprocessed"
+    row["status"] = "pending"
     return row
 
 
@@ -130,7 +130,7 @@ def main():
     rows = [build_row(email, user_id) for email in emails]
     result = client.table("emails").insert(rows).execute()
 
-    print(f"Inserted {len(result.data)} email(s) with status='unprocessed'")
+    print(f"Inserted {len(result.data)} email(s) with status='pending'")
     for row in result.data:
         print(f"  - [{row['id'][:8]}] {row['subject']}")
 

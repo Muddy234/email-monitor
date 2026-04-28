@@ -15,9 +15,6 @@ from status import (
     DeliveryState,
     LegacyOnboardingStatus,
     Status,
-    email_active_values,
-    email_pending_values,
-    pipeline_run_active_values,
 )
 
 logger = logging.getLogger("worker")
@@ -78,7 +75,7 @@ class SupabaseWorkerClient:
         result = (
             self.client.table("emails")
             .select("user_id")
-            .in_("status", list(email_pending_values()))  # DUAL-READ (Phase 2)
+            .eq("status", Status.PENDING)
             .execute()
         )
         # Deduplicate
@@ -96,9 +93,9 @@ class SupabaseWorkerClient:
     # ------------------------------------------------------------------
 
     def claim_unprocessed_emails(self, user_id, limit=10):
-        """Atomically claim unprocessed emails for a user via RPC.
+        """Atomically claim pending emails for a user via RPC.
 
-        Sets status='processing' and returns the claimed rows.
+        Sets status='active' and returns the claimed rows.
         Uses FOR UPDATE SKIP LOCKED to prevent duplicate processing.
 
         Args:
@@ -124,10 +121,10 @@ class SupabaseWorkerClient:
         return data
 
     def reset_stuck_processing(self):
-        """Reset orphaned emails stuck in 'processing' status.
+        """Reset orphaned emails stuck in 'active' status.
 
-        If no pipeline_run is currently 'running', any emails in 'processing'
-        are orphans from a crashed run. Reset them to 'unprocessed' so they
+        If no pipeline_run is currently 'active', any emails in 'active'
+        are orphans from a crashed run. Reset them to 'pending' so they
         get picked up on the next cycle.
 
         Returns:
@@ -137,17 +134,17 @@ class SupabaseWorkerClient:
         running = (
             self.client.table("pipeline_runs")
             .select("id")
-            .in_("status", list(pipeline_run_active_values()))  # DUAL-READ (Phase 2)
+            .eq("status", Status.ACTIVE)
             .execute()
         )
         if running.data:
             return 0  # Pipeline is active, don't reset
 
-        # No active pipeline — any 'processing' emails are orphaned
+        # No active pipeline — any 'active' emails are orphaned
         result = (
             self.client.table("emails")
             .update({"status": Status.PENDING})
-            .in_("status", list(email_active_values()))  # DUAL-READ (Phase 2)
+            .eq("status", Status.ACTIVE)
             .execute()
         )
         return len(result.data) if result.data else 0
@@ -215,7 +212,7 @@ class SupabaseWorkerClient:
                 self.client.table("emails")
                 .select("id")
                 .eq("user_id", user_id)
-                .in_("status", list(email_pending_values()))  # DUAL-READ (Phase 2)
+                .eq("status", Status.PENDING)
                 .limit(batch_size)
                 .execute()
             )
