@@ -527,15 +527,15 @@ def run_onboarding(db, user_id, profile):
         except Exception:
             logger.exception("Stage 3: model training failed (non-fatal)")
 
-        # @pipeline step="mark-existing-emails" num="26" desc="Sets all user's emails to status onboarding so they aren't re-processed." writes="emails.status = onboarding"
-        # Mark all existing emails as 'onboarding' BEFORE setting onboarding
-        # complete — claim RPC only selects status='unprocessed', so these
-        # are naturally invisible to the pipeline.
+        # @pipeline step="mark-existing-emails" num="26" desc="Sets all pending emails to skipped+onboarding so they aren't re-processed." writes="emails.status = skipped, emails.deferred_reason = onboarding"
+        # Mark all pending emails as skipped+onboarding BEFORE setting
+        # onboarding complete — claim RPC only selects status='pending', so
+        # skipped rows are naturally invisible to the pipeline.
         try:
             count = db.mark_all_emails_onboarding(user_id)
-            logger.info(f"Marked {count} emails as 'onboarding' for user {user_id[:8]}...")
+            logger.info(f"Marked {count} emails as skipped+onboarding for user {user_id[:8]}...")
         except Exception:
-            logger.exception(f"Failed to mark emails as 'onboarding' for user {user_id[:8]}...")
+            logger.exception(f"Failed to mark emails as skipped+onboarding for user {user_id[:8]}...")
 
         # @pipeline step="mark-complete" num="27" desc="Sets onboarding_status = complete (or complete_partial) and writes onboarding_completed_at." writes="profiles.onboarding_completed_at"
         # Mark complete — degraded if critical components are missing

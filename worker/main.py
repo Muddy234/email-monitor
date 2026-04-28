@@ -263,12 +263,12 @@ def main():
                     break
                 profile = db.fetch_user_config(uid)
                 logger.info(f"Running onboarding for user {uid[:8]}...")
-                # @pipeline step="run-onboarding" num="16" desc="Calls into runner.py to execute the three-stage pipeline." writes="onboarding_status = running"
+                # @pipeline step="run-onboarding" num="16" desc="Calls into runner.py to execute the three-stage pipeline." writes="profiles.onboarding_status (FSM stage)"
                 run_onboarding(db, uid, profile)
         except Exception as e:
             logger.error(f"Onboarding check error: {e}")
 
-        # @pipeline harden="Hardening note" body="If step 12 crashes before completion, onboarding_status stays 'running' — the gate condition (status in {null, pending, failed}) blocks all future attempts. Consider a timeout or heartbeat mechanism that resets 'running' to 'failed' after N minutes of inactivity."
+        # @pipeline harden="Hardening note" body="If a stage crashes before completion, onboarding_status stays at the in-progress stage (collecting, extracting, etc.) — the gate condition (status in {null, pending, failed}) blocks all future attempts. Consider a timeout or heartbeat mechanism that resets stuck mid-stage rows to 'failed' after N minutes of inactivity."
 
         # -- Model re-training check -----------------------------------
         try:

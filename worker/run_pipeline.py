@@ -164,7 +164,7 @@ def filter_emails(db_client, emails, user_id, config):
         email_data = supabase_row_to_email_data(email)
 
         # Defer emails with empty bodies — likely synced before GetItem
-        # enrichment succeeded. Leave as "unprocessed" for re-processing
+        # enrichment succeeded. Leave as "pending" for re-processing
         # once the extension re-syncs with a valid token and populates body.
         # After 10 minutes, give up and process with empty body to avoid
         # infinite defer loops for genuinely empty emails.
@@ -858,7 +858,7 @@ def process_user_batch_signals(db, user_id, profile, emails):
 
     try:
         # @pipeline divider="Stage 1 — Rule-based filtering"
-        # @pipeline step="filter-emails" num="28" desc="Late-arrival filter (pre-onboarding emails marked 'onboarding') + rule-based filter (blacklist senders, subject patterns) + signal-based auto-skip (terminal ack, FYI). Skipped emails written to DB immediately." reads="emails, profiles.onboarding_completed_at" writes="classifications (skip), emails.status in (onboarding, processed)" nonfatal="empty result → early exit"
+        # @pipeline step="filter-emails" num="28" desc="Late-arrival filter (pre-onboarding emails marked skipped+onboarding) + rule-based filter (blacklist senders, subject patterns) + signal-based auto-skip (terminal ack, FYI). Skipped emails written to DB immediately." reads="emails, profiles.onboarding_completed_at" writes="classifications (skip), emails.status in (skipped, done)" nonfatal="empty result → early exit"
 
         # ── Stage 1: Filter (includes late-arrival sweep) ────────
         filtered = filter_emails(db, emails, user_id, config)
