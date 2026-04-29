@@ -1,5 +1,5 @@
 /**
- * Status vocabulary constants for the Email_Monitor dashboard.
+ * Status vocabulary constants for the Clarion AI dashboard.
  *
  * Mirrors worker/status.py and extension/status.js. Loaded as an ES module.
  *

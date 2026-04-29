@@ -11,6 +11,11 @@
         <priority>0.5</priority>
     </url>
     <url>
+        <loc>https://www.clarion-ai.app/terms.html</loc>
+        <changefreq>monthly</changefreq>
+        <priority>0.5</priority>
+    </url>
+    <url>
         <loc>https://www.clarion-ai.app/demo-animated.html</loc>
         <changefreq>monthly</changefreq>
         <priority>0.7</priority>

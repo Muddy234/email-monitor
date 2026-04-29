@@ -1,6 +1,5 @@
 User-agent: *
 Allow: /
 Disallow: /app/
-Disallow: /assets/og-image.html
 
 Sitemap: https://www.clarion-ai.app/sitemap.xml
