@@ -1608,3 +1608,136 @@ button:focus-visible {
     .lp-blog-article__title { font-size: 1.75rem; }
     .lp-blog-card__link { padding: 20px; }
 }
+
+/* ----------------------------------------------------------------
+ * Blog CTA blocks (top banner + bottom card)
+ * ---------------------------------------------------------------- */
+
+.lp-blog-cta {
+    background: var(--lp-slate-50, #f8fafc);
+    border: 1px solid var(--lp-slate-200, #e2e8f0);
+    border-radius: var(--lp-radius-md, 12px);
+}
+
+/* Top: compact horizontal banner above the article body */
+.lp-blog-cta--top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 16px 20px;
+    margin: 0 0 32px;
+    background: linear-gradient(135deg, rgba(29, 78, 216, 0.05) 0%, rgba(16, 185, 129, 0.05) 100%);
+    border-color: rgba(29, 78, 216, 0.15);
+}
+
+.lp-blog-cta--top__text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.lp-blog-cta--top__text strong {
+    color: var(--lp-slate-900);
+    font-weight: 600;
+    font-size: 0.95rem;
+    line-height: 1.4;
+}
+
+.lp-blog-cta--top__text span {
+    color: var(--lp-slate-600);
+    font-size: 0.85rem;
+    line-height: 1.4;
+}
+
+.lp-blog-cta--top .lp-blog-cta__btn {
+    flex-shrink: 0;
+}
+
+/* Bottom: full conversion block at the end of the article */
+.lp-blog-cta--bottom {
+    margin: 56px 0 0;
+    padding: 40px 32px;
+    text-align: center;
+    background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%);
+    border-color: transparent;
+    color: #fff;
+}
+
+.lp-blog-cta__heading {
+    margin: 0 0 12px;
+    font-size: 1.6rem;
+    font-weight: 700;
+    line-height: 1.25;
+    color: #fff;
+}
+
+.lp-blog-cta__lede {
+    margin: 0 auto 20px;
+    max-width: 560px;
+    font-size: 1rem;
+    line-height: 1.6;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.lp-blog-cta__bullets {
+    margin: 0 auto 24px;
+    padding: 0;
+    list-style: none;
+    display: inline-flex;
+    flex-direction: column;
+    gap: 6px;
+    text-align: left;
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 0.95rem;
+}
+
+.lp-blog-cta__bullets li {
+    position: relative;
+    padding-left: 22px;
+}
+
+.lp-blog-cta__bullets li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0.55em;
+    width: 12px;
+    height: 6px;
+    border-left: 2px solid #10b981;
+    border-bottom: 2px solid #10b981;
+    transform: rotate(-45deg);
+}
+
+.lp-blog-cta--bottom .lp-blog-cta__btn {
+    display: inline-block;
+}
+
+.lp-blog-cta__finepr {
+    margin: 14px 0 0;
+    font-size: 0.8rem;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+/* List page: a little extra breathing room above the bottom CTA */
+.lp-blog-list + .lp-blog-cta--bottom {
+    margin-top: 64px;
+}
+
+@media (max-width: 640px) {
+    .lp-blog-cta--top {
+        flex-direction: column;
+        align-items: flex-start;
+        padding: 16px;
+    }
+    .lp-blog-cta--top .lp-blog-cta__btn {
+        width: 100%;
+        text-align: center;
+    }
+    .lp-blog-cta--bottom {
+        padding: 32px 20px;
+        margin-top: 48px;
+    }
+    .lp-blog-cta__heading { font-size: 1.35rem; }
+}

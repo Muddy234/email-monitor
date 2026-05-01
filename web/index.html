@@ -49,18 +49,48 @@
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
+        "@type": "Organization",
+        "@id": "https://www.clarion-ai.app/#organization",
+        "name": "Clarion AI",
+        "url": "https://www.clarion-ai.app/",
+        "logo": {
+            "@type": "ImageObject",
+            "url": "https://www.clarion-ai.app/assets/og-image.png"
+        },
+        "description": "Clarion AI builds AI-powered email intelligence for Outlook. We read, prioritize, and draft replies so nothing important slips past you."
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "@id": "https://www.clarion-ai.app/#website",
+        "url": "https://www.clarion-ai.app/",
+        "name": "Clarion AI",
+        "publisher": { "@id": "https://www.clarion-ai.app/#organization" },
+        "inLanguage": "en-US"
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
         "@type": "SoftwareApplication",
+        "@id": "https://www.clarion-ai.app/#software",
         "name": "Clarion AI",
         "applicationCategory": "BusinessApplication",
+        "operatingSystem": "Chrome OS, Windows, macOS, Linux",
         "browserRequirements": "Google Chrome",
         "description": "AI-powered email intelligence that reads, prioritizes, and drafts replies to your Outlook email.",
+        "url": "https://www.clarion-ai.app/",
+        "installUrl": "https://chromewebstore.google.com/detail/clarion-ai/okedljaeiebcaeijahlboekdghbcpaan",
+        "downloadUrl": "https://chromewebstore.google.com/detail/clarion-ai/okedljaeiebcaeijahlboekdghbcpaan",
         "offers": {
             "@type": "Offer",
             "price": "0",
             "priceCurrency": "USD",
             "description": "Free Chrome Extension"
         },
-        "publisher": { "@type": "Organization", "name": "Clarion AI" }
+        "publisher": { "@id": "https://www.clarion-ai.app/#organization" }
     }
     </script>
     <script type="application/ld+json">
