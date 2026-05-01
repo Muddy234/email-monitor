@@ -1,7 +1,6 @@
 ---
 title: Why I Built Clarion
 date: 2026-05-02
-author: Nate McBride
 excerpt: Tried every email system there is. None of them survived a busy month. The problem wasn't the volume, it was the gap between what hit my inbox and what I actually retained.
 ---
 
