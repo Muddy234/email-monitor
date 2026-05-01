@@ -51,6 +51,16 @@ _GREETING_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Tightened pattern for stripping. Requires the line to end with a comma or
+# exclamation mark (i.e., be structurally a greeting, not just any line that
+# starts with "Hi"). Allows 0-3 trailing words to cover targets like
+# "Hi Tyler,", "Hi all,", "Hi Tyler and Rebecca,", "Dear Mr. Smith,".
+_GREETING_STRIP_RE = re.compile(
+    r"^\s*(?:Hi|Hello|Hey|Dear|Good\s+(?:morning|afternoon|evening))"
+    r"(?:[ \t]+[\w'\-]+){0,3}\s*[,!]\s*$",
+    re.IGNORECASE,
+)
+
 _USER_CONFIRM_RE = re.compile(r'\[USER TO CONFIRM(?::\s*([^\]]*))?\]')
 
 _STANDALONE_CONFIRM_RE = re.compile(
@@ -248,104 +258,121 @@ def _check_tag_hygiene(draft: str) -> tuple[list[str], list[str], str, bool]:
     return issues, auto_fixed, fixed, False
 
 
-def _check_signoff(
-    draft: str, user_name: str, signoff_expected: bool,
-) -> tuple[list[str], list[str], str, bool]:
-    """Check sign-off presence and name correctness.
+_MAX_SIGNATURE_LINES = 4
+_MAX_SIGNATURE_WORDS_PER_LINE = 5
+_MAX_SIGNOFF_STRIP_CHARS = 200
+
+
+def _looks_like_trailing_signoff(draft: str, match: re.Match) -> bool:
+    """True if the sign-off match is structurally at the end of the draft.
+
+    Accepts the match if everything after it is either empty or a short
+    signature block (≤4 lines, ≤5 words each). Rejects when the phrase
+    appears mid-body with substantive content following — for example a
+    quoted previous email continuing into the user's actual reply.
+    """
+    tail = draft[match.end():].strip()
+    if not tail:
+        return True
+    tail_lines = [l.strip() for l in tail.split("\n") if l.strip()]
+    if len(tail_lines) > _MAX_SIGNATURE_LINES:
+        return False
+    return all(
+        len(l.split()) <= _MAX_SIGNATURE_WORDS_PER_LINE for l in tail_lines
+    )
+
+
+def _strip_signoff(draft: str) -> tuple[list[str], list[str], str, bool]:
+    """Strip the trailing sign-off block (closing phrase + signature lines).
+
+    Always runs unconditionally. Eliminates the wrong-name-in-signoff bug
+    class structurally — if no sign-off is stored, the LLM cannot sign as
+    the wrong person.
+
+    Guards against over-stripping:
+    - Trailing-signoff guard: only strips when the matched phrase looks
+      structurally like it ends the draft (short or empty tail).
+    - Defensive cap: if the strip would remove >200 chars, skip and flag.
+
+    Auto-fix flags emitted (in `auto_fixed`):
+    - `stripped_signoff:<N>` — sign-off removed; <N> chars stripped
+    - `signoff_strip_skipped_midbody` — match found mid-body; left alone
+    - `signoff_strip_skipped_too_long` — strip would have removed too much
+
+    Never sets needs_retry.
 
     Returns (issues, auto_fixed, fixed_draft, needs_retry).
     """
-    if not signoff_expected:
-        return [], [], draft, False
-
-    issues = []
-    auto_fixed = []
+    auto_fixed: list[str] = []
     fixed = draft
-    needs_retry = False
 
-    signoff_matches = list(_SIGNOFF_RE.finditer(fixed))
+    matches = list(_SIGNOFF_RE.finditer(fixed))
+    if not matches:
+        return [], auto_fixed, fixed, False
 
-    if not signoff_matches:
-        issues.append("missing_signoff")
-        return issues, auto_fixed, fixed, True
+    last_match = matches[-1]
 
-    # Double sign-off: auto-fix, keep last
-    if len(signoff_matches) > 1:
-        last = signoff_matches[-1]
-        first = signoff_matches[0]
-        # Keep everything before first sign-off + everything from last sign-off
-        fixed = fixed[:first.start()].rstrip() + "\n\n" + fixed[last.start():]
-        auto_fixed.append("removed_duplicate_signoff")
+    if not _looks_like_trailing_signoff(fixed, last_match):
+        auto_fixed.append("signoff_strip_skipped_midbody")
+        return [], auto_fixed, fixed, False
 
-    # Truncated user name: check the line after the last sign-off
-    if user_name:
-        # Re-find sign-off in (possibly fixed) draft
-        matches = list(_SIGNOFF_RE.finditer(fixed))
-        if matches:
-            last_match = matches[-1]
-            after_signoff = fixed[last_match.end():].strip()
-            # The name should be on the first non-empty line after the sign-off
-            name_line = ""
-            for line in after_signoff.split("\n"):
-                if line.strip():
-                    name_line = line.strip()
-                    break
+    # Walk back to the start of the line containing the sign-off phrase.
+    line_start = fixed.rfind("\n", 0, last_match.start())
+    if line_start == -1:
+        line_start = 0
+    else:
+        line_start += 1  # skip past the newline itself
 
-            if not name_line:
-                issues.append("missing_name_after_signoff")
-                needs_retry = True
-            elif name_line.lower() != user_name.lower():
-                # Check for truncation (partial match at start)
-                if (user_name.lower().startswith(name_line.lower())
-                        and len(name_line) < len(user_name)):
-                    issues.append("truncated_signoff_name")
-                    needs_retry = True
-                # If it's a completely different name, also flag
-                elif user_name.split()[0].lower() not in name_line.lower():
-                    issues.append("wrong_signoff_name")
-                    needs_retry = True
+    strip_chars = len(fixed) - line_start
+    if strip_chars > _MAX_SIGNOFF_STRIP_CHARS:
+        auto_fixed.append("signoff_strip_skipped_too_long")
+        return [], auto_fixed, fixed, False
 
-    return issues, auto_fixed, fixed, needs_retry
+    fixed = fixed[:line_start].rstrip()
+    auto_fixed.append(f"stripped_signoff:{strip_chars}")
+    return [], auto_fixed, fixed, False
 
 
-def _check_greeting(
-    draft: str, user_name: str, recipient_name: str,
-    greetings_expected: bool, multi_recipient: bool,
-) -> tuple[list[str], list[str], str, bool]:
-    """Check greeting presence and correct addressing.
+def _strip_greeting(draft: str) -> tuple[list[str], list[str], str, bool]:
+    """Strip the opening greeting line (and any blank lines after it).
+
+    Always runs unconditionally. Uses a tightened regex
+    (`_GREETING_STRIP_RE`) that requires the line to end with `,` or `!` —
+    this prevents matching things like "Hi — quick thought on the
+    contract" where "Hi" leads into body text.
+
+    Auto-fix flag emitted:
+    - `stripped_greeting:<N>` — greeting line removed; <N> chars stripped
+
+    Never sets needs_retry.
 
     Returns (issues, auto_fixed, fixed_draft, needs_retry).
     """
-    issues = []
-    needs_retry = False
+    auto_fixed: list[str] = []
+    lines = draft.split("\n")
 
-    # Get first non-empty line
-    first_line = ""
-    for line in draft.split("\n"):
+    first_idx = -1
+    for i, line in enumerate(lines):
         if line.strip():
-            first_line = line.strip()
+            first_idx = i
             break
 
-    if not first_line:
-        return issues, [], draft, False
+    if first_idx == -1:
+        return [], [], draft, False
 
-    # Missing greeting
-    if greetings_expected and not _GREETING_RE.match(first_line):
-        issues.append("missing_greeting")
-        needs_retry = True
+    if not _GREETING_STRIP_RE.match(lines[first_idx]):
+        return [], [], draft, False
 
-    # Greeting addresses user instead of recipient
-    # Skip if multi-recipient (greeting could be "Hi all," etc.)
-    if not multi_recipient and user_name:
-        user_first = user_name.split()[0].lower()
-        recip_first = recipient_name.split()[0].lower() if recipient_name else ""
+    # Calculate how many chars we're removing (the greeting line + any
+    # blank lines that follow, before joining the remainder).
+    new_lines = lines[first_idx + 1:]
+    while new_lines and not new_lines[0].strip():
+        new_lines.pop(0)
+    fixed = "\n".join(new_lines).strip()
+    strip_chars = len(draft) - len(fixed)
 
-        # Only flag if the names are different
-        if user_first != recip_first and user_first in first_line.lower():
-            issues.append("greeting_addresses_user")
-            needs_retry = True
-
-    return issues, [], draft, needs_retry
+    auto_fixed.append(f"stripped_greeting:{strip_chars}")
+    return [], auto_fixed, fixed, False
 
 
 def _check_length(
@@ -393,11 +420,8 @@ def check_draft_quality(draft: str, config: QCConfig) -> QCResult:
     checks = [
         lambda d: _check_leaked_artifacts(d),
         lambda d: _check_tag_hygiene(d),
-        lambda d: _check_signoff(d, config.user_name, config.signoff_expected),
-        lambda d: _check_greeting(
-            d, config.user_name, config.recipient_name,
-            config.greetings_expected, config.multi_recipient,
-        ),
+        lambda d: _strip_signoff(d),
+        lambda d: _strip_greeting(d),
         lambda d: _check_length(d, config.target_word_range),
     ]
 
@@ -416,44 +440,10 @@ def check_draft_quality(draft: str, config: QCConfig) -> QCResult:
 
 
 def build_revision_notes(qc_result: QCResult, user_name: str) -> str:
-    """Build a revision note string from QC issues for the retry prompt."""
-    if not qc_result.issues:
-        return ""
+    """Build a revision note string from QC issues for the retry prompt.
 
-    notes = []
-    for issue in qc_result.issues:
-        if issue == "missing_signoff":
-            notes.append(
-                "The reply must end with a closing greeting "
-                f"(e.g., Best regards,) followed by {user_name} on the next line."
-            )
-        elif issue in ("truncated_signoff_name", "wrong_signoff_name"):
-            notes.append(
-                f"The sign-off name was incorrect or truncated. "
-                f"It must be exactly: {user_name}"
-            )
-        elif issue == "missing_name_after_signoff":
-            notes.append(
-                f"The sign-off greeting was present but the user's name was missing. "
-                f"Add {user_name} on the line after the closing greeting."
-            )
-        elif issue == "missing_greeting":
-            notes.append(
-                "The reply is missing an opening greeting. "
-                "Start with an appropriate greeting (e.g., Hi [Name],)."
-            )
-        elif issue == "greeting_addresses_user":
-            notes.append(
-                "The greeting addressed the author instead of the recipient. "
-                "Address the greeting to the email's sender, not the user drafting the reply."
-            )
-        # Flag-only issues don't need revision notes
-
-    if not notes:
-        return ""
-
-    return (
-        "REVISION NOTE: The previous draft had these structural issues:\n"
-        + "\n".join(f"- {n}" for n in notes)
-        + "\nPlease ensure the reply corrects these problems."
-    )
+    Sign-off and greeting issues are now stripped unconditionally in QC, so
+    the remaining flag-only issues (unclosed_bracket, bare_placeholder,
+    draft_too_short, draft_too_long) do not produce retry guidance.
+    """
+    return ""

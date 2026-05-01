@@ -1432,6 +1432,13 @@ def process_user_batch_signals(db, user_id, profile, emails):
                             f"  QC auto-fixed for {db_id[:8]}: {qc.auto_fixed}"
                         )
 
+                    # NOTE (2026-05-01): After the sign-off/greeting strip refactor,
+                    # this retry branch is effectively unreachable. The remaining
+                    # issue codes (unclosed_bracket, bare_placeholder, draft_too_short,
+                    # draft_too_long) all set needs_retry=False, so qc.passed is True.
+                    # build_revision_notes() now returns "" unconditionally. Branch is
+                    # retained as a safety net in case future checks reintroduce
+                    # needs_retry=True; revisit if telemetry shows it firing.
                     if not qc.passed:
                         logger.info(
                             f"  QC failed for {db_id[:8]}: {qc.issues}, retrying..."
