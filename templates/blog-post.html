@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.googletagmanager.com; connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https://*.google-analytics.com https://*.googletagmanager.com;">
+
+    <!-- Google Analytics (GA4) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-3Z8XYCHKZY"></script>
+    <script src="/js/gtag-init.js"></script>
+
+    <meta name="description" content="{{EXCERPT}}">
+    <meta name="author" content="{{AUTHOR}}">
+    <meta name="theme-color" content="#1D4ED8">
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="{{TITLE}} — Clarion AI">
+    <meta property="og:description" content="{{EXCERPT}}">
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="https://www.clarion-ai.app/blog/{{SLUG}}">
+    <meta property="og:image" content="https://www.clarion-ai.app/assets/og-image.png">
+    <meta property="og:site_name" content="Clarion AI">
+    <meta property="og:locale" content="en_US">
+    <meta property="article:published_time" content="{{DATE_ISO}}">
+    <meta property="article:author" content="{{AUTHOR}}">
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{{TITLE}} — Clarion AI">
+    <meta name="twitter:description" content="{{EXCERPT}}">
+    <meta name="twitter:image" content="https://www.clarion-ai.app/assets/og-image.png">
+
+    <link rel="canonical" href="https://www.clarion-ai.app/blog/{{SLUG}}">
+    <link rel="alternate" type="application/rss+xml" title="Clarion AI Blog" href="/blog/feed.xml">
+    <link rel="icon" type="image/svg+xml" href="/assets/favicon/favicon.svg">
+
+    <link rel="preconnect" href="https://www.googletagmanager.com">
+    <link rel="preconnect" href="https://www.google-analytics.com">
+    <link rel="preload" href="/assets/fonts/InterVariable.woff2" as="font" type="font/woff2" crossorigin>
+
+    <link rel="stylesheet" href="/css/landing.css">
+
+    <!-- Structured Data -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "BlogPosting",
+        "headline": "{{TITLE_JSON}}",
+        "description": "{{EXCERPT_JSON}}",
+        "datePublished": "{{DATE_ISO}}",
+        "author": { "@type": "Person", "name": "{{AUTHOR_JSON}}" },
+        "publisher": {
+            "@type": "Organization",
+            "name": "Clarion AI",
+            "logo": { "@type": "ImageObject", "url": "https://www.clarion-ai.app/assets/og-image.png" }
+        },
+        "mainEntityOfPage": {
+            "@type": "WebPage",
+            "@id": "https://www.clarion-ai.app/blog/{{SLUG}}"
+        }
+    }
+    </script>
+
+    <title>{{TITLE}} — Clarion AI</title>
+</head>
+<body>
+    <a class="lp-skip-link" href="#main">Skip to content</a>
+
+    <!-- NAVBAR -->
+    <header class="lp-navbar" id="navbar">
+        <nav class="lp-container lp-navbar__inner" aria-label="Main navigation">
+            <a href="/" class="lp-navbar__logo" aria-label="Clarion AI home">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" width="28" height="28" aria-hidden="true">
+                    <rect x="2" y="6" width="28" height="20" rx="3" stroke="currentColor" stroke-width="2.2"/>
+                    <path d="M2 9l13.1 8.3a1.94 1.94 0 0 0 1.8 0L30 9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <circle cx="26" cy="8" r="4" fill="#10B981"/>
+                    <circle cx="26" cy="8" r="6" fill="none" stroke="#10B981" stroke-width="1.2" opacity="0.5"/>
+                </svg>
+                <span>Clarion AI</span>
+            </a>
+
+            <ul class="lp-navbar__links" id="nav-links">
+                <li><a href="/#features">Features</a></li>
+                <li><a href="/#how-it-works">How It Works</a></li>
+                <li><a href="/#faq">FAQ</a></li>
+                <li><a href="/blog/" aria-current="page">Blog</a></li>
+                <li class="lp-navbar__mobile-only"><a href="/app/login.html">Log In</a></li>
+                <li class="lp-navbar__mobile-only"><a href="https://chromewebstore.google.com/detail/clarion-ai/okedljaeiebcaeijahlboekdghbcpaan" target="_blank" rel="noopener" class="lp-btn lp-btn--primary lp-navbar__cta-mobile">Add to Chrome — Free</a></li>
+            </ul>
+
+            <div class="lp-navbar__actions">
+                <a href="/app/login.html" class="lp-navbar__login lp-navbar__desktop-only">Log In</a>
+                <a href="https://chromewebstore.google.com/detail/clarion-ai/okedljaeiebcaeijahlboekdghbcpaan" target="_blank" rel="noopener" class="lp-btn lp-btn--primary lp-navbar__cta lp-navbar__desktop-only">Add to Chrome — Free</a>
+                <button class="lp-navbar__hamburger" id="nav-toggle" aria-label="Open menu" aria-expanded="false">
+                    <span></span><span></span><span></span>
+                </button>
+            </div>
+        </nav>
+    </header>
+
+    <main id="main">
+        <article class="lp-blog-article">
+            <div class="lp-container lp-blog-article__inner">
+                <a href="/blog/" class="lp-blog-article__back">&larr; All posts</a>
+                <header class="lp-blog-article__header">
+                    <h1 class="lp-blog-article__title">{{TITLE}}</h1>
+                    <p class="lp-blog-article__meta">
+                        <time datetime="{{DATE_ISO}}">{{DATE_DISPLAY}}</time>
+                        <span>· {{AUTHOR}}</span>
+                    </p>
+                </header>
+                <div class="lp-blog-article__body">
+                    {{BODY_HTML}}
+                </div>
+            </div>
+        </article>
+    </main>
+
+    <!-- FOOTER -->
+    <footer class="lp-footer">
+        <div class="lp-container lp-footer__inner">
+            <div class="lp-footer__brand">
+                <a href="/" class="lp-navbar__logo lp-navbar__logo--light" aria-label="Clarion AI home">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" width="24" height="24" aria-hidden="true">
+                        <rect x="2" y="6" width="28" height="20" rx="3" stroke="currentColor" stroke-width="2.2"/>
+                        <path d="M2 9l13.1 8.3a1.94 1.94 0 0 0 1.8 0L30 9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <circle cx="26" cy="8" r="4" fill="#10B981"/>
+                        <circle cx="26" cy="8" r="6" fill="none" stroke="#10B981" stroke-width="1.2" opacity="0.5"/>
+                    </svg>
+                    <span>Clarion AI</span>
+                </a>
+                <p class="lp-footer__tagline">AI-powered email intelligence.</p>
+            </div>
+            <div class="lp-footer__links">
+                <h4>Product</h4>
+                <ul>
+                    <li><a href="/#features">Features</a></li>
+                    <li><a href="/#how-it-works">How It Works</a></li>
+                    <li><a href="/#faq">FAQ</a></li>
+                    <li><a href="/blog/">Blog</a></li>
+                    <li><a href="https://chromewebstore.google.com/detail/clarion-ai/okedljaeiebcaeijahlboekdghbcpaan" target="_blank" rel="noopener">Chrome Web Store</a></li>
+                </ul>
+            </div>
+            <div class="lp-footer__links">
+                <h4>Company</h4>
+                <ul>
+                    <li><a href="/privacy.html">Privacy Policy</a></li>
+                    <li><a href="/terms.html">Terms of Service</a></li>
+                    <li><a href="mailto:contact@clarion-ai.app">Contact</a></li>
+                </ul>
+            </div>
+        </div>
+        <div class="lp-footer__bottom">
+            <div class="lp-container">
+                <p>&copy; 2026 Clarion AI. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script type="module" src="/js/landing.js"></script>
+</body>
+</html>

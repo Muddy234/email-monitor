@@ -1,0 +1,18 @@
+[
+  {
+    "slug": "why-i-built-clarion",
+    "title": "Why I Built Clarion",
+    "excerpt": "Tried every email system there is. None of them survived a busy month. The problem wasn't the volume, it was the gap between what hit my inbox and what I actually retained.",
+    "date": "2026-05-02",
+    "author": "Nate McBride",
+    "tags": ["origin"]
+  },
+  {
+    "slug": "hello-clarion",
+    "title": "Hello from Clarion AI",
+    "excerpt": "We're starting a blog. Here's what to expect — practical guides, product updates, and our point of view on inbox overload.",
+    "date": "2026-05-01",
+    "author": "Clarion AI Team",
+    "tags": ["announcements"]
+  }
+]

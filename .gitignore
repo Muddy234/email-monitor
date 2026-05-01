@@ -7,6 +7,11 @@ legacy/
 tmpclaude-*
 .claude/
 
+# Node tooling
+node_modules/
+npm-debug.log
+.vercel/
+
 # Build artifacts & temp
 nul
 supabase/.temp/
@@ -24,3 +29,12 @@ capture_screenshots.py
 seed_test_user.sql
 store_screenshots/
 extension/icons/icon128_store.png
+
+# Marketing credentials — never commit
+marketing/username_password.txt
+marketing/**/credentials*
+marketing/**/*password*
+marketing/**/*secret*
+
+# Generated scout output (treat as ephemeral, can re-run)
+marketing/reddit/scout_output/

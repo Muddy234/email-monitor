@@ -1,0 +1,17 @@
+{
+  "name": "clarion-ai-web",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Build tooling for the Clarion AI marketing site (blog prerender + RSS).",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build-blog.mjs",
+    "build:blog": "node scripts/build-blog.mjs"
+  },
+  "devDependencies": {
+    "marked": "12.0.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
