@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SMS Updates Sign-Up — Clarion AI</title>
+    <meta name="description" content="Opt in to receive SMS text updates from Clarion AI: email summaries, calendar updates, and critical email notifications.">
+    <link rel="icon" type="image/svg+xml" href="assets/favicon/favicon.svg">
+    <link rel="preload" href="assets/fonts/InterVariable.woff2" as="font" type="font/woff2" crossorigin>
+    <style>
+        @font-face {
+            font-family: 'Inter';
+            src: url('assets/fonts/InterVariable.woff2') format('woff2');
+            font-weight: 100 900;
+            font-display: swap;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            color: #1a1a1a;
+            background: #fff;
+            line-height: 1.7;
+            padding: 48px 24px;
+            max-width: 720px;
+            margin: 0 auto;
+        }
+        h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; }
+        .updated { font-size: 14px; color: #666; margin-bottom: 32px; }
+        h2 { font-size: 18px; font-weight: 600; margin: 28px 0 12px; }
+        p, li { font-size: 15px; color: #333; margin-bottom: 12px; }
+        ul { padding-left: 24px; }
+        li { margin-bottom: 6px; }
+        a { color: #3b82f6; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .back { display: inline-block; margin-bottom: 24px; font-size: 14px; }
+
+        form { margin-top: 24px; }
+        .field { margin-bottom: 20px; }
+        label { display: block; font-size: 14px; font-weight: 600; margin-bottom: 6px; color: #1a1a1a; }
+        input[type="tel"],
+        input[type="text"],
+        input[type="email"] {
+            width: 100%;
+            padding: 10px 12px;
+            font-size: 15px;
+            font-family: inherit;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            background: #fff;
+            color: #1a1a1a;
+        }
+        input[type="tel"]:focus,
+        input[type="text"]:focus,
+        input[type="email"]:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+        }
+        .hint { font-size: 13px; color: #666; margin-top: 4px; }
+
+        .consent {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 14px 16px;
+            margin-bottom: 20px;
+        }
+        .consent input[type="checkbox"] {
+            margin-top: 4px;
+            width: 16px;
+            height: 16px;
+            flex-shrink: 0;
+            cursor: pointer;
+        }
+        .consent label {
+            font-weight: 400;
+            font-size: 14px;
+            color: #333;
+            margin-bottom: 0;
+            line-height: 1.6;
+            cursor: pointer;
+        }
+
+        .disclaimer {
+            font-size: 13px;
+            color: #666;
+            background: #f9fafb;
+            border-left: 3px solid #d1d5db;
+            padding: 12px 14px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        .disclaimer p { font-size: 13px; color: #666; margin-bottom: 8px; }
+        .disclaimer p:last-child { margin-bottom: 0; }
+
+        button[type="submit"] {
+            display: inline-block;
+            width: 100%;
+            padding: 14px 20px;
+            font-size: 16px;
+            font-weight: 600;
+            font-family: inherit;
+            color: #fff;
+            background: #3b82f6;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        button[type="submit"]:hover { background: #2563eb; }
+        button[type="submit"]:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+
+        .success {
+            display: none;
+            margin-top: 20px;
+            padding: 14px 16px;
+            background: #ecfdf5;
+            border: 1px solid #a7f3d0;
+            border-radius: 8px;
+            color: #065f46;
+            font-size: 14px;
+        }
+        .error {
+            display: none;
+            margin-top: 12px;
+            padding: 10px 14px;
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            border-radius: 6px;
+            color: #991b1b;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <a class="back" href="/">&larr; Back to Clarion AI</a>
+
+    <h1>SMS Text Updates Sign-Up</h1>
+    <p class="updated">Opt in to receive text message updates from Clarion AI</p>
+
+    <p>Stay on top of what matters without keeping your inbox open all day. Sign up below to receive SMS text updates from Clarion AI directly to your mobile phone.</p>
+
+    <h2>What you'll receive</h2>
+    <ul>
+        <li><strong>Email summaries:</strong> A short digest of your most important unread emails.</li>
+        <li><strong>Calendar updates:</strong> Reminders and changes to your upcoming meetings and events.</li>
+        <li><strong>Critical email alerts:</strong> Real-time notifications when an urgent or high-priority email arrives.</li>
+    </ul>
+
+    <h2>Message frequency</h2>
+    <p>Message frequency varies based on your inbox and calendar activity. You can expect approximately <strong>3–10 messages per day</strong>. Frequency may be higher during busy periods.</p>
+
+    <h2>Sign up</h2>
+    <form id="sms-opt-in-form" novalidate>
+        <div class="field">
+            <label for="full_name">Full name</label>
+            <input type="text" id="full_name" name="full_name" autocomplete="name" required>
+        </div>
+
+        <div class="field">
+            <label for="email">Email address</label>
+            <input type="email" id="email" name="email" autocomplete="email" required>
+            <p class="hint">We'll use this to match your SMS sign-up to your Clarion AI account.</p>
+        </div>
+
+        <div class="field">
+            <label for="phone">Mobile phone number</label>
+            <input type="tel" id="phone" name="phone" autocomplete="tel" placeholder="+1 (555) 123-4567" required>
+            <p class="hint">U.S. mobile numbers only. Include country code if outside the U.S.</p>
+        </div>
+
+        <div class="consent">
+            <input type="checkbox" id="consent" name="consent" required>
+            <label for="consent">
+                I agree to receive recurring automated text messages from Clarion AI at the mobile number provided, including email summaries, calendar updates, and critical email notifications. Consent is not a condition of purchase. Message and data rates may apply. I have read and agree to the <a href="terms.html">Terms of Service</a> and <a href="privacy.html">Privacy Policy</a>.
+            </label>
+        </div>
+
+        <div class="disclaimer">
+            <p><strong>Message and data rates may apply.</strong> Standard message and data rates from your mobile carrier may apply to each message sent or received. Clarion AI does not charge for SMS messages.</p>
+            <p><strong>HELP:</strong> Reply <strong>HELP</strong> to any message for assistance, or email <a href="mailto:support@clarion-ai.app">support@clarion-ai.app</a>.</p>
+            <p><strong>STOP:</strong> Reply <strong>STOP</strong> to any message at any time to unsubscribe. You will receive a one-time confirmation and no further messages.</p>
+            <p>Carriers are not liable for delayed or undelivered messages.</p>
+        </div>
+
+        <div class="error" id="form-error"></div>
+
+        <button type="submit" id="submit-btn">Yes, sign me up!</button>
+
+        <div class="success" id="form-success">
+            Thanks! You're signed up. You'll receive a confirmation text shortly. Reply <strong>STOP</strong> at any time to unsubscribe.
+        </div>
+    </form>
+
+    <h2 style="margin-top: 40px;">More information</h2>
+    <ul>
+        <li><a href="terms.html">Terms of Service</a></li>
+        <li><a href="privacy.html">Privacy Policy</a></li>
+        <li>Questions? <a href="mailto:contact@clarion-ai.app">contact@clarion-ai.app</a></li>
+    </ul>
+
+    <script>
+        (function () {
+            const form = document.getElementById('sms-opt-in-form');
+            const errorBox = document.getElementById('form-error');
+            const successBox = document.getElementById('form-success');
+            const submitBtn = document.getElementById('submit-btn');
+
+            function showError(msg) {
+                errorBox.textContent = msg;
+                errorBox.style.display = 'block';
+            }
+            function clearError() {
+                errorBox.textContent = '';
+                errorBox.style.display = 'none';
+            }
+
+            form.addEventListener('submit', function (e) {
+                e.preventDefault();
+                clearError();
+
+                const name = form.full_name.value.trim();
+                const email = form.email.value.trim();
+                const phone = form.phone.value.trim();
+                const consent = form.consent.checked;
+
+                if (!name) return showError('Please enter your full name.');
+                if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+                    return showError('Please enter a valid email address.');
+                }
+                const digits = phone.replace(/\D/g, '');
+                if (digits.length < 10) {
+                    return showError('Please enter a valid mobile phone number.');
+                }
+                if (!consent) {
+                    return showError('You must check the consent box to sign up for SMS updates.');
+                }
+
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Signing you up...';
+
+                // TODO: wire to Supabase endpoint / backend.
+                setTimeout(function () {
+                    form.querySelectorAll('input, button').forEach(function (el) {
+                        el.disabled = true;
+                    });
+                    successBox.style.display = 'block';
+                    submitBtn.textContent = 'Signed up';
+                }, 600);
+            });
+        })();
+    </script>
+</body>
+</html>
