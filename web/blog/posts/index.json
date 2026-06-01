@@ -1,5 +1,12 @@
 [
   {
+    "slug": "three-years-on-email",
+    "title": "You Will Spend Three Years of Your Life on Email",
+    "excerpt": "You'll spend roughly three years of your life on email. That's not the part that should scare you. The part that should scare you is what slips past while you do it.",
+    "date": "2026-06-01",
+    "tags": ["email", "productivity"]
+  },
+  {
     "slug": "why-i-built-clarion",
     "title": "Why I Built Clarion",
     "excerpt": "Tried every email system there is. None of them survived a busy month. The problem wasn't the volume, it was the gap between what hit my inbox and what I actually retained.",

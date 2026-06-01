@@ -26,7 +26,14 @@
         <priority>0.8</priority>
     </url>
     <url>
-        <loc>https://www.clarion-ai.app/blog/hello-clarion</loc>
+        <loc>https://www.clarion-ai.app/blog/three-years-on-email</loc>
+        <lastmod>2026-06-01</lastmod>
+        <changefreq>monthly</changefreq>
+        <priority>0.6</priority>
+    </url>
+    <url>
+        <loc>https://www.clarion-ai.app/blog/why-i-built-clarion</loc>
+        <lastmod>2026-05-02</lastmod>
         <changefreq>monthly</changefreq>
         <priority>0.6</priority>
     </url>
